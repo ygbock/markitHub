@@ -1,0 +1,192 @@
+{
+  "entities": {
+    "product": {
+      "title": "Product",
+      "description": "Inventory product item with stock and pricing details",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "sku": { "type": "string" },
+        "price": { "type": "number" },
+        "cost": { "type": "number" },
+        "stock": { "type": "number" },
+        "category": { "type": "string" },
+        "location": { "type": "string" },
+        "reorderPoint": { "type": "number" },
+        "barcode": { "type": "string" },
+        "qrCode": { "type": "string" },
+        "salesCount": { "type": "number" }
+      },
+      "required": ["id", "name", "sku", "price", "stock", "category"]
+    },
+    "customer": {
+      "title": "Customer",
+      "description": "Customer CRM account record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "phone": { "type": "string" },
+        "loyaltyPoints": { "type": "number" },
+        "segment": { "type": "string" }
+      },
+      "required": ["id", "name", "email"]
+    },
+    "staff": {
+      "title": "StaffMember",
+      "description": "Staff operator user account",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "role": { "type": "string" },
+        "avatar": { "type": "string" },
+        "pin": { "type": "string" },
+        "status": { "type": "string" }
+      },
+      "required": ["id", "name", "email", "role"]
+    },
+    "order": {
+      "title": "Order",
+      "description": "POS or eCommerce sale order receipt",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "date": { "type": "string" },
+        "subtotal": { "type": "number" },
+        "tax": { "type": "number" },
+        "discount": { "type": "number" },
+        "total": { "type": "number" },
+        "paymentMethod": { "type": "string" },
+        "channel": { "type": "string" },
+        "status": { "type": "string" }
+      },
+      "required": ["id", "date", "subtotal", "total", "paymentMethod", "channel", "status"]
+    },
+    "auditLog": {
+      "title": "AuditLog",
+      "description": "Security audit ledger item",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "timestamp": { "type": "string" },
+        "staffName": { "type": "string" },
+        "role": { "type": "string" },
+        "action": { "type": "string" },
+        "module": { "type": "string" },
+        "details": { "type": "string" }
+      },
+      "required": ["id", "timestamp", "staffName", "role", "action", "module", "details"]
+    },
+    "settings": {
+      "title": "SystemSettings",
+      "description": "Enterprise store settings and active currency",
+      "type": "object",
+      "properties": {
+        "currency": { "type": "string" },
+        "businessName": { "type": "string" },
+        "taxRate": { "type": "number" },
+        "enableSoundEffects": { "type": "boolean" },
+        "lowStockThreshold": { "type": "number" }
+      },
+      "required": ["currency", "businessName", "taxRate"]
+    },
+    "category": {
+      "title": "Category",
+      "description": "Hierarchical product classification node with parent-child support",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "parent_id": { "type": "string" },
+        "name": { "type": "string" },
+        "slug": { "type": "string" },
+        "description": { "type": "string" },
+        "image": { "type": "string" },
+        "icon": { "type": "string" },
+        "sort_order": { "type": "number" },
+        "status": { "type": "string" }
+      },
+      "required": ["id", "name", "slug"]
+    },
+    "monimeSession": {
+      "title": "MonimeSession",
+      "description": "Monime multi-rail checkout session and webhook event record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "order_id": { "type": "string" },
+        "monime_session_id": { "type": "string" },
+        "monime_order_number": { "type": "string" },
+        "redirect_url": { "type": "string" },
+        "status": { "type": "string" },
+        "amount": { "type": "number" },
+        "currency": { "type": "string" },
+        "created_at": { "type": "string" },
+        "updated_at": { "type": "string" }
+      },
+      "required": ["id", "order_id", "monime_session_id", "status", "amount", "currency"]
+    },
+    "coupon": {
+      "title": "Coupon",
+      "description": "Promotional coupon code with validation rules and usage limits",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "code": { "type": "string" },
+        "discountType": { "type": "string" },
+        "value": { "type": "number" },
+        "minSpend": { "type": "number" },
+        "minOrderAmount": { "type": "number" },
+        "description": { "type": "string" },
+        "isActive": { "type": "boolean" },
+        "startDate": { "type": "string" },
+        "expiryDate": { "type": "string" },
+        "maxTotalUsage": { "type": "number" },
+        "currentUsageCount": { "type": "number" },
+        "maxUsagePerCustomer": { "type": "number" }
+      },
+      "required": ["id", "code", "discountType", "value"]
+    }
+  },
+  "firestore": {
+    "/coupons/{couponId}": {
+      "schema": "coupon",
+      "description": "Store promotional coupons, discounts, eligibility criteria, and usage limits"
+    },
+    "/products/{productId}": {
+      "schema": "product",
+      "description": "Store inventory products, prices, stock, and variants"
+    },
+    "/categories/{categoryId}": {
+      "schema": "category",
+      "description": "Hierarchical category tree structure"
+    },
+    "/customers/{customerId}": {
+      "schema": "customer",
+      "description": "Store registered customers, loyalty points, and profiles"
+    },
+    "/staff/{staffId}": {
+      "schema": "staff",
+      "description": "Store authenticated staff accounts, roles, and status"
+    },
+    "/orders/{orderId}": {
+      "schema": "order",
+      "description": "Store point of sale and eCommerce sales orders and invoices"
+    },
+    "/audit_logs/{logId}": {
+      "schema": "auditLog",
+      "description": "Immutable security and activity audit records"
+    },
+    "/settings/{settingId}": {
+      "schema": "settings",
+      "description": "Global enterprise POS system and currency configuration"
+    },
+    "/monime_sessions/{sessionId}": {
+      "schema": "monimeSession",
+      "description": "Monime multi-channel payment checkout sessions and webhook settlement logs"
+    }
+  }
+}

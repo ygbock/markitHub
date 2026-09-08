@@ -1,0 +1,46 @@
+@import "tailwindcss";
+
+/* Custom utility to remove scrollbars while preserving scroll functionality */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  #printable-barcode-sheet,
+  #printable-barcode-sheet *,
+  #printable-invoice-sheet,
+  #printable-invoice-sheet *,
+  #invoice-sheet-box,
+  #invoice-sheet-box * {
+    visibility: visible;
+  }
+  #printable-barcode-sheet,
+  #printable-invoice-sheet,
+  #invoice-sheet-box {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    margin: 0;
+    padding: 24px;
+    background: #ffffff !important;
+    color: #000000 !important;
+    box-shadow: none !important;
+    border: none !important;
+  }
+  .no-print,
+  #branding-toolbox,
+  #sheet-actions,
+  #desktop-fixed-sidebar,
+  #mobile-bottom-nav,
+  #master-mode-navbar {
+    display: none !important;
+  }
+}

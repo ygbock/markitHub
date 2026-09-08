@@ -1,0 +1,89 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Global helper functions
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128;
+    }
+    
+    function incoming() {
+      return request.resource.data;
+    }
+    
+    function existing() {
+      return resource.data;
+    }
+
+    // Default deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Products collection: accessible for reading and writing by active POS/ecommerce sessions
+    match /products/{productId} {
+      allow read: if true;
+      allow write: if isValidId(productId);
+    }
+
+    // Customers collection
+    match /customers/{customerId} {
+      allow read: if true;
+      allow write: if isValidId(customerId);
+    }
+
+    // Staff collection
+    match /staff/{staffId} {
+      allow read: if true;
+      allow write: if isValidId(staffId);
+    }
+
+    // Orders collection
+    match /orders/{orderId} {
+      allow read: if true;
+      allow write: if isValidId(orderId);
+    }
+
+    // Audit logs collection (immutable logs)
+    match /audit_logs/{logId} {
+      allow read: if true;
+      allow create: if isValidId(logId);
+      allow update, delete: if false;
+    }
+
+    // Settings collection
+    match /settings/{settingId} {
+      allow read: if true;
+      allow write: if isValidId(settingId);
+    }
+
+    // Categories collection
+    match /categories/{categoryId} {
+      allow read: if true;
+      allow write: if isValidId(categoryId);
+    }
+
+    // Reviews collection
+    match /reviews/{reviewId} {
+      allow read: if true;
+      allow write: if isValidId(reviewId);
+    }
+
+    // Coupons & promotions collection
+    match /coupons/{couponId} {
+      allow read: if true;
+      allow write: if isValidId(couponId);
+    }
+
+    // Monime sessions collection
+    match /monime_sessions/{sessionId} {
+      allow read: if true;
+      allow write: if isValidId(sessionId);
+    }
+
+    // Test connection doc
+    match /test/{testId} {
+      allow read, write: if true;
+    }
+  }
+}

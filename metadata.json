@@ -1,0 +1,10 @@
+{
+  "name": "POS-Commerce Suite",
+  "description": "An enterprise-grade unified POS, Inventory, and E-Commerce platform featuring decoupled fintech payment gateway architecture with payment sessions, real-time omnichannel inventory reservation, and automated double-entry ledger settlement.",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
