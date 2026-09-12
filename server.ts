@@ -744,7 +744,7 @@ async function startServer() {
   // =========================================================================
 
   // 1. Reserve Inventory (Locks items with TTL before payment)
-  app.post('/api/inventory/reserve', requireServerAuth, requirePermission('inventory.view'), (req, res) => {
+  app.post('/api/inventory/reserve', requireServerAuth, requirePermission('inventory.view'), async (req, res) => {
     try {
       const { items, customerId, customerName, orderId, ttlMinutes, productsCatalog } = req.body || {};
 
