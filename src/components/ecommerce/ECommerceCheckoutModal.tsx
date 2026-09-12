@@ -22,6 +22,7 @@ import {
   Copy, FileText, CheckCheck, Boxes
 } from 'lucide-react';
 import { useCurrency } from '../../context/CurrencyContext';
+import { useTenant } from '../../context/TenantContext';
 import { validateCartWithBackend } from '../../services/cartValidationService';
 import { CartValidationResult } from '../../server/cartValidator';
 import { PaymentService } from '../../services/paymentService';
@@ -59,6 +60,8 @@ export default function ECommerceCheckoutModal({
   systemSettings
 }: ECommerceCheckoutModalProps) {
   const { formatAmount, currentCurrency } = useCurrency();
+  const { tenantConfig, tenantSlug, formatCurrency: tenantFormatCurrency } = useTenant();
+  const formatCurrency = (amount: number) => tenantConfig ? tenantFormatCurrency(amount) : formatAmount(amount);
 
   const [step, setStep] = useState<'info' | 'shipping' | 'payment' | 'confirmation'>('info');
   const [isProcessing, setIsProcessing] = useState(false);

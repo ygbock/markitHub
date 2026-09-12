@@ -7,6 +7,7 @@ import {
 import { useCurrency } from '../../context/CurrencyContext';
 import SearchAutocomplete from './SearchAutocomplete';
 import { CustomerNotificationCenter } from './CustomerNotificationCenter';
+import { TenantSwitcher } from './TenantSwitcher';
 
 interface ECommerceNavProps {
   products?: Product[];
@@ -118,6 +119,7 @@ export default function ECommerceNav({
           </div>
 
           <div className="flex items-center gap-2 sm:gap-3 text-[11px] text-slate-300 shrink-0 ml-auto">
+            <TenantSwitcher variant="pill" />
             {onOpenOrderTracking && (
               <button
                 type="button"
@@ -450,7 +452,7 @@ export default function ECommerceNav({
                     ? 'bg-indigo-600 text-white shadow-xs ring-2 ring-indigo-600/20'
                     : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
                 }`}
-                id={`cat-nav-pill-${cat.toLowerCase().replace(/[^a-z0-9]/g, '-')}`}
+                id={`cat-nav-pill-${String(cat || '').toLowerCase().replace(/[^a-z0-9]/g, '-')}`}
               >
                 {cat}
               </button>

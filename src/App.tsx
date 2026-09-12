@@ -29,6 +29,7 @@ import DashboardOverview from './components/DashboardOverview';
 import InventoryModule from './components/InventoryModule';
 import POSModule from './components/POSModule';
 import ECommerceStorefront from './components/ECommerceStorefront';
+import { TenantProvider } from './context/TenantContext';
 import CRMModule from './components/CRMModule';
 import InvoiceModule from './components/InvoiceModule';
 import ReportsModule from './components/ReportsModule';
@@ -1683,23 +1684,25 @@ export default function App() {
           </div>
         ) : (
           /* eCommerce Storefront: Full Screen Premium layout */
-          <ECommerceStorefront
-            products={products}
-            customers={customers}
-            orders={orders}
-            onPlaceEcomOrder={handlePlaceEcomOrder}
-            activeCustomer={activeCustomer}
-            onLoginCustomer={handleLoginCustomer}
-            onRegisterCustomer={handleAddCustomer}
-            onSwitchToAdmin={() => setCurrentView('Admin')}
-            homepageConfig={homepageConfig}
-            reviews={reviews}
-            onAddReview={handleAddReview}
-            onHelpfulClick={handleHelpfulClick}
-            onConfirmOrderReceipt={handleConfirmOrderReceipt}
-            onFileReturnOrComplaint={handleFileReturnOrComplaint}
-            systemSettings={systemSettings}
-          />
+          <TenantProvider>
+            <ECommerceStorefront
+              products={products}
+              customers={customers}
+              orders={orders}
+              onPlaceEcomOrder={handlePlaceEcomOrder}
+              activeCustomer={activeCustomer}
+              onLoginCustomer={handleLoginCustomer}
+              onRegisterCustomer={handleAddCustomer}
+              onSwitchToAdmin={() => setCurrentView('Admin')}
+              homepageConfig={homepageConfig}
+              reviews={reviews}
+              onAddReview={handleAddReview}
+              onHelpfulClick={handleHelpfulClick}
+              onConfirmOrderReceipt={handleConfirmOrderReceipt}
+              onFileReturnOrComplaint={handleFileReturnOrComplaint}
+              systemSettings={systemSettings}
+            />
+          </TenantProvider>
         )}
       </div>
 

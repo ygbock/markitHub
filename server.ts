@@ -9,8 +9,16 @@ import {
   reserveInventoryServer, 
   finalizeReservationServer, 
   releaseReservationServer, 
-  getActiveReservationsServer 
+  getActiveReservationsServer,
+  getActiveReservedQuantity
 } from './src/server/inventoryReservationManager';
+import { 
+  getTenantConfigBySlug, 
+  getTenantProducts, 
+  getTenantProductBySlugOrId,
+  getTenantCategories,
+  getTenantBrands
+} from './src/server/tenantManager';
 import { INITIAL_PRODUCTS } from './src/data/mockData';
 import { slugify } from './src/utils/seoUtils';
 
@@ -49,6 +57,452 @@ async function startServer() {
       timestamp: new Date().toISOString(),
       hasGeminiKey: Boolean(process.env.GEMINI_API_KEY),
     });
+  });
+
+  // =========================================================================
+  // MULTI-TENANT STOREFRONT ENDPOINTS & SERVER-AUTHORITATIVE CONTRACTS
+  // =========================================================================
+  const serverStorefrontOrders = new Map<string, any>();
+
+  // Tenant Resolution Helper
+  function resolveTenant(req: express.Request, paramTenantSlug?: string) {
+    const slug = paramTenantSlug || 
+      (req.headers['x-tenant-slug'] as string) || 
+      (req.headers['x-tenant-id'] as string) || 
+      (req.query.tenant as string) || 
+      'nexus-retail';
+    return getTenantConfigBySlug(slug);
+  }
+
+  // 1. Storefront Context Endpoint
+  app.get('/api/storefront/:tenantSlug/context', (req, res) => {
+    try {
+      const tenantConfig = resolveTenant(req, req.params.tenantSlug);
+      if (!tenantConfig) {
+        return res.status(404).json({ success: false, error: 'TENANT_NOT_FOUND', message: 'Tenant not found.' });
+      }
+      return res.json({
+        success: true,
+        ...tenantConfig,
+      });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err?.message });
+    }
+  });
+
+  // Default Storefront Context Endpoint
+  app.get('/api/storefront/context', (req, res) => {
+    try {
+      const tenantConfig = resolveTenant(req);
+      if (!tenantConfig) {
+        return res.status(404).json({ success: false, error: 'TENANT_NOT_FOUND', message: 'Tenant not found.' });
+      }
+      return res.json({
+        success: true,
+        ...tenantConfig,
+      });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err?.message });
+    }
+  });
+
+  // 2. Tenant Products List Endpoint (with filtering, search, sorting, pagination, & live stock)
+  app.get('/api/storefront/:tenantSlug/products', (req, res) => {
+    try {
+      const tenantConfig = resolveTenant(req, req.params.tenantSlug);
+      if (!tenantConfig) {
+        return res.status(404).json({ success: false, error: 'TENANT_NOT_FOUND' });
+      }
+
+      let products = getTenantProducts(tenantConfig.tenant.slug);
+
+      const { category, brand, minPrice, maxPrice, inStockOnly, search, q, sort, page = '1', limit = '12' } = req.query;
+
+      const searchTerm = String(search || q || '').trim().toLowerCase();
+      if (searchTerm) {
+        products = products.filter(p =>
+          p.name.toLowerCase().includes(searchTerm) ||
+          p.description.toLowerCase().includes(searchTerm) ||
+          p.sku.toLowerCase().includes(searchTerm) ||
+          (p.brand && p.brand.toLowerCase().includes(searchTerm)) ||
+          (p.category && p.category.toLowerCase().includes(searchTerm))
+        );
+      }
+
+      if (category) {
+        const catClean = String(category).trim().toLowerCase();
+        products = products.filter(p => p.category.toLowerCase().includes(catClean) || slugify(p.category) === catClean);
+      }
+
+      if (brand) {
+        const brandClean = String(brand).trim().toLowerCase();
+        products = products.filter(p => p.brand && p.brand.toLowerCase() === brandClean);
+      }
+
+      if (minPrice) {
+        const minP = Number(minPrice);
+        if (!isNaN(minP)) products = products.filter(p => p.price >= minP);
+      }
+
+      if (maxPrice) {
+        const maxP = Number(maxPrice);
+        if (!isNaN(maxP)) products = products.filter(p => p.price <= maxP);
+      }
+
+      // Compute live available stock for each product
+      const productsWithLiveStock = products.map(p => {
+        const activeReserved = getActiveReservedQuantity(p.id, undefined, undefined, tenantConfig.tenant.id);
+        const availableStock = Math.max(0, (p.stock || 0) - activeReserved);
+        return {
+          ...p,
+          availableStock,
+          activeReserved,
+          inStock: availableStock > 0,
+        };
+      });
+
+      let filteredProducts = productsWithLiveStock;
+
+      if (inStockOnly === 'true' || inStockOnly === '1') {
+        filteredProducts = filteredProducts.filter(p => p.inStock);
+      }
+
+      // Sorting
+      const sortKey = String(sort || 'newest');
+      if (sortKey === 'price_asc') {
+        filteredProducts.sort((a, b) => a.price - b.price);
+      } else if (sortKey === 'price_desc') {
+        filteredProducts.sort((a, b) => b.price - a.price);
+      } else if (sortKey === 'rating') {
+        filteredProducts.sort((a, b) => (b.rating || 0) - (a.rating || 0));
+      } else if (sortKey === 'bestsellers') {
+        filteredProducts.sort((a, b) => (b.salesCount || 0) - (a.salesCount || 0));
+      }
+
+      // Pagination
+      const pageNum = Math.max(1, parseInt(String(page), 10) || 1);
+      const limitNum = Math.max(1, Math.min(100, parseInt(String(limit), 10) || 12));
+      const total = filteredProducts.length;
+      const totalPages = Math.ceil(total / limitNum) || 1;
+      const startIndex = (pageNum - 1) * limitNum;
+      const paginatedProducts = filteredProducts.slice(startIndex, startIndex + limitNum);
+
+      return res.json({
+        success: true,
+        tenantSlug: tenantConfig.tenant.slug,
+        products: paginatedProducts,
+        pagination: {
+          total,
+          page: pageNum,
+          limit: limitNum,
+          totalPages,
+        },
+        appliedFilters: {
+          category: category || null,
+          brand: brand || null,
+          minPrice: minPrice ? Number(minPrice) : null,
+          maxPrice: maxPrice ? Number(maxPrice) : null,
+          inStockOnly: inStockOnly === 'true' || inStockOnly === '1',
+          search: searchTerm || null,
+          sort: sortKey,
+        },
+      });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err?.message });
+    }
+  });
+
+  // 3. Single Product Endpoint
+  app.get('/api/storefront/:tenantSlug/products/:slugOrId', (req, res) => {
+    try {
+      const tenantConfig = resolveTenant(req, req.params.tenantSlug);
+      if (!tenantConfig) {
+        return res.status(404).json({ success: false, error: 'TENANT_NOT_FOUND' });
+      }
+
+      const product = getTenantProductBySlugOrId(tenantConfig.tenant.slug, req.params.slugOrId);
+      if (!product) {
+        return res.status(404).json({ success: false, error: 'PRODUCT_NOT_FOUND', message: `Product '${req.params.slugOrId}' not found.` });
+      }
+
+      const activeReserved = getActiveReservedQuantity(product.id, undefined, undefined, tenantConfig.tenant.id);
+      const availableStock = Math.max(0, (product.stock || 0) - activeReserved);
+
+      // Recommendations from same tenant catalog
+      const allTenantProducts = getTenantProducts(tenantConfig.tenant.slug);
+      const recommendations = allTenantProducts
+        .filter(p => p.id !== product.id && (p.category === product.category || p.brand === product.brand))
+        .slice(0, 4)
+        .map(p => ({
+          ...p,
+          availableStock: Math.max(0, (p.stock || 0) - getActiveReservedQuantity(p.id, undefined, undefined, tenantConfig.tenant.id)),
+        }));
+
+      return res.json({
+        success: true,
+        product: {
+          ...product,
+          availableStock,
+          activeReserved,
+          inStock: availableStock > 0,
+        },
+        recommendations,
+        tenant: {
+          slug: tenantConfig.tenant.slug,
+          currency: tenantConfig.currency,
+        },
+      });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err?.message });
+    }
+  });
+
+  // 4. Categories Endpoint
+  app.get('/api/storefront/:tenantSlug/categories', (req, res) => {
+    try {
+      const tenantConfig = resolveTenant(req, req.params.tenantSlug);
+      if (!tenantConfig) {
+        return res.status(404).json({ success: false, error: 'TENANT_NOT_FOUND' });
+      }
+      return res.json({
+        success: true,
+        categories: getTenantCategories(tenantConfig.tenant.slug),
+      });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err?.message });
+    }
+  });
+
+  // 5. Brands Endpoint
+  app.get('/api/storefront/:tenantSlug/brands', (req, res) => {
+    try {
+      const tenantConfig = resolveTenant(req, req.params.tenantSlug);
+      if (!tenantConfig) {
+        return res.status(404).json({ success: false, error: 'TENANT_NOT_FOUND' });
+      }
+      return res.json({
+        success: true,
+        brands: getTenantBrands(tenantConfig.tenant.slug),
+      });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err?.message });
+    }
+  });
+
+  // 6. Search Autocomplete Endpoint
+  app.get('/api/storefront/:tenantSlug/search/autocomplete', (req, res) => {
+    try {
+      const tenantConfig = resolveTenant(req, req.params.tenantSlug);
+      if (!tenantConfig) {
+        return res.status(404).json({ success: false, error: 'TENANT_NOT_FOUND' });
+      }
+
+      const query = String(req.query.q || req.query.query || '').trim().toLowerCase();
+      if (!query) {
+        return res.json({ success: true, products: [], categories: [], brands: [] });
+      }
+
+      const products = getTenantProducts(tenantConfig.tenant.slug);
+      const matchingProducts = products
+        .filter(p => p.name.toLowerCase().includes(query) || p.sku.toLowerCase().includes(query) || (p.brand && p.brand.toLowerCase().includes(query)))
+        .slice(0, 6)
+        .map(p => ({
+          id: p.id,
+          name: p.name,
+          sku: p.sku,
+          price: p.price,
+          category: p.category,
+          imageUrl: p.imageUrl,
+          slug: slugify(p.name),
+        }));
+
+      const categories = getTenantCategories(tenantConfig.tenant.slug).filter(c => c.name.toLowerCase().includes(query));
+      const brands = getTenantBrands(tenantConfig.tenant.slug).filter(b => b.toLowerCase().includes(query));
+
+      return res.json({
+        success: true,
+        query,
+        products: matchingProducts,
+        categories,
+        brands,
+      });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err?.message });
+    }
+  });
+
+  // 7. Tenant-scoped Order Creation Endpoint
+  app.post('/api/storefront/:tenantSlug/orders', (req, res) => {
+    try {
+      const tenantConfig = resolveTenant(req, req.params.tenantSlug);
+      if (!tenantConfig) {
+        return res.status(404).json({ success: false, error: 'TENANT_NOT_FOUND' });
+      }
+
+      const {
+        items = [],
+        customer = {},
+        shippingAddress = {},
+        paymentMethod = 'Monime Mobile Money',
+        shippingOption = 'standard',
+        couponCode = '',
+        notes = '',
+      } = req.body || {};
+
+      if (!Array.isArray(items) || items.length === 0) {
+        return res.status(400).json({ success: false, error: 'Cart items cannot be empty.' });
+      }
+
+      const tenantProducts = getTenantProducts(tenantConfig.tenant.slug);
+
+      // Re-validate products and compute authoritative subtotal
+      let subtotal = 0;
+      const validatedLineItems: any[] = [];
+
+      for (const item of items) {
+        const product = tenantProducts.find(p => p.id === item.productId || p.id === item.id);
+        if (!product) {
+          return res.status(400).json({
+            success: false,
+            error: `Product '${item.name || item.productId}' is not available in ${tenantConfig.tenant.name} catalog.`,
+          });
+        }
+
+        const qty = Math.max(1, Number(item.quantity) || 1);
+        let unitPrice = product.price;
+
+        if (item.variantSku && product.variants) {
+          const v = product.variants.find((v: any) => v.sku === item.variantSku);
+          if (v && v.price) unitPrice = v.price;
+        }
+
+        const lineTotal = Number((unitPrice * qty).toFixed(2));
+        subtotal += lineTotal;
+
+        validatedLineItems.push({
+          productId: product.id,
+          productName: product.name,
+          sku: item.variantSku || product.sku,
+          variantSku: item.variantSku,
+          quantity: qty,
+          unitPrice,
+          totalPrice: lineTotal,
+          imageUrl: product.imageUrl,
+        });
+      }
+
+      // Reserve stock with tenantId lock
+      const reserveResult = reserveInventoryServer({
+        tenantId: tenantConfig.tenant.id,
+        items: validatedLineItems.map(it => ({
+          productId: it.productId,
+          productName: it.productName,
+          variantSku: it.variantSku,
+          quantity: it.quantity,
+        })),
+        customerId: customer.id || customer.email,
+        customerName: customer.name || 'Guest Customer',
+        productsCatalog: tenantProducts,
+      });
+
+      if (!reserveResult.success) {
+        return res.status(409).json(reserveResult);
+      }
+
+      // Shipping fee calculation
+      let shippingFee = tenantConfig.policies.shipping.standardFee;
+      if (shippingOption === 'express' && tenantConfig.policies.shipping.expressFee !== null) {
+        shippingFee = tenantConfig.policies.shipping.expressFee;
+      }
+      if (
+        tenantConfig.policies.shipping.freeShippingThreshold !== null &&
+        subtotal >= tenantConfig.policies.shipping.freeShippingThreshold
+      ) {
+        shippingFee = 0;
+      }
+
+      const taxAmount = Number((subtotal * tenantConfig.catalogPolicy.taxRate).toFixed(2));
+      let discountAmount = 0;
+
+      // Validate Coupon if provided
+      if (couponCode) {
+        const couponResult = validateCouponAuthoritative({
+          couponCode,
+          cartItems: validatedLineItems,
+          authoritativeSubtotal: subtotal,
+          customerId: customer.id,
+          customer,
+          couponsRegistry: SERVER_PROMOTIONS_REGISTRY,
+          shippingCost: shippingFee,
+        });
+        if (couponResult.valid) {
+          discountAmount = couponResult.discountAmount;
+          if (couponResult.isFreeShipping) shippingFee = 0;
+        }
+      }
+
+      const totalAmount = Number((subtotal + shippingFee + taxAmount - discountAmount).toFixed(2));
+      const orderId = `ORD-${tenantConfig.store.code}-${Date.now().toString().slice(-6)}`;
+
+      const orderRecord = {
+        id: orderId,
+        orderNumber: orderId,
+        tenantId: tenantConfig.tenant.id,
+        tenantSlug: tenantConfig.tenant.slug,
+        customer: {
+          id: customer.id || `cust-${Date.now()}`,
+          name: customer.name || 'Guest Customer',
+          email: customer.email || '',
+          phone: customer.phone || '',
+        },
+        items: validatedLineItems,
+        subtotal,
+        shippingFee,
+        taxAmount,
+        discountAmount,
+        totalAmount,
+        currency: tenantConfig.currency.code,
+        currencySymbol: tenantConfig.currency.symbol,
+        paymentMethod,
+        paymentStatus: 'Pending Payment',
+        fulfillmentStatus: 'Unfulfilled',
+        status: 'Submitted',
+        inventoryReservationId: reserveResult.reservation?.reservationId,
+        shippingAddress,
+        notes,
+        createdAt: new Date().toISOString(),
+      };
+
+      serverStorefrontOrders.set(orderId, orderRecord);
+
+      return res.status(201).json({
+        success: true,
+        order: orderRecord,
+        reservation: reserveResult.reservation,
+      });
+    } catch (err: any) {
+      console.error('Storefront order endpoint error:', err);
+      return res.status(500).json({ success: false, error: err?.message });
+    }
+  });
+
+  // 8. Order Lookup Endpoint
+  app.get('/api/storefront/:tenantSlug/orders/:orderId', (req, res) => {
+    try {
+      const tenantConfig = resolveTenant(req, req.params.tenantSlug);
+      if (!tenantConfig) {
+        return res.status(404).json({ success: false, error: 'TENANT_NOT_FOUND' });
+      }
+
+      const order = serverStorefrontOrders.get(req.params.orderId);
+      if (!order || order.tenantId !== tenantConfig.tenant.id) {
+        return res.status(404).json({ success: false, error: 'ORDER_NOT_FOUND', message: `Order #${req.params.orderId} not found.` });
+      }
+
+      return res.json({ success: true, order });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err?.message });
+    }
   });
 
   // =========================================================================

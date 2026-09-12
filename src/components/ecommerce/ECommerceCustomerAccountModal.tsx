@@ -429,7 +429,7 @@ export default function ECommerceCustomerAccountModal({
   // Merge real orders from props + demo orders
   const allAccountOrders = useMemo(() => {
     const realMapped: CustomerAccountOrder[] = customerOrders.map((ord, idx) => {
-      const orderNum = ord.orderNumber || ord.id || `ORD-${10234 + idx}`;
+      const orderNum = String(ord.orderNumber || ord.id || `ORD-${10234 + idx}`);
       const dateStr = ord.date || new Date().toISOString();
       let formatted = dateStr;
       try {
@@ -439,8 +439,8 @@ export default function ECommerceCustomerAccountModal({
       }
 
       return {
-        id: ord.id || orderNum,
-        orderNumber: orderNum.replace('#', ''),
+        id: String(ord.id || orderNum),
+        orderNumber: String(orderNum).replace('#', ''),
         date: dateStr,
         formattedDate: formatted,
         status: ord.status || 'Out for Delivery',
@@ -460,7 +460,7 @@ export default function ECommerceCustomerAccountModal({
         shippingCost: ord.shippingCost || 0,
         tax: ord.tax || 0,
         discount: ord.discount || 0,
-        trackingNumber: ord.trackingNumber || `TRK-SL-${orderNum.replace(/[^0-9]/g, '') || '99201'}`,
+        trackingNumber: ord.trackingNumber || `TRK-SL-${String(orderNum).replace(/[^0-9]/g, '') || '99201'}`,
         carrierName: ord.carrierName || 'Sierra Express Courier Services',
         deliveryAddress: ord.deliveryAddress || '232 Wilkinson Road, Suite 4B, Freetown, Sierra Leone',
         paymentMethod: ord.paymentMethod || 'Orange Money'

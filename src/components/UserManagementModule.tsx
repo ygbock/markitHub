@@ -641,7 +641,7 @@ export default function UserManagementModule({
                 <div 
                   key={role}
                   className="bg-white rounded-3xl border border-slate-200 p-5 space-y-4 shadow-xs hover:border-indigo-200 transition-all flex flex-col justify-between"
-                  id={`role-def-card-${role.toLowerCase().replace(/\s+/g, '-')}`}
+                  id={`role-def-card-${String(role || '').toLowerCase().replace(/\s+/g, '-')}`}
                 >
                   <div className="space-y-3">
                     <div className="flex items-center justify-between">

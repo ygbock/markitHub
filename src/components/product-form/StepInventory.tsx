@@ -364,7 +364,7 @@ export default function StepInventory({
                 onClick={handleAutoGenerateSku}
                 className="text-[10px] font-bold text-indigo-600 hover:text-indigo-800 flex items-center gap-1 cursor-pointer bg-indigo-50 hover:bg-indigo-100 px-2 py-0.5 rounded-md transition-colors"
               >
-                <RefreshCw className="w-2.5 h-2.5" /> Auto SKU ({activeTemplate.replace(/\{|\}/g, '')})
+                <RefreshCw className="w-2.5 h-2.5" /> Auto SKU ({String(activeTemplate || '').replace(/\{|\}/g, '')})
               </button>
             </div>
             <div className="relative">

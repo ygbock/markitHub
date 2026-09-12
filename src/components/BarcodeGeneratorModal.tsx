@@ -81,26 +81,26 @@ export default function BarcodeGeneratorModal({
   const activeProduct = products.find(p => p.id === selectedProductId) || products[0];
 
   // Active SKU to encode
-  const activeSku = useCustomSku 
+  const activeSku = (useCustomSku 
     ? (customSkuInput.trim() || 'SKU-SAMPLE-001')
-    : (selectedVariantSku || (activeProduct ? activeProduct.sku : 'SKU-001'));
+    : (selectedVariantSku || (activeProduct ? activeProduct.sku : 'SKU-001'))) || 'SKU-001';
 
   // Active value to feed to JsBarcode
   const activeEncodeValue = (() => {
     if (barcodeFormat === 'EAN13') {
       // EAN-13 requires 12 or 13 digits
-      const digitsOnly = activeSku.replace(/\D/g, '');
+      const digitsOnly = String(activeSku || '').replace(/\D/g, '');
       if (digitsOnly.length >= 12) {
         return digitsOnly.slice(0, 13);
       }
       // If product has numeric barcode, fallback to that
-      if (activeProduct?.barcode && activeProduct.barcode.replace(/\D/g, '').length >= 12) {
-        return activeProduct.barcode.replace(/\D/g, '').slice(0, 13);
+      if (activeProduct?.barcode && String(activeProduct.barcode).replace(/\D/g, '').length >= 12) {
+        return String(activeProduct.barcode).replace(/\D/g, '').slice(0, 13);
       }
       return '880192837401'; // Valid 12-digit base for EAN13
     }
     if (barcodeFormat === 'UPC') {
-      const digitsOnly = activeSku.replace(/\D/g, '');
+      const digitsOnly = String(activeSku || '').replace(/\D/g, '');
       if (digitsOnly.length >= 11) {
         return digitsOnly.slice(0, 12);
       }
@@ -221,7 +221,7 @@ export default function BarcodeGeneratorModal({
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `barcode-${activeSku.replace(/[^a-zA-Z0-9-_]/g, '_')}.svg`;
+    link.download = `barcode-${String(activeSku || 'sku').replace(/[^a-zA-Z0-9-_]/g, '_')}.svg`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -250,7 +250,7 @@ export default function BarcodeGeneratorModal({
         const pngUrl = canvas.toDataURL('image/png');
         const link = document.createElement('a');
         link.href = pngUrl;
-        link.download = `barcode-${activeSku.replace(/[^a-zA-Z0-9-_]/g, '_')}.png`;
+        link.download = `barcode-${String(activeSku || 'sku').replace(/[^a-zA-Z0-9-_]/g, '_')}.png`;
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);

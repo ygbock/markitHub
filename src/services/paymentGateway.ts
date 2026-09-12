@@ -115,7 +115,7 @@ export class StripeAdapter implements IPaymentGatewayAdapter {
     amount: number,
     currency: string
   ): Promise<GatewayProcessResponse> {
-    const last4 = (request.customerPaymentData.cardNumber || '4242').replace(/\s+/g, '').slice(-4);
+    const last4 = String(request.customerPaymentData?.cardNumber || '4242').replace(/\s+/g, '').slice(-4);
     const txnId = `ch_stripe_${Date.now().toString().slice(-8)}_${Math.random().toString(36).substring(2, 7)}`;
 
     await new Promise(resolve => setTimeout(resolve, 900));
@@ -151,7 +151,7 @@ export class BankWireAdapter implements IPaymentGatewayAdapter {
     amount: number,
     currency: string
   ): Promise<GatewayProcessResponse> {
-    const userRef = request.customerPaymentData.bankTransferReference || `SLCB-WIRE-${Date.now().toString().slice(-6)}`;
+    const userRef = String(request.customerPaymentData?.bankTransferReference || `SLCB-WIRE-${Date.now().toString().slice(-6)}`);
     const txnId = `WIRE-${Date.now().toString().slice(-6)}-${userRef.replace(/\s+/g, '').slice(-4)}`;
 
     await new Promise(resolve => setTimeout(resolve, 600));

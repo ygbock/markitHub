@@ -4,6 +4,7 @@ import { InventoryReservation, InventoryReservationItem, Product, CartItem } fro
 const SERVER_RESERVATIONS_STORE = new Map<string, InventoryReservation>();
 
 export interface ServerReserveParams {
+  tenantId?: string;
   items: {
     productId: string;
     productName?: string;
@@ -39,13 +40,15 @@ export interface ServerReserveResult {
 export function getActiveReservedQuantity(
   productId: string, 
   variantSku?: string,
-  excludeReservationId?: string
+  excludeReservationId?: string,
+  tenantId?: string
 ): number {
   const now = new Date().getTime();
   let totalReserved = 0;
 
   for (const [id, res] of SERVER_RESERVATIONS_STORE.entries()) {
     if (excludeReservationId && id === excludeReservationId) continue;
+    if (tenantId && res.tenantId && res.tenantId !== tenantId) continue;
     
     // Check if expired
     if (res.status === 'active' && new Date(res.expiresAt).getTime() > now) {
@@ -71,6 +74,7 @@ export function getActiveReservedQuantity(
  */
 export function reserveInventoryServer(params: ServerReserveParams): ServerReserveResult {
   const {
+    tenantId,
     items,
     customerId,
     customerName = 'Guest Customer',
@@ -101,7 +105,7 @@ export function reserveInventoryServer(params: ServerReserveParams): ServerReser
       }
     }
 
-    const currentActiveReserved = getActiveReservedQuantity(item.productId, item.variantSku);
+    const currentActiveReserved = getActiveReservedQuantity(item.productId, item.variantSku, undefined, tenantId);
     const availableStock = Math.max(0, onHandStock - currentActiveReserved);
 
     if (item.quantity > availableStock) {
@@ -134,6 +138,7 @@ export function reserveInventoryServer(params: ServerReserveParams): ServerReser
   // Phase 2: Create Active Reservation Lock
   const reservation: InventoryReservation = {
     reservationId,
+    tenantId,
     orderId,
     customerId,
     customerName,
@@ -207,13 +212,15 @@ export function releaseReservationServer(
 /**
  * Get all active unexpired reservations
  */
-export function getActiveReservationsServer(): InventoryReservation[] {
+export function getActiveReservationsServer(tenantId?: string): InventoryReservation[] {
   const now = new Date().getTime();
   const active: InventoryReservation[] = [];
 
   for (const res of SERVER_RESERVATIONS_STORE.values()) {
     if (res.status === 'active' && new Date(res.expiresAt).getTime() > now) {
-      active.push(res);
+      if (!tenantId || !res.tenantId || res.tenantId === tenantId) {
+        active.push(res);
+      }
     }
   }
 
