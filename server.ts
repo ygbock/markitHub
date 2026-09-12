@@ -968,7 +968,7 @@ async function startServer() {
   });
 
   // Moderate Review endpoint (Approve, Hide, Flag)
-  app.patch('/api/reviews/:id/moderate', (req, res) => {
+  app.patch('/api/reviews/:id/moderate',  requireServerAuth,(req, res) => {
     try {
       const { id } = req.params;
       const { status, flagReason } = req.body || {};
@@ -1002,7 +1002,7 @@ async function startServer() {
   });
 
   // Admin Respond to Review endpoint
-  app.post('/api/reviews/:id/respond', (req, res) => {
+  app.post('/api/reviews/:id/respond',  requireServerAuth,(req, res) => {
     try {
       const { id } = req.params;
       const { text, responderName = 'Store Management', responderRole = 'Customer Experience' } = req.body || {};
@@ -1035,7 +1035,7 @@ async function startServer() {
   });
 
   // AI Product Photo Extraction Endpoint (Supports Single & Multi-Angle Product Photos)
-  app.post('/api/extract-product-photo', async (req, res) => {
+  app.post('/api/extract-product-photo',  requireServerAuth,async (req, res) => {
     try {
       const { 
         imageBase64, 
@@ -1273,7 +1273,7 @@ Ensure the barcode digits are transcribed with 100% precision. Return raw JSON w
   });
 
   // Computer Vision Serial Number & Batch/Lot OCR Detection Endpoint
-  app.post('/api/vision-serial-batch', async (req, res) => {
+  app.post('/api/vision-serial-batch',  requireServerAuth,async (req, res) => {
     try {
       const { imageBase64, mimeType = 'image/jpeg', targetMode = 'auto', contextHint } = req.body;
 
