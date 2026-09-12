@@ -74,16 +74,19 @@ async function startServer() {
   // Monime Checkout Session Creation Endpoint
   app.post('/api/monime/create-checkout-session', async (req, res) => {
     try {
-      const { orderId, items, successUrl, cancelUrl, customerName, spaceId: customSpaceId, token: customToken, currency = 'SLE' } = req.body || {};
+      const { orderId, items, successUrl, cancelUrl, customerName, currency = 'SLE' } = req.body || {};
 
       if (!orderId || !items || !Array.isArray(items) || items.length === 0) {
         return res.status(400).json({ error: 'Missing required fields: orderId, items' });
       }
 
-      const monimeToken = customToken || process.env.MONIME_API_TOKEN || 'monime_test_tok_9948201948';
-      const monimeSpaceId = customSpaceId || process.env.MONIME_SPACE_ID || 'monime_spc_sl_nexus';
+      const monimeToken = (process.env.MONIME_API_TOKEN || '').trim();
+      const monimeSpaceId = (process.env.MONIME_SPACE_ID || '').trim();
+      if (!monimeToken || !monimeSpaceId) {
+        return res.status(503).json({ error: 'Monime payment service is not configured on the server.' });
+      }
       const monimeVersion = 'caph.2025-08-23';
-      const monimeApiUrl = process.env.MONIME_API_URL || 'https://api.monime.io';
+      const monimeApiUrl = (process.env.MONIME_API_URL || 'https://api.monime.io').replace(/\/+$/, '');
 
       // Build line items for Monime (minor units = cents, e.g. SLE * 100)
       const lineItems = items.map((item: any) => ({
@@ -100,7 +103,7 @@ async function startServer() {
       }));
 
       const totalAmount = items.reduce((sum: number, item: any) => sum + ((Number(item.price) || 0) * (Number(item.quantity) || 1)), 0);
-      const idempotencyKey = `nexus-${orderId}-${Date.now()}`;
+      const idempotencyKey = `nexus-${orderId}`;
 
       let session: any = null;
 
@@ -180,9 +183,9 @@ async function startServer() {
   // Monime Test Connection & Status Verification Endpoint
   app.post('/api/monime/test-connection', async (req, res) => {
     try {
-      const { spaceId, token, apiUrl = 'https://api.monime.io' } = req.body || {};
-      const effectiveToken = (token || process.env.MONIME_API_TOKEN || '').trim();
-      const effectiveSpaceId = (spaceId || process.env.MONIME_SPACE_ID || '').trim();
+      const effectiveToken = (process.env.MONIME_API_TOKEN || '').trim();
+      const effectiveSpaceId = (process.env.MONIME_SPACE_ID || '').trim();
+      const apiUrl = (process.env.MONIME_API_URL || 'https://api.monime.io').replace(/\/+$/, '');
 
       if (!effectiveSpaceId) {
         return res.status(400).json({ 
