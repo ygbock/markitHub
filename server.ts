@@ -539,6 +539,7 @@ async function startServer() {
         event_id: eventId,
         received_at: new Date().toISOString(),
         type: String(event.type || event.eventType || ''),
+        status: 'processing',
       });
 
       const eventType = event.type || event.eventType;
