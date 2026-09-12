@@ -1,89 +1,85 @@
 rules_version = '2';
+
 service cloud.firestore {
   match /databases/{database}/documents {
-    
-    // Global helper functions
-    function isValidId(id) {
-      return id is string && id.size() > 0 && id.size() <= 128;
-    }
-    
-    function incoming() {
-      return request.resource.data;
-    }
-    
-    function existing() {
-      return resource.data;
+
+    // -------------------------------------------------------------------------
+    // Security baseline
+    // -------------------------------------------------------------------------
+    // Client-side Firestore writes are intentionally disabled while the
+    // application migrates to authenticated server-side business operations.
+    // Sensitive collections must NEVER be writable from an untrusted browser.
+    //
+    // Public reads are limited to storefront-safe catalog content.
+    // All other reads/writes require an authenticated backend path and are
+    // denied here until explicit tenant/branch/RBAC rules are implemented.
+    // -------------------------------------------------------------------------
+
+    function isAuthenticated() {
+      return request.auth != null;
     }
 
-    // Default deny catch-all
+    // Default deny: every collection not explicitly listed below is private.
     match /{document=**} {
       allow read, write: if false;
     }
 
-    // Products collection: accessible for reading and writing by active POS/ecommerce sessions
+    // -------------------------------------------------------------------------
+    // Public storefront data
+    // -------------------------------------------------------------------------
+    // These collections contain catalog/display data only. Do not place
+    // secrets, internal cost data, customer data, or operational credentials
+    // in them.
     match /products/{productId} {
       allow read: if true;
-      allow write: if isValidId(productId);
+      allow write: if false;
     }
 
-    // Customers collection
-    match /customers/{customerId} {
-      allow read: if true;
-      allow write: if isValidId(customerId);
-    }
-
-    // Staff collection
-    match /staff/{staffId} {
-      allow read: if true;
-      allow write: if isValidId(staffId);
-    }
-
-    // Orders collection
-    match /orders/{orderId} {
-      allow read: if true;
-      allow write: if isValidId(orderId);
-    }
-
-    // Audit logs collection (immutable logs)
-    match /audit_logs/{logId} {
-      allow read: if true;
-      allow create: if isValidId(logId);
-      allow update, delete: if false;
-    }
-
-    // Settings collection
-    match /settings/{settingId} {
-      allow read: if true;
-      allow write: if isValidId(settingId);
-    }
-
-    // Categories collection
     match /categories/{categoryId} {
       allow read: if true;
-      allow write: if isValidId(categoryId);
+      allow write: if false;
     }
 
-    // Reviews collection
     match /reviews/{reviewId} {
       allow read: if true;
-      allow write: if isValidId(reviewId);
+      allow write: if false;
     }
 
-    // Coupons & promotions collection
+    // -------------------------------------------------------------------------
+    // Sensitive/business collections
+    // -------------------------------------------------------------------------
+    // Writes are blocked from browsers. Reads are also blocked until the
+    // server-side authentication + tenant/branch/RBAC model is in place.
+    match /customers/{customerId} {
+      allow read, write: if false;
+    }
+
+    match /staff/{staffId} {
+      allow read, write: if false;
+    }
+
+    match /orders/{orderId} {
+      allow read, write: if false;
+    }
+
+    match /audit_logs/{logId} {
+      allow read, write: if false;
+    }
+
+    match /settings/{settingId} {
+      allow read, write: if false;
+    }
+
     match /coupons/{couponId} {
-      allow read: if true;
-      allow write: if isValidId(couponId);
+      allow read, write: if false;
     }
 
-    // Monime sessions collection
     match /monime_sessions/{sessionId} {
-      allow read: if true;
-      allow write: if isValidId(sessionId);
+      allow read, write: if false;
     }
 
-    // Test connection doc
     match /test/{testId} {
-      allow read, write: if true;
+      allow read, write: if false;
     }
   }
 }
