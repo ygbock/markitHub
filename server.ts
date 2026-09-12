@@ -535,7 +535,63 @@ async function startServer() {
             existing.status = 'completed';
             existing.updated_at = new Date().toISOString();
             if (orderNumber) existing.monime_order_number = orderNumber;
-            await sessionRef.set(existing, { merge: true });
+            const settlementRef = db.collection('payment_settlements').doc(String(tenantId) + '_' + String(sessionId));
+            await db.runTransaction(async (tx: any) => {
+              const settlementSnap = await tx.get(settlementRef);
+              if (settlementSnap.exists && settlementSnap.data()?.status === 'settled') return;
+              const freshSessionSnap = await tx.get(sessionRef);
+              if (!freshSessionSnap.exists) throw new Error('Payment session disappeared during settlement.');
+              const fresh = freshSessionSnap.data() as MonimeServerSession;
+
+              const webhookAmount = Number(data.amount?.value ?? data.amount ?? data.total?.value ?? NaN);
+              const webhookCurrency = String(data.currency || data.amount?.currency || '').trim();
+              if (Number.isFinite(webhookAmount) && Math.round(webhookAmount) !== Math.round(Number(fresh.amount) * 100) && webhookAmount !== Number(fresh.amount)) {
+                throw new Error('Monime webhook amount does not match the server payment session.');
+              }
+              if (webhookCurrency && webhookCurrency.toUpperCase() !== String(fresh.currency || '').toUpperCase()) {
+                throw new Error('Monime webhook currency does not match the server payment session.');
+              }
+
+              tx.set(sessionRef, {
+                status: 'completed',
+                updated_at: new Date().toISOString(),
+                ...(orderNumber ? { monime_order_number: orderNumber } : {}),
+              }, { merge: true });
+
+              const orderId = String(fresh.order_id || '');
+              if (orderId) {
+                const orderRef = db.collection('orders').doc(orderId);
+                const orderSnap = await tx.get(orderRef);
+                if (orderSnap.exists) {
+                  const order = orderSnap.data() || {};
+                  const currentStatus = String(order.paymentStatus || order.payment_status || '').toLowerCase();
+                  if (!['paid', 'completed', 'settled'].includes(currentStatus)) {
+                    tx.set(orderRef, {
+                      paymentStatus: 'paid',
+                      payment_status: 'paid',
+                      paidAt: new Date().toISOString(),
+                      paymentProvider: 'monime',
+                      monimeSessionId: String(sessionId),
+                      tenantId,
+                    }, { merge: true });
+                  }
+                }
+              }
+
+              tx.create(settlementRef, {
+                tenantId,
+                sessionId: String(sessionId),
+                orderId: String(fresh.order_id || ''),
+                amount: fresh.amount,
+                currency: fresh.currency,
+                status: 'settled',
+                settledAt: new Date().toISOString(),
+                webhookEventId: eventId,
+              });
+            });
+            existing.status = 'completed';
+            existing.updated_at = new Date().toISOString();
+            if (orderNumber) existing.monime_order_number = orderNumber;
             serverMonimeSessions.set(sessionId, existing);
           }
         }
