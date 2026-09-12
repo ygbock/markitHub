@@ -684,13 +684,19 @@ async function startServer() {
     const webhookUrl = webhookBaseUrl + '/api/monime/webhook/' + encodeURIComponent(tenantId);
     const headers = { 'Content-Type': 'application/json', Authorization: 'Bearer ' + accessToken, 'Monime-Space-Id': spaceId, 'Monime-Version': 'caph.2025-08-23' };
     const events = ['payment.completed', 'payment.failed', 'checkout_session.completed'];
+    const createWebhook = async () => {
+      const idempotencyKey = crypto.createHash('sha256').update(tenantId + ':' + spaceId + ':' + webhookSecret).digest('hex').slice(0, 64);
+      const response = await fetch(apiUrl + '/v1/webhooks', { method: 'POST', headers: { ...headers, 'Idempotency-Key': idempotencyKey }, body: JSON.stringify({ name: 'markitHub Payment Webhook', url: webhookUrl, apiRelease: 'caph', events, enabled: true, verificationMethod: { type: 'HS256', secret: webhookSecret }, metadata: { tenantId, managedBy: 'markitHub' } }) });
+      if (!response.ok) { const detail = await response.text(); throw new Error('Monime webhook registration failed (' + response.status + '): ' + detail.slice(0, 300)); }
+      return await response.json();
+    };
     if (existingWebhookId) {
       const response = await fetch(apiUrl + '/v1/webhooks/' + encodeURIComponent(existingWebhookId), { method: 'PATCH', headers, body: JSON.stringify({ name: 'markitHub Payment Webhook', url: webhookUrl, enabled: true, apiRelease: 'caph', events, metadata: { tenantId, managedBy: 'markitHub' } }) });
       if (!response.ok) throw new Error('Monime webhook update failed (' + response.status + ').');
       const data = await response.json();
       return { id: String(data.result?.id || existingWebhookId), url: webhookUrl, created: false };
     }
-    const response = await fetch(apiUrl + '/v1/webhooks', { method: 'POST', headers: { ...headers, 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify({ name: 'markitHub Payment Webhook', url: webhookUrl, apiRelease: 'caph', events, enabled: true, verificationMethod: { type: 'HS256', secret: webhookSecret }, metadata: { tenantId, managedBy: 'markitHub' } }) });
+    const data = await createWebhook();
     if (!response.ok) { const detail = await response.text(); throw new Error('Monime webhook registration failed (' + response.status + '): ' + detail.slice(0, 300)); }
     const data = await response.json();
     return { id: String(data.result?.id || ''), url: webhookUrl, created: true };
