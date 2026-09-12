@@ -123,6 +123,7 @@ async function startServer() {
 
   interface MonimeServerSession {
     order_id: string;
+    reservation_id?: string;
     monime_session_id: string;
     monime_order_number?: string;
     redirect_url?: string;
