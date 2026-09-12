@@ -532,14 +532,18 @@ async function startServer() {
       const eventRef = db.collection('monime_webhook_events').doc(`${tenantId}_${eventId}`);
       const eventSnap = await eventRef.get();
       if (eventSnap.exists) {
-        return res.status(200).json({ received: true, duplicate: true });
+        const existingEvent = eventSnap.data() || {};
+        if (String(existingEvent.status || '') === 'processed') {
+          return res.status(200).json({ received: true, duplicate: true });
+        }
+        const receivedAt = new Date(String(existingEvent.received_at || 0)).getTime();
+        if (Number.isFinite(receivedAt) && Date.now() - receivedAt < 10 * 60 * 1000) {
+          return res.status(202).json({ received: true, processing: true });
+        }
+        await eventRef.set({ status: 'processing', retry_started_at: new Date().toISOString(), retry_count: Number(existingEvent.retry_count || 0) + 1 }, { merge: true });
+      } else {
+        await eventRef.create({ event_id: eventId, received_at: new Date().toISOString(), type: String(event.type || event.eventType || ''), status: 'processing', retry_count: 0 });
       }
-      await eventRef.create({
-        event_id: eventId,
-        received_at: new Date().toISOString(),
-        type: String(event.type || event.eventType || ''),
-        status: 'processing',
-      });
 
       const eventType = event.type || event.eventType;
       const data = event.data || event.result || {};
