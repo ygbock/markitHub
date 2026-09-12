@@ -16,6 +16,7 @@ import {
 } from './src/server/inventoryReservationManager';
 import { INITIAL_PRODUCTS } from './src/data/mockData';
 import { slugify } from './src/utils/seoUtils';
+import { DEFAULT_ROLE_PERMISSIONS } from './src/utils/permissions';
 
 dotenv.config();
 
@@ -65,6 +66,20 @@ async function startServer() {
     }
     return getAuth();
   }
+
+
+  const requirePermission = (permission: string) => (req: any, res: any, next: any) => {
+    const claims = req.user?.claims || {};
+    const role = typeof claims.role === 'string' ? claims.role : '';
+    const permissions = Array.isArray(claims.permissions)
+      ? claims.permissions
+      : (DEFAULT_ROLE_PERMISSIONS as Record<string, string[]>)[role] || [];
+    if (!permissions.includes(permission)) {
+      return res.status(403).json({ error: 'Insufficient permissions.' });
+    }
+    req.user.permissions = permissions;
+    return next();
+  };
 
   const requireServerAuth = async (req: any, res: any, next: any) => {
     const header = String(req.headers.authorization || '');
@@ -122,7 +137,7 @@ async function startServer() {
   const serverMonimeSessions = new Map<string, MonimeServerSession>();
 
   // Monime Checkout Session Creation Endpoint
-  app.post('/api/monime/create-checkout-session', requireServerAuth, async (req, res) => {
+  app.post('/api/monime/create-checkout-session', requireServerAuth, requirePermission('payments.create'), async (req, res) => {
     try {
       const { orderId, items, successUrl, cancelUrl, customerName, currency = 'SLE' } = req.body || {};
 
@@ -231,7 +246,7 @@ async function startServer() {
   });
 
   // Monime Test Connection & Status Verification Endpoint
-  app.post('/api/monime/test-connection', requireServerAuth, async (req, res) => {
+  app.post('/api/monime/test-connection', requireServerAuth, requirePermission('system.sync'), async (req, res) => {
     try {
       const effectiveToken = (process.env.MONIME_API_TOKEN || '').trim();
       const effectiveSpaceId = (process.env.MONIME_SPACE_ID || '').trim();
@@ -363,7 +378,7 @@ async function startServer() {
   });
 
   // Get active Monime Sessions Endpoint
-  app.get('/api/monime/sessions', requireServerAuth, (req, res) => {
+  app.get('/api/monime/sessions', requireServerAuth, requirePermission('payments.create'), (req, res) => {
     return res.json({
       success: true,
       sessions: Array.from(serverMonimeSessions.values())
@@ -533,7 +548,7 @@ async function startServer() {
   // =========================================================================
 
   // 1. Reserve Inventory (Locks items with TTL before payment)
-  app.post('/api/inventory/reserve', requireServerAuth, (req, res) => {
+  app.post('/api/inventory/reserve', requireServerAuth, requirePermission('inventory.view'), (req, res) => {
     try {
       const { items, customerId, customerName, orderId, ttlMinutes, productsCatalog } = req.body || {};
 
@@ -568,7 +583,7 @@ async function startServer() {
   });
 
   // 2. Finalize Reservation (Post-payment stock commit)
-  app.post('/api/inventory/reservations/:id/finalize', requireServerAuth, (req, res) => {
+  app.post('/api/inventory/reservations/:id/finalize', requireServerAuth, requirePermission('inventory.adjust'), (req, res) => {
     try {
       const reservationId = req.params.id;
       const { orderId } = req.body || {};
@@ -585,7 +600,7 @@ async function startServer() {
   });
 
   // 3. Release Reservation (Rollback on cancelled/failed checkout)
-  app.post('/api/inventory/reservations/:id/release', requireServerAuth, (req, res) => {
+  app.post('/api/inventory/reservations/:id/release', requireServerAuth, requirePermission('inventory.adjust'), (req, res) => {
     try {
       const reservationId = req.params.id;
       const { reason } = req.body || {};
@@ -598,7 +613,7 @@ async function startServer() {
   });
 
   // 4. Get Active Unexpired Reservations
-  app.get('/api/inventory/reservations/active', requireServerAuth, (req, res) => {
+  app.get('/api/inventory/reservations/active', requireServerAuth, requirePermission('inventory.view'), (req, res) => {
     try {
       const active = getActiveReservationsServer();
       return res.json({
@@ -968,7 +983,7 @@ async function startServer() {
   });
 
   // Moderate Review endpoint (Approve, Hide, Flag)
-  app.patch('/api/reviews/:id/moderate',  requireServerAuth,(req, res) => {
+  app.patch('/api/reviews/:id/moderate',  requireServerAuth, requirePermission('ecommerce.manage'),(req, res) => {
     try {
       const { id } = req.params;
       const { status, flagReason } = req.body || {};
@@ -1002,7 +1017,7 @@ async function startServer() {
   });
 
   // Admin Respond to Review endpoint
-  app.post('/api/reviews/:id/respond',  requireServerAuth,(req, res) => {
+  app.post('/api/reviews/:id/respond',  requireServerAuth, requirePermission('ecommerce.manage'),(req, res) => {
     try {
       const { id } = req.params;
       const { text, responderName = 'Store Management', responderRole = 'Customer Experience' } = req.body || {};
@@ -1035,7 +1050,7 @@ async function startServer() {
   });
 
   // AI Product Photo Extraction Endpoint (Supports Single & Multi-Angle Product Photos)
-  app.post('/api/extract-product-photo',  requireServerAuth,async (req, res) => {
+  app.post('/api/extract-product-photo',  requireServerAuth, requirePermission('inventory.create'),async (req, res) => {
     try {
       const { 
         imageBase64, 
@@ -1273,7 +1288,7 @@ Ensure the barcode digits are transcribed with 100% precision. Return raw JSON w
   });
 
   // Computer Vision Serial Number & Batch/Lot OCR Detection Endpoint
-  app.post('/api/vision-serial-batch',  requireServerAuth,async (req, res) => {
+  app.post('/api/vision-serial-batch',  requireServerAuth, requirePermission('inventory.create'),async (req, res) => {
     try {
       const { imageBase64, mimeType = 'image/jpeg', targetMode = 'auto', contextHint } = req.body;
 
