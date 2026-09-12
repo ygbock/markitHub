@@ -506,6 +506,8 @@ function initializeTenants() {
       description: 'Active Noise Cancelling studio headphones with 40-hour battery life and lossless high-resolution audio codecs.',
       returnable: true,
       tenantId: 'apex-gadgets',
+      qrCode: 'APX-ANC-900',
+      variants: [],
     });
   }
 

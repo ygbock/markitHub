@@ -532,7 +532,7 @@ export default function ECommerceStorefront({
           if (specs['Memory']?.toLowerCase().includes(lower)) return true;
           return variants.some(v => 
             (v.name && v.name.toLowerCase().includes(lower)) ||
-            (v.options && Object.values(v.options).some(o => o.toLowerCase().includes(lower)))
+            (v.options && Object.values(v.options).some(o => String(o).toLowerCase().includes(lower)))
           );
         });
         if (!matchesStorage) return false;
@@ -550,7 +550,7 @@ export default function ECommerceStorefront({
           if (specs['Memory']?.toLowerCase().includes(lower)) return true;
           return variants.some(v => 
             (v.name && v.name.toLowerCase().includes(lower)) ||
-            (v.options && Object.values(v.options).some(o => o.toLowerCase().includes(lower)))
+            (v.options && Object.values(v.options).some(o => String(o).toLowerCase().includes(lower)))
           );
         });
         if (!matchesRam) return false;
@@ -566,7 +566,7 @@ export default function ECommerceStorefront({
           return variants.some(v => 
             (v.size && v.size.toLowerCase().includes(lower)) ||
             (v.name && v.name.toLowerCase().includes(lower)) ||
-            (v.options && Object.values(v.options).some(o => o.toLowerCase().includes(lower)))
+            (v.options && Object.values(v.options).some(o => String(o).toLowerCase().includes(lower)))
           );
         });
         if (!matchesSize) return false;
@@ -583,7 +583,7 @@ export default function ECommerceStorefront({
           if (specs['Color']?.toLowerCase().includes(lower)) return true;
           return variants.some(v => 
             (v.color && v.color.toLowerCase().includes(lower)) ||
-            (v.options && Object.values(v.options).some(o => o.toLowerCase().includes(lower)))
+            (v.options && Object.values(v.options).some(o => String(o).toLowerCase().includes(lower)))
           );
         });
         if (!matchesColor) return false;
@@ -600,7 +600,7 @@ export default function ECommerceStorefront({
           if (pName.includes(lower) || pDesc.includes(lower)) return true;
           if (specs['Gender']?.toLowerCase().includes(lower)) return true;
           return variants.some(v => 
-            (v.options && Object.values(v.options).some(o => o.toLowerCase().includes(lower)))
+            (v.options && Object.values(v.options).some(o => String(o).toLowerCase().includes(lower)))
           );
         });
         if (!matchesGender) return false;
