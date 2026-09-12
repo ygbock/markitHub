@@ -625,6 +625,7 @@ async function startServer() {
   // =========================================================================
 
   interface MonimeServerSession {
+    tenant_id?: string;
     order_id: string;
     reservation_id?: string;
     monime_session_id: string;
@@ -1313,6 +1314,8 @@ async function startServer() {
         }
       }
 
+      return res.status(200).json({ received: true, eventType });
+    } catch (err: any) {
       // Leave the event retryable, but record the failure so operators can diagnose it.
       try {
         const dbForFailure = getFirestoreDb();
