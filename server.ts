@@ -256,6 +256,24 @@ async function startServer() {
       if (!db) return res.status(503).json({ error: 'Durable configuration storage is not configured.' });
       const tenantId = String(req.user?.claims?.tenantId || req.user?.claims?.tenant_id || '').trim();
       if (!tenantId) return res.status(400).json({ error: 'Tenant identity is required.' });
+      if (reservationId) {
+        const reservationSnap = await db.collection('inventory_reservations').doc(String(reservationId)).get();
+        if (!reservationSnap.exists) {
+          return res.status(400).json({ error: 'Inventory reservation was not found.' });
+        }
+        const reservation = reservationSnap.data() || {};
+        const reservationTenant = String(reservation.tenantId || '');
+        const reservationOrderId = String(reservation.orderId || reservation.order_id || '');
+        const reservationStatus = String(reservation.status || '');
+        if (reservationTenant !== tenantId || reservationOrderId !== String(orderId) || reservationStatus !== 'active') {
+          return res.status(409).json({ error: 'Inventory reservation is invalid for this order and tenant.' });
+        }
+        const expiresAt = new Date(String(reservation.expiresAt || 0)).getTime();
+        if (Number.isFinite(expiresAt) && expiresAt <= Date.now()) {
+          return res.status(409).json({ error: 'Inventory reservation has expired.' });
+        }
+      }
+
       const gatewaySnap = await db.collection('tenants').doc(tenantId).collection('payment_gateways').doc('monime').get();
       if (!gatewaySnap.exists) {
         return res.status(503).json({ error: 'This tenant has not configured Monime payments.' });
@@ -439,9 +457,9 @@ async function startServer() {
           pingSuccess = true;
         }
       } catch (netErr: any) {
-        statusCode = 200;
-        note = `Monime local validation active. Space ID '${effectiveSpaceId}' & token format verified for sandbox / live checkout orchestration.`;
-        pingSuccess = true;
+        statusCode = 503;
+        note = 'Unable to reach the configured Monime API. Credentials were not verified.';
+        pingSuccess = false;
       }
 
       const latencyMs = Date.now() - startTime;
