@@ -1135,7 +1135,12 @@ async function startServer() {
               }
 
               const orderId = String(fresh.order_id || '');
-              const reservationForStock = reservationId ? (await tx.get(db.collection('inventory_reservations').doc(reservationId))).data() : null;
+              const reservationRefForSettlement = reservationId ? db.collection('inventory_reservations').doc(reservationId) : null;
+              const reservationForStockSnap = reservationRefForSettlement ? await tx.get(reservationRefForSettlement) : null;
+              const reservationForStock = reservationForStockSnap?.data() || null;
+              const orderRefForSettlement = orderId ? db.collection('orders').doc(orderId) : null;
+              const orderSnapForSettlement = orderRefForSettlement ? await tx.get(orderRefForSettlement) : null;
+              if (reservationForStock && String(reservationForStock.tenantId || reservationForStock.tenant_id || '') !== tenantId) throw new Error('Inventory reservation belongs to another tenant.');
               if (reservationForStock && Array.isArray(reservationForStock.items)) {
                 const movementBase = String(tenantId) + '_' + String(sessionId);
                 const productDeltas = new Map<string, { total:number; variants:Map<string,number> }>();
@@ -1155,6 +1160,8 @@ async function startServer() {
                   const productSnap = await tx.get(productRef);
                   if (!productSnap.exists) throw new Error('Product not found during inventory settlement: ' + productId);
                   const product = productSnap.data() || {};
+                  const productTenantId = String(product.tenantId || product.tenant_id || '');
+                  if (productTenantId && productTenantId !== tenantId) throw new Error('Product belongs to another tenant.');
                   const variants = Array.isArray(product.variants) ? product.variants.map((v:any) => ({...v})) : [];
                   let productStock = Number(product.stock || 0);
 
@@ -1207,9 +1214,12 @@ async function startServer() {
               }
 
               if (orderId) {
-                const orderRef = db.collection('orders').doc(orderId);
-                const orderSnap = await tx.get(orderRef);
+                const orderRef = orderRefForSettlement!;
+                const orderSnap = orderSnapForSettlement!;
                 if (orderSnap.exists) {
+                  const orderData = orderSnap.data() || {};
+                  const orderTenantId = String(orderData.tenantId || orderData.tenant_id || '');
+                  if (orderTenantId && orderTenantId !== tenantId) throw new Error('Order belongs to another tenant.');
                   const order = orderSnap.data() || {};
                   const orderTenant = String(order.tenantId || order.tenant_id || '');
                   if (orderTenant && orderTenant !== tenantId) throw new Error('Order belongs to another tenant.');
