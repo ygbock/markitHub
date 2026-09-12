@@ -25,6 +25,7 @@ import {
 import { INITIAL_PRODUCTS } from './src/data/mockData';
 import { slugify } from './src/utils/seoUtils';
 import { DEFAULT_ROLE_PERMISSIONS } from './src/utils/permissions';
+import { transitionPaymentState, type PaymentState, type PaymentEvent } from './src/server/paymentState';
 
 dotenv.config();
 
@@ -1079,9 +1080,10 @@ async function startServer() {
           if (sessionSnap.exists) {
             const existing = sessionSnap.data() as MonimeServerSession;
             if (String(existing.tenant_id || '') !== tenantId) return res.status(200).json({ received: true, ignored: true });
-            const current = String(existing.status || 'pending').toLowerCase();
-            if (!['completed', 'paid'].includes(current)) {
-              await sessionRef.set({ status: 'failed', updated_at: new Date().toISOString(), failure_reason: String(data.reason || data.message || 'Monime payment failed').slice(0, 500) }, { merge: true });
+            const current = String(existing.status || 'pending').toLowerCase() as PaymentState;
+            const next = transitionPaymentState(current, 'failed');
+            if (next) {
+              await sessionRef.set({ status: next, updated_at: new Date().toISOString(), failure_reason: String(data.reason || data.message || 'Monime payment failed').slice(0, 500) }, { merge: true });
             }
           }
         }
@@ -1096,11 +1098,12 @@ async function startServer() {
           const sessionSnap = await sessionRef.get();
           if (sessionSnap.exists) {
             const existing = sessionSnap.data() as MonimeServerSession;
-            const currentSessionStatus = String(existing.status || 'pending').toLowerCase();
-            if (['cancelled', 'expired'].includes(currentSessionStatus)) {
-              return res.status(200).json({ received: true, ignored: true, reason: 'terminal_session_state' });
+            const currentSessionStatus = String(existing.status || 'pending').toLowerCase() as PaymentState;
+            const nextSessionStatus = transitionPaymentState(currentSessionStatus, 'completed');
+            if (!nextSessionStatus) {
+              return res.status(200).json({ received: true, ignored: true, reason: 'invalid_payment_state_transition' });
             }
-            existing.status = 'completed';
+            existing.status = nextSessionStatus;
             existing.updated_at = new Date().toISOString();
             if (orderNumber) existing.monime_order_number = orderNumber;
             const settlementRef = db.collection('payment_settlements').doc(String(tenantId) + '_' + String(sessionId));
