@@ -1140,6 +1140,20 @@ async function startServer() {
               const reservationForStock = reservationForStockSnap?.data() || null;
               const orderRefForSettlement = orderId ? db.collection('orders').doc(orderId) : null;
               const orderSnapForSettlement = orderRefForSettlement ? await tx.get(orderRefForSettlement) : null;
+              if (!orderRefForSettlement || !orderSnapForSettlement?.exists) throw new Error('Linked order was not found during payment settlement.');
+              const settlementOrder = orderSnapForSettlement.data() || {};
+              const orderTenantId = String(settlementOrder.tenantId || settlementOrder.tenant_id || '');
+              if (orderTenantId && orderTenantId !== tenantId) throw new Error('Order belongs to another tenant.');
+              const orderTotal = Number(settlementOrder.grandTotal ?? settlementOrder.total ?? settlementOrder.totalAmount ?? NaN);
+              const sessionTotal = Number(fresh.amount);
+              if (!Number.isFinite(orderTotal) || !Number.isFinite(sessionTotal) || Math.abs(orderTotal - sessionTotal) > 0.01) throw new Error('Payment amount does not match the server order total.');
+              const orderCurrency = String(settlementOrder.currency || '').trim();
+              if (orderCurrency && orderCurrency.toUpperCase() !== String(fresh.currency || '').toUpperCase()) throw new Error('Payment currency does not match the server order currency.');
+              const currentPaymentStatus = String(settlementOrder.paymentStatus || settlementOrder.payment_status || '').toLowerCase();
+              if (currentPaymentStatus === 'paid' || currentPaymentStatus === 'completed') {
+                tx.set(settlementRef, { status: 'settled', tenantId, sessionId: String(sessionId), orderId, duplicate: true, settledAt: new Date().toISOString() }, { merge: true });
+                return;
+              }
               if (reservationForStock && String(reservationForStock.tenantId || reservationForStock.tenant_id || '') !== tenantId) throw new Error('Inventory reservation belongs to another tenant.');
               if (reservationForStock && Array.isArray(reservationForStock.items)) {
                 const movementBase = String(tenantId) + '_' + String(sessionId);
