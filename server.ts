@@ -749,7 +749,7 @@ async function startServer() {
         });
       }
 
-      const result = reserveInventoryServer({
+      const result = await reserveInventoryServer({
         items,
         customerId,
         customerName,
@@ -777,7 +777,7 @@ async function startServer() {
     try {
       const reservationId = req.params.id;
       const { orderId } = req.body || {};
-      const result = finalizeReservationServer(reservationId, orderId);
+      const result = await finalizeReservationServer(reservationId, orderId);
 
       if (!result.success) {
         return res.status(400).json(result);
@@ -794,7 +794,7 @@ async function startServer() {
     try {
       const reservationId = req.params.id;
       const { reason } = req.body || {};
-      const result = releaseReservationServer(reservationId, reason);
+      const result = await releaseReservationServer(reservationId, reason);
 
       return res.json(result);
     } catch (err: any) {
@@ -805,7 +805,7 @@ async function startServer() {
   // 4. Get Active Unexpired Reservations
   app.get('/api/inventory/reservations/active', requireServerAuth, requirePermission('inventory.view'), (req, res) => {
     try {
-      const active = getActiveReservationsServer();
+      const active = await getActiveReservationsServer();
       return res.json({
         success: true,
         count: active.length,
