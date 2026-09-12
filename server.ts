@@ -1071,7 +1071,22 @@ async function startServer() {
       const data = event.data || event.result || {};
       console.log('[Monime Webhook] Verified event:', eventType, eventId);
 
-      if (eventType === 'checkout_session.completed' || eventType === 'payment.completed') {
+      if (eventType === 'payment.failed' || eventType === 'checkout_session.failed') {
+        const sessionId = data.id || data.sessionId;
+        if (sessionId) {
+          const sessionRef = db.collection('monime_sessions').doc(String(sessionId));
+          const sessionSnap = await sessionRef.get();
+          if (sessionSnap.exists) {
+            const existing = sessionSnap.data() as MonimeServerSession;
+            if (String(existing.tenant_id || '') !== tenantId) return res.status(200).json({ received: true, ignored: true });
+            const current = String(existing.status || 'pending').toLowerCase();
+            if (!['completed', 'paid'].includes(current)) {
+              await sessionRef.set({ status: 'failed', updated_at: new Date().toISOString(), failure_reason: String(data.reason || data.message || 'Monime payment failed').slice(0, 500) }, { merge: true });
+            }
+          }
+        }
+        await eventRef.set({ status: 'processed', processed_at: new Date().toISOString() }, { merge: true });
+      } else if (eventType === 'checkout_session.completed' || eventType === 'payment.completed') {
         const sessionId = data.id || data.sessionId;
         const orderNumber = data.orderNumber || data.monime_order_number;
         if (sessionId) {
@@ -1295,8 +1310,23 @@ async function startServer() {
         }
       }
 
-      return res.status(200).json({ received: true, eventType });
-    } catch (err: any) {
+      // Leave the event retryable, but record the failure so operators can diagnose it.
+      try {
+        const dbForFailure = getFirestoreDb();
+        if (dbForFailure) {
+          const tenantIdForFailure = String(req.params.tenantId || '').trim();
+          const eventIdForFailure = String((req.body?.id || req.body?.eventId || req.body?.data?.id || '')).trim();
+          if (tenantIdForFailure && eventIdForFailure) {
+            await dbForFailure.collection('monime_webhook_events').doc(tenantIdForFailure + '_' + eventIdForFailure).set({
+              status: 'failed',
+              last_error: String(err?.message || 'Webhook processing failed').slice(0, 500),
+              failed_at: new Date().toISOString(),
+            }, { merge: true });
+          }
+        }
+      } catch (recordErr) {
+        console.error('Unable to record Monime webhook failure:', recordErr);
+      }
       console.error('Monime webhook error:', err);
       return res.status(400).json({ error: 'Invalid webhook payload.' });
     }
