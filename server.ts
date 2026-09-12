@@ -587,6 +587,77 @@ async function startServer() {
               }
 
               const orderId = String(fresh.order_id || '');
+              const reservationForStock = reservationId ? (await tx.get(db.collection('inventory_reservations').doc(reservationId))).data() : null;
+              if (reservationForStock && Array.isArray(reservationForStock.items)) {
+                const movementBase = String(tenantId) + '_' + String(sessionId);
+                const productDeltas = new Map<string, { total:number; variants:Map<string,number> }>();
+                for (const ri of reservationForStock.items) {
+                  const pid = String(ri.productId || '');
+                  const qty = Number(ri.quantity || 0);
+                  if (!pid || qty <= 0) continue;
+                  const current = productDeltas.get(pid) || { total: 0, variants: new Map<string,number>() };
+                  if (ri.variantSku) current.variants.set(String(ri.variantSku), (current.variants.get(String(ri.variantSku)) || 0) + qty);
+                  else current.total += qty;
+                  productDeltas.set(pid, current);
+                }
+
+                let movementIndex = 0;
+                for (const [productId, delta] of productDeltas) {
+                  const productRef = db.collection('products').doc(productId);
+                  const productSnap = await tx.get(productRef);
+                  if (!productSnap.exists) throw new Error('Product not found during inventory settlement: ' + productId);
+                  const product = productSnap.data() || {};
+                  const variants = Array.isArray(product.variants) ? product.variants.map((v:any) => ({...v})) : [];
+                  let productStock = Number(product.stock || 0);
+
+                  for (const [sku, qty] of delta.variants) {
+                    const idx = variants.findIndex((v:any) => String(v.sku || '') === sku);
+                    if (idx < 0) throw new Error('Variant not found during inventory settlement: ' + sku);
+                    const before = Number(variants[idx].stock || 0);
+                    if (before < qty) throw new Error('Insufficient stock during payment settlement for variant ' + sku);
+                    variants[idx].stock = before - qty;
+                    const movementId = movementBase + '_v_' + String(movementIndex++);
+                    tx.create(db.collection('stock_movements').doc(movementId), {
+                      id: movementId, tenantId, date: new Date().toISOString(), productId,
+                      productName: String(product.name || ''), sku, type: 'Online Sale',
+                      quantityChange: -qty, quantityBefore: before, quantityAfter: before - qty,
+                      unitCost: Number(variants[idx].cost ?? product.cost ?? 0),
+                      totalCostImpact: Number(variants[idx].cost ?? product.cost ?? 0) * qty,
+                      location: String(product.location || 'Main Warehouse / Storefront'),
+                      referenceDoc: orderId || String(sessionId), performedBy: 'Monime Payment Settlement',
+                      notes: 'Atomic inventory deduction for verified Monime payment settlement'
+                    });
+                  }
+
+                  if (delta.total > 0) {
+                    if (productStock < delta.total) throw new Error('Insufficient stock during payment settlement for product ' + productId);
+                    const before = productStock;
+                    productStock -= delta.total;
+                    const movementId = movementBase + '_p_' + String(movementIndex++);
+                    tx.create(db.collection('stock_movements').doc(movementId), {
+                      id: movementId, tenantId, date: new Date().toISOString(), productId,
+                      productName: String(product.name || ''), sku: String(product.sku || productId),
+                      type: 'Online Sale', quantityChange: -delta.total, quantityBefore: before,
+                      quantityAfter: productStock, unitCost: Number(product.cost || 0),
+                      totalCostImpact: Number(product.cost || 0) * delta.total,
+                      location: String(product.location || 'Main Warehouse / Storefront'),
+                      referenceDoc: orderId || String(sessionId), performedBy: 'Monime Payment Settlement',
+                      notes: 'Atomic inventory deduction for verified Monime payment settlement'
+                    });
+                  } else if (delta.variants.size > 0) {
+                    productStock = variants.reduce((sum:number, v:any) => sum + Number(v.stock || 0), 0);
+                  }
+
+                  tx.set(productRef, {
+                    stock: productStock,
+                    variants,
+                    ...(product.onHand !== undefined ? { onHand: productStock } : {}),
+                    ...(product.available !== undefined ? { available: Math.max(0, productStock - Number(product.reserved || product.reservedStock || 0)) } : {}),
+                    updatedAt: new Date().toISOString()
+                  }, { merge: true });
+                }
+              }
+
               if (orderId) {
                 const orderRef = db.collection('orders').doc(orderId);
                 const orderSnap = await tx.get(orderRef);
