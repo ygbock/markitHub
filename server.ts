@@ -424,16 +424,20 @@ async function startServer() {
         return res.status(400).json({ error: 'Webhook event ID is required.' });
       }
 
-      const seen = (globalThis as any).__monimeWebhookEvents || new Map<string, number>();
-      (globalThis as any).__monimeWebhookEvents = seen;
-      const now = Date.now();
-      for (const [id, seenAt] of seen.entries()) {
-        if (now - seenAt > 24 * 60 * 60 * 1000) seen.delete(id);
+      const db = getFirestoreDb();
+      if (!db) {
+        return res.status(503).json({ error: 'Durable webhook storage is not configured.' });
       }
-      if (seen.has(eventId)) {
+      const eventRef = db.collection('monime_webhook_events').doc(eventId);
+      const eventSnap = await eventRef.get();
+      if (eventSnap.exists) {
         return res.status(200).json({ received: true, duplicate: true });
       }
-      seen.set(eventId, now);
+      await eventRef.create({
+        event_id: eventId,
+        received_at: new Date().toISOString(),
+        type: String(event.type || event.eventType || ''),
+      });
 
       const eventType = event.type || event.eventType;
       const data = event.data || event.result || {};
@@ -442,20 +446,30 @@ async function startServer() {
       if (eventType === 'checkout_session.completed' || eventType === 'payment.completed') {
         const sessionId = data.id || data.sessionId;
         const orderNumber = data.orderNumber || data.monime_order_number;
-        if (sessionId && serverMonimeSessions.has(sessionId)) {
-          const existing = serverMonimeSessions.get(sessionId)!;
-          existing.status = 'completed';
-          existing.updated_at = new Date().toISOString();
-          if (orderNumber) existing.monime_order_number = orderNumber;
-          serverMonimeSessions.set(sessionId, existing);
+        if (sessionId) {
+          const sessionRef = db.collection('monime_sessions').doc(String(sessionId));
+          const sessionSnap = await sessionRef.get();
+          if (sessionSnap.exists) {
+            const existing = sessionSnap.data() as MonimeServerSession;
+            existing.status = 'completed';
+            existing.updated_at = new Date().toISOString();
+            if (orderNumber) existing.monime_order_number = orderNumber;
+            await sessionRef.set(existing, { merge: true });
+            serverMonimeSessions.set(sessionId, existing);
+          }
         }
       } else if (eventType === 'checkout_session.cancelled' || eventType === 'checkout_session.expired') {
         const sessionId = data.id || data.sessionId;
-        if (sessionId && serverMonimeSessions.has(sessionId)) {
-          const existing = serverMonimeSessions.get(sessionId)!;
-          existing.status = eventType.includes('cancelled') ? 'cancelled' : 'expired';
-          existing.updated_at = new Date().toISOString();
-          serverMonimeSessions.set(sessionId, existing);
+        if (sessionId) {
+          const sessionRef = db.collection('monime_sessions').doc(String(sessionId));
+          const sessionSnap = await sessionRef.get();
+          if (sessionSnap.exists) {
+            const existing = sessionSnap.data() as MonimeServerSession;
+            existing.status = eventType.includes('cancelled') ? 'cancelled' : 'expired';
+            existing.updated_at = new Date().toISOString();
+            await sessionRef.set(existing, { merge: true });
+            serverMonimeSessions.set(sessionId, existing);
+          }
         }
       }
 
