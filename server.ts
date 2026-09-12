@@ -250,10 +250,20 @@ async function startServer() {
       const cancelUrl = new URL('/checkout/cancel', appUrl);
       cancelUrl.searchParams.set('orderId', String(orderId));
 
-      const monimeToken = (process.env.MONIME_API_TOKEN || '').trim();
-      const monimeSpaceId = (process.env.MONIME_SPACE_ID || '').trim();
-      if (!monimeToken || !monimeSpaceId) {
-        return res.status(503).json({ error: 'Monime payment service is not configured on the server.' });
+      const db = getFirestoreDb();
+      if (!db) return res.status(503).json({ error: 'Durable configuration storage is not configured.' });
+      const tenantId = String(req.user?.claims?.tenantId || req.user?.claims?.tenant_id || '').trim();
+      if (!tenantId) return res.status(400).json({ error: 'Tenant identity is required.' });
+      const gatewaySnap = await db.collection('tenants').doc(tenantId).collection('payment_gateways').doc('monime').get();
+      if (!gatewaySnap.exists) {
+        return res.status(503).json({ error: 'This tenant has not configured Monime payments.' });
+      }
+      const gateway = gatewaySnap.data() || {};
+      const monimeToken = String(gateway.monimeAccessToken || '').trim();
+      const monimeSpaceId = String(gateway.monimeSpaceId || '').trim();
+      const configuredWebhookSecret = String(gateway.webhookSecret || '').trim();
+      if (!monimeToken || !monimeSpaceId || configuredWebhookSecret.length < 32) {
+        return res.status(503).json({ error: 'This tenant has incomplete Monime payment configuration.' });
       }
       const monimeVersion = 'caph.2025-08-23';
       const monimeApiUrl = (process.env.MONIME_API_URL || 'https://api.monime.io').replace(/\/+$/, '');
@@ -449,9 +459,14 @@ async function startServer() {
   // Monime Webhook Receiver Endpoint
   app.post('/api/monime/webhook', express.raw({ type: 'application/json', limit: '256kb' }), async (req: any, res) => {
     try {
-      const secret = (process.env.MONIME_WEBHOOK_SECRET || '').trim();
-      if (!secret || secret.length < 32) {
-        return res.status(503).json({ error: 'Monime webhook verification is not configured.' });
+      const db = getFirestoreDb();
+      if (!db) return res.status(503).json({ error: 'Durable webhook storage is not configured.' });
+      const tenantId = String(req.headers['x-tenant-id'] || '').trim();
+      if (!tenantId) return res.status(400).json({ error: 'Webhook tenant identifier is required.' });
+      const gatewaySnap = await db.collection('tenants').doc(tenantId).collection('payment_gateways').doc('monime').get();
+      const secret = String(gatewaySnap.data()?.webhookSecret || '').trim();
+      if (!gatewaySnap.exists || secret.length < 32) {
+        return res.status(503).json({ error: 'Monime webhook verification is not configured for this tenant.' });
       }
 
       const signatureHeader = String(req.headers['monime-signature'] || '');
@@ -488,11 +503,7 @@ async function startServer() {
         return res.status(400).json({ error: 'Webhook event ID is required.' });
       }
 
-      const db = getFirestoreDb();
-      if (!db) {
-        return res.status(503).json({ error: 'Durable webhook storage is not configured.' });
-      }
-      const eventRef = db.collection('monime_webhook_events').doc(eventId);
+      const eventRef = db.collection('monime_webhook_events').doc(`${tenantId}_${eventId}`);
       const eventSnap = await eventRef.get();
       if (eventSnap.exists) {
         return res.status(200).json({ received: true, duplicate: true });
