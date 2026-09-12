@@ -1,7 +1,10 @@
 import express from 'express';
+import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import dotenv from 'dotenv';
+import { getApps, cert, initializeApp } from 'firebase-admin/app';
+import { getAuth } from 'firebase-admin/auth';
 import { GoogleGenAI } from '@google/genai';
 import { createServer as createViteServer } from 'vite';
 import { validateCartBackend, validateCouponAuthoritative, SERVER_PROMOTIONS_REGISTRY } from './src/server/cartValidator';
@@ -21,8 +24,23 @@ import {
 } from './src/server/tenantManager';
 import { INITIAL_PRODUCTS } from './src/data/mockData';
 import { slugify } from './src/utils/seoUtils';
+import { DEFAULT_ROLE_PERMISSIONS } from './src/utils/permissions';
 
 dotenv.config();
+
+declare global {
+  namespace Express {
+    interface Request {
+      user?: {
+        uid: string;
+        email: string | null;
+        emailVerified: boolean;
+        claims: Record<string, any>;
+        permissions?: string[];
+      };
+    }
+  }
+}
 
 const PORT = 3000;
 const HOST = '0.0.0.0';
@@ -51,6 +69,67 @@ async function startServer() {
   app.use(express.urlencoded({ extended: true, limit: '30mb' }));
 
   // Health check endpoint
+  // -----------------------------------------------------------------------------
+  // SECURITY MIDDLEWARE
+  // -----------------------------------------------------------------------------
+  // Sensitive business endpoints must fail closed until Firebase Admin
+  // authentication is wired in. Public storefront endpoints remain available.
+  function getFirebaseAdminAuth() {
+    if (getApps().length === 0) {
+      const projectId = process.env.FIREBASE_PROJECT_ID;
+      const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
+      const privateKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n');
+      if (!projectId || !clientEmail || !privateKey) {
+        return null;
+      }
+      initializeApp({
+        credential: cert({ projectId, clientEmail, privateKey }),
+      });
+    }
+    return getAuth();
+  }
+
+
+  const requirePermission = (permission: string) => (req: any, res: any, next: any) => {
+    const claims = req.user?.claims || {};
+    const role = typeof claims.role === 'string' ? claims.role : '';
+    const permissions = Array.isArray(claims.permissions)
+      ? claims.permissions
+      : (DEFAULT_ROLE_PERMISSIONS as Record<string, string[]>)[role] || [];
+    if (!permissions.includes(permission)) {
+      return res.status(403).json({ error: 'Insufficient permissions.' });
+    }
+    req.user.permissions = permissions;
+    return next();
+  };
+
+  const requireServerAuth = async (req: any, res: any, next: any) => {
+    const header = String(req.headers.authorization || '');
+    if (!header.startsWith('Bearer ')) {
+      return res.status(401).json({ error: 'Authentication required.' });
+    }
+    const token = header.slice('Bearer '.length).trim();
+    if (!token) {
+      return res.status(401).json({ error: 'Authentication required.' });
+    }
+    try {
+      const auth = getFirebaseAdminAuth();
+      if (!auth) {
+        return res.status(503).json({ error: 'Server authentication is not configured.' });
+      }
+      const decoded = await auth.verifyIdToken(token);
+      req.user = {
+        uid: decoded.uid,
+        email: decoded.email ?? null,
+        emailVerified: decoded.email_verified === true,
+        claims: decoded,
+      };
+      return next();
+    } catch {
+      return res.status(401).json({ error: 'Invalid or expired authentication token.' });
+    }
+  };
+
   app.get('/api/health', (req, res) => {
     res.json({
       status: 'ok',
@@ -512,6 +591,7 @@ async function startServer() {
 
   interface MonimeServerSession {
     order_id: string;
+    reservation_id?: string;
     monime_session_id: string;
     monime_order_number?: string;
     redirect_url?: string;
@@ -523,38 +603,173 @@ async function startServer() {
     updated_at: string;
   }
 
+  const getFirestoreDb = () => {
+    const projectId = process.env.FIREBASE_PROJECT_ID;
+    const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
+    const privateKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n');
+    if (!projectId || !clientEmail || !privateKey) return null;
+    const app = getApps().length ? getApps()[0] : initializeApp({
+      credential: cert({ projectId, clientEmail, privateKey }),
+    });
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { getFirestore } = require('firebase-admin/firestore');
+    return getFirestore(app);
+  };
+
   const serverMonimeSessions = new Map<string, MonimeServerSession>();
 
-  // Monime Checkout Session Creation Endpoint
-  app.post('/api/monime/create-checkout-session', async (req, res) => {
+
+  // Tenant-scoped Monime configuration. Secrets live only in this server-side
+  // collection and are never returned to the browser.
+  app.get('/api/monime/config', requireServerAuth, requirePermission('system.settings'), async (req: any, res) => {
     try {
-      const { orderId, items, successUrl, cancelUrl, customerName, spaceId: customSpaceId, token: customToken, currency = 'SLE' } = req.body || {};
+      const db = getFirestoreDb();
+      if (!db) return res.status(503).json({ error: 'Durable configuration storage is not configured.' });
+      const tenantId = String(req.user?.claims?.tenantId || req.user?.claims?.tenant_id || '').trim();
+      if (!tenantId) return res.status(400).json({ error: 'Tenant identity is required.' });
+      const snap = await db.collection('tenants').doc(tenantId).collection('payment_gateways').doc('monime').get();
+      if (!snap.exists) return res.json({ configured: false, provider: 'monime' });
+      const data = snap.data() || {};
+      return res.json({
+        configured: Boolean(data.monimeSpaceId && data.monimeAccessToken && data.webhookSecret),
+        provider: 'monime',
+        environment: data.monimeMode === 'live' ? 'production' : 'sandbox',
+        spaceId: data.monimeSpaceId || null,
+        webhookConfigured: Boolean(data.webhookSecret),
+        preferredChannel: data.monimePreferredChannel || 'all',
+        version: data.monimeVersion || 'caph.2025-08-23',
+      });
+    } catch {
+      return res.status(500).json({ error: 'Unable to load Monime configuration.' });
+    }
+  });
+
+  app.put('/api/monime/config', requireServerAuth, requirePermission('system.settings'), async (req: any, res) => {
+    try {
+      const db = getFirestoreDb();
+      if (!db) return res.status(503).json({ error: 'Durable configuration storage is not configured.' });
+      const tenantId = String(req.user?.claims?.tenantId || req.user?.claims?.tenant_id || '').trim();
+      if (!tenantId) return res.status(400).json({ error: 'Tenant identity is required.' });
+      const body = req.body || {};
+      const spaceId = String(body.monimeSpaceId || '').trim();
+      const accessToken = String(body.monimeAccessToken || '').trim();
+      const webhookSecret = String(body.webhookSecret || '').trim();
+      const mode = body.monimeMode === 'live' ? 'live' : 'test';
+      if (!spaceId || !accessToken || webhookSecret.length < 32) {
+        return res.status(400).json({
+          error: 'Monime Space ID, API access token, and a webhook secret of at least 32 characters are required.'
+        });
+      }
+      if (accessToken.length < 20) {
+        return res.status(400).json({ error: 'Monime API access token appears invalid.' });
+      }
+      if (spaceId.length > 200 || accessToken.length > 1000 || webhookSecret.length > 1000) {
+        return res.status(400).json({ error: 'Monime configuration value is too long.' });
+      }
+      await db.collection('tenants').doc(tenantId).collection('payment_gateways').doc('monime').set({
+        provider: 'monime',
+        monimeSpaceId: spaceId,
+        monimeAccessToken: accessToken,
+        webhookSecret,
+        monimeMode: mode,
+        monimePreferredChannel: ['all', 'mobile_money', 'card', 'bank_transfer', 'payment_code'].includes(body.monimePreferredChannel) ? body.monimePreferredChannel : 'all',
+        monimeVersion: 'caph.2025-08-23',
+        updatedAt: new Date().toISOString(),
+        updatedBy: req.user.uid,
+      }, { merge: true });
+      return res.json({ success: true, configured: true, environment: mode === 'live' ? 'production' : 'sandbox', spaceId });
+    } catch {
+      return res.status(500).json({ error: 'Unable to save Monime configuration.' });
+    }
+  });
+
+  // Monime Checkout Session Creation Endpoint
+  app.post('/api/monime/create-checkout-session', requireServerAuth, requirePermission('payments.create'), async (req, res) => {
+    try {
+      const { orderId, items, customerName, currency = 'SLE', reservationId } = req.body || {};
 
       if (!orderId || !items || !Array.isArray(items) || items.length === 0) {
         return res.status(400).json({ error: 'Missing required fields: orderId, items' });
       }
 
-      const monimeToken = customToken || process.env.MONIME_API_TOKEN || 'monime_test_tok_9948201948';
-      const monimeSpaceId = customSpaceId || process.env.MONIME_SPACE_ID || 'monime_spc_sl_nexus';
+      // Rebuild checkout pricing exclusively from the server catalog. Browser
+      // prices, names, images, and catalog overrides are never authoritative.
+      const validationResult = validateCartBackend({
+        items: items.map((item: any) => ({
+          productId: String(item.productId || item.id || ''),
+          variantSku: item.variantSku ? String(item.variantSku) : undefined,
+          quantity: Number(item.quantity),
+          clientPrice: typeof item.price === 'number' ? item.price : undefined,
+        })),
+      });
+      if (!validationResult.success) {
+        return res.status(400).json({
+          error: 'Cart validation failed.',
+          details: validationResult.errors,
+          warnings: validationResult.warnings,
+        });
+      }
+
+      const appUrl = (process.env.APP_URL || '').trim().replace(/\/+$/, '');
+      if (!appUrl) {
+        return res.status(503).json({ error: 'APP_URL is not configured on the server.' });
+      }
+      const successUrl = new URL('/checkout/success', appUrl);
+      successUrl.searchParams.set('orderId', String(orderId));
+      const cancelUrl = new URL('/checkout/cancel', appUrl);
+      cancelUrl.searchParams.set('orderId', String(orderId));
+
+      const db = getFirestoreDb();
+      if (!db) return res.status(503).json({ error: 'Durable configuration storage is not configured.' });
+      const tenantId = String(req.user?.claims?.tenantId || req.user?.claims?.tenant_id || '').trim();
+      if (!tenantId) return res.status(400).json({ error: 'Tenant identity is required.' });
+      if (reservationId) {
+        const reservationSnap = await db.collection('inventory_reservations').doc(String(reservationId)).get();
+        if (!reservationSnap.exists) {
+          return res.status(400).json({ error: 'Inventory reservation was not found.' });
+        }
+        const reservation = reservationSnap.data() || {};
+        const reservationTenant = String(reservation.tenantId || '');
+        const reservationOrderId = String(reservation.orderId || reservation.order_id || '');
+        const reservationStatus = String(reservation.status || '');
+        if (reservationTenant !== tenantId || reservationOrderId !== String(orderId) || reservationStatus !== 'active') {
+          return res.status(409).json({ error: 'Inventory reservation is invalid for this order and tenant.' });
+        }
+        const expiresAt = new Date(String(reservation.expiresAt || 0)).getTime();
+        if (Number.isFinite(expiresAt) && expiresAt <= Date.now()) {
+          return res.status(409).json({ error: 'Inventory reservation has expired.' });
+        }
+      }
+
+      const gatewaySnap = await db.collection('tenants').doc(tenantId).collection('payment_gateways').doc('monime').get();
+      if (!gatewaySnap.exists) {
+        return res.status(503).json({ error: 'This tenant has not configured Monime payments.' });
+      }
+      const gateway = gatewaySnap.data() || {};
+      const monimeToken = String(gateway.monimeAccessToken || '').trim();
+      const monimeSpaceId = String(gateway.monimeSpaceId || '').trim();
+      const configuredWebhookSecret = String(gateway.webhookSecret || '').trim();
+      if (!monimeToken || !monimeSpaceId || configuredWebhookSecret.length < 32) {
+        return res.status(503).json({ error: 'This tenant has incomplete Monime payment configuration.' });
+      }
       const monimeVersion = 'caph.2025-08-23';
-      const monimeApiUrl = process.env.MONIME_API_URL || 'https://api.monime.io';
+      const monimeApiUrl = (process.env.MONIME_API_URL || 'https://api.monime.io').replace(/\/+$/, '');
 
       // Build line items for Monime (minor units = cents, e.g. SLE * 100)
-      const lineItems = items.map((item: any) => ({
+      const lineItems = validationResult.items.map((item) => ({
         type: 'custom',
-        name: item.name,
-        description: item.description || undefined,
-        quantity: item.quantity || 1,
+        name: item.productName,
+        quantity: item.quantity,
         price: {
-          currency: currency || 'SLE',
-          value: Math.round((Number(item.price) || 0) * 100),
+          currency: validationResult.pricing.currency,
+          value: Math.round(item.serverUnitPrice * 100),
         },
-        reference: item.sku || undefined,
-        images: item.image ? [item.image] : undefined,
+        reference: item.variantSku || item.productId,
+        images: item.imageUrl ? [item.imageUrl] : undefined,
       }));
 
-      const totalAmount = items.reduce((sum: number, item: any) => sum + ((Number(item.price) || 0) * (Number(item.quantity) || 1)), 0);
-      const idempotencyKey = `nexus-${orderId}-${Date.now()}`;
+      const totalAmount = validationResult.pricing.grandTotal;
+      const idempotencyKey = `nexus-${crypto.createHash('sha256').update(String(orderId)).digest('hex').slice(0, 32)}`;
 
       let session: any = null;
 
@@ -590,31 +805,31 @@ async function startServer() {
         console.warn('[Monime API Network Notice] Using high-availability sandbox session generator:', networkErr?.message);
       }
 
-      // If session not created by external network (e.g. sandbox or token placeholder), generate compliant session
+      // Never fabricate a successful payment session when Monime is unavailable.
       if (!session) {
-        const pseudoId = `cs_monime_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-        session = {
-          id: pseudoId,
-          orderNumber: `MNM-${Date.now().toString().slice(-6)}`,
-          redirectUrl: `https://checkout.monime.io/pay/${pseudoId}?ref=${encodeURIComponent(orderId)}`,
-          status: 'pending'
-        };
+        return res.status(502).json({ error: 'Unable to create Monime checkout session.' });
       }
 
-      // Store session in server memory
       const sessionRecord: MonimeServerSession = {
         order_id: orderId,
+        ...(reservationId ? { reservation_id: String(reservationId) } : {}),
         monime_session_id: session.id,
         monime_order_number: session.orderNumber,
         redirect_url: session.redirectUrl,
         status: session.status || 'pending',
         amount: totalAmount,
-        currency: currency || 'SLE',
-        line_items: items,
+        currency: validationResult.pricing.currency,
+        line_items: validationResult.items,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       };
 
+      await db.collection('monime_sessions').doc(String(session.id)).set({
+        ...sessionRecord,
+        updated_at: new Date().toISOString(),
+      }, { merge: true });
+
+      // Keep a short-lived local cache only for compatibility; Firestore is authoritative.
       serverMonimeSessions.set(session.id, sessionRecord);
 
       return res.status(200).json({
@@ -632,11 +847,17 @@ async function startServer() {
   });
 
   // Monime Test Connection & Status Verification Endpoint
-  app.post('/api/monime/test-connection', async (req, res) => {
+  app.post('/api/monime/test-connection', requireServerAuth, requirePermission('system.sync'), async (req, res) => {
     try {
-      const { spaceId, token, apiUrl = 'https://api.monime.io' } = req.body || {};
-      const effectiveToken = (token || process.env.MONIME_API_TOKEN || '').trim();
-      const effectiveSpaceId = (spaceId || process.env.MONIME_SPACE_ID || '').trim();
+      const db = getFirestoreDb();
+      if (!db) return res.status(503).json({ success: false, message: 'Durable configuration storage is not configured.' });
+      const tenantId = String(req.user?.claims?.tenantId || req.user?.claims?.tenant_id || '').trim();
+      if (!tenantId) return res.status(400).json({ success: false, message: 'Tenant identity is required.' });
+      const gatewaySnap = await db.collection('tenants').doc(tenantId).collection('payment_gateways').doc('monime').get();
+      const gateway = gatewaySnap.data() || {};
+      const effectiveToken = String(gateway.monimeAccessToken || '').trim();
+      const effectiveSpaceId = String(gateway.monimeSpaceId || '').trim();
+      const apiUrl = (process.env.MONIME_API_URL || 'https://api.monime.io').replace(/\/+$/, '');
 
       if (!effectiveSpaceId) {
         return res.status(400).json({ 
@@ -699,9 +920,9 @@ async function startServer() {
           pingSuccess = true;
         }
       } catch (netErr: any) {
-        statusCode = 200;
-        note = `Monime local validation active. Space ID '${effectiveSpaceId}' & token format verified for sandbox / live checkout orchestration.`;
-        pingSuccess = true;
+        statusCode = 503;
+        note = 'Unable to reach the configured Monime API. Credentials were not verified.';
+        pingSuccess = false;
       }
 
       const latencyMs = Date.now() - startTime;
@@ -726,49 +947,280 @@ async function startServer() {
   });
 
   // Monime Webhook Receiver Endpoint
-  app.post('/api/monime/webhook', async (req, res) => {
+  app.post('/api/monime/webhook/:tenantId', express.raw({ type: 'application/json', limit: '256kb' }), async (req: any, res) => {
     try {
-      const event = req.body || {};
-      const eventType = event.type || event.eventType || 'checkout_session.completed';
-      const data = event.data || event.result || event;
+      const db = getFirestoreDb();
+      if (!db) return res.status(503).json({ error: 'Durable webhook storage is not configured.' });
+      const tenantId = String(req.params.tenantId || '').trim();
+      if (!tenantId || !/^[A-Za-z0-9_-]{1,100}$/.test(tenantId)) return res.status(400).json({ error: 'Invalid webhook tenant identifier.' });
+      const gatewaySnap = await db.collection('tenants').doc(tenantId).collection('payment_gateways').doc('monime').get();
+      const secret = String(gatewaySnap.data()?.webhookSecret || '').trim();
+      if (!gatewaySnap.exists || secret.length < 32) {
+        return res.status(503).json({ error: 'Monime webhook verification is not configured for this tenant.' });
+      }
 
-      console.log(`[Monime Webhook] Received event: ${eventType}`, data);
+      const signatureHeader = String(req.headers['monime-signature'] || '');
+      if (!signatureHeader) {
+        return res.status(401).json({ error: 'Missing Monime-Signature.' });
+      }
+
+      const rawBody = Buffer.isBuffer(req.body) ? req.body : Buffer.from(String(req.body || ''), 'utf8');
+      const timestampMatch = signatureHeader.match(/(?:^|,)t=(\\d+)/);
+      const signatureMatch = signatureHeader.match(/(?:^|,)v1=([a-fA-F0-9]+)/);
+      if (!timestampMatch || !signatureMatch) {
+        return res.status(401).json({ error: 'Invalid Monime-Signature format.' });
+      }
+
+      const timestamp = Number(timestampMatch[1]);
+      if (!Number.isSafeInteger(timestamp)) {
+        return res.status(401).json({ error: 'Invalid webhook timestamp.' });
+      }
+      const timestampMs = timestamp < 100000000000 ? timestamp * 1000 : timestamp;
+      if (Math.abs(Date.now() - timestampMs) > 5 * 60 * 1000) {
+        return res.status(401).json({ error: 'Expired webhook signature.' });
+      }
+
+      const signedPayload = Buffer.concat([Buffer.from(String(timestamp)), Buffer.from('.'), rawBody]);
+      const expected = crypto.createHmac('sha256', secret).update(signedPayload).digest('hex');
+      const provided = signatureMatch[1].toLowerCase();
+      if (provided.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(provided), Buffer.from(expected))) {
+        return res.status(401).json({ error: 'Invalid webhook signature.' });
+      }
+
+      const event = JSON.parse(rawBody.toString('utf8'));
+      const eventId = String(event.id || event.eventId || event.data?.id || '');
+      if (!eventId) {
+        return res.status(400).json({ error: 'Webhook event ID is required.' });
+      }
+
+      const eventRef = db.collection('monime_webhook_events').doc(`${tenantId}_${eventId}`);
+      const eventSnap = await eventRef.get();
+      if (eventSnap.exists) {
+        const existingEvent = eventSnap.data() || {};
+        if (String(existingEvent.status || '') === 'processed') {
+          return res.status(200).json({ received: true, duplicate: true });
+        }
+        const receivedAt = new Date(String(existingEvent.received_at || 0)).getTime();
+        if (Number.isFinite(receivedAt) && Date.now() - receivedAt < 10 * 60 * 1000) {
+          return res.status(202).json({ received: true, processing: true });
+        }
+        await eventRef.set({ status: 'processing', retry_started_at: new Date().toISOString(), retry_count: Number(existingEvent.retry_count || 0) + 1 }, { merge: true });
+      } else {
+        await eventRef.create({ event_id: eventId, received_at: new Date().toISOString(), type: String(event.type || event.eventType || ''), status: 'processing', retry_count: 0 });
+      }
+
+      const eventType = event.type || event.eventType;
+      const data = event.data || event.result || {};
+      console.log('[Monime Webhook] Verified event:', eventType, eventId);
 
       if (eventType === 'checkout_session.completed' || eventType === 'payment.completed') {
         const sessionId = data.id || data.sessionId;
         const orderNumber = data.orderNumber || data.monime_order_number;
-        const reference = data.reference || data.orderId;
+        if (sessionId) {
+          const sessionRef = db.collection('monime_sessions').doc(String(sessionId));
+          const sessionSnap = await sessionRef.get();
+          if (sessionSnap.exists) {
+            const existing = sessionSnap.data() as MonimeServerSession;
+            existing.status = 'completed';
+            existing.updated_at = new Date().toISOString();
+            if (orderNumber) existing.monime_order_number = orderNumber;
+            const settlementRef = db.collection('payment_settlements').doc(String(tenantId) + '_' + String(sessionId));
+            await db.runTransaction(async (tx: any) => {
+              const settlementSnap = await tx.get(settlementRef);
+              if (settlementSnap.exists && settlementSnap.data()?.status === 'settled') return;
+              const freshSessionSnap = await tx.get(sessionRef);
+              if (!freshSessionSnap.exists) throw new Error('Payment session disappeared during settlement.');
+              const fresh = freshSessionSnap.data() as MonimeServerSession;
 
-        if (sessionId && serverMonimeSessions.has(sessionId)) {
-          const existing = serverMonimeSessions.get(sessionId)!;
-          existing.status = 'completed';
-          existing.updated_at = new Date().toISOString();
-          if (orderNumber) existing.monime_order_number = orderNumber;
-          serverMonimeSessions.set(sessionId, existing);
+              const webhookAmount = Number(data.amount?.value ?? data.amount ?? data.total?.value ?? NaN);
+              const webhookCurrency = String(data.currency || data.amount?.currency || '').trim();
+              if (Number.isFinite(webhookAmount) && Math.round(webhookAmount) !== Math.round(Number(fresh.amount) * 100) && webhookAmount !== Number(fresh.amount)) {
+                throw new Error('Monime webhook amount does not match the server payment session.');
+              }
+              if (webhookCurrency && webhookCurrency.toUpperCase() !== String(fresh.currency || '').toUpperCase()) {
+                throw new Error('Monime webhook currency does not match the server payment session.');
+              }
+
+              tx.set(sessionRef, {
+                status: 'completed',
+                updated_at: new Date().toISOString(),
+                ...(orderNumber ? { monime_order_number: orderNumber } : {}),
+              }, { merge: true });
+
+              const reservationId = String((fresh as any).reservation_id || '');
+              if (reservationId) {
+                const reservationRef = db.collection('inventory_reservations').doc(reservationId);
+                const reservationSnap = await tx.get(reservationRef);
+                if (reservationSnap.exists) {
+                  const reservation = reservationSnap.data() || {};
+                  if (String(reservation.status) === 'active') {
+                    const tenantReservation = String(reservation.tenantId || '');
+                    if (tenantReservation && tenantReservation !== tenantId) throw new Error('Inventory reservation belongs to another tenant.');
+                    const reservationExpiresAt = new Date(String(reservation.expiresAt || 0)).getTime();
+                    if (Number.isFinite(reservationExpiresAt) && reservationExpiresAt <= Date.now()) {
+                      throw new Error('Inventory reservation has expired.');
+                    }
+                    tx.set(reservationRef, {
+                      status: 'finalized',
+                      finalizedAt: new Date().toISOString(),
+                      finalizedByPaymentSession: String(sessionId),
+                      tenantId,
+                    }, { merge: true });
+                  } else if (String(reservation.status) !== 'finalized') {
+                    throw new Error('Inventory reservation is not active for payment settlement.');
+                  }
+                } else {
+                  throw new Error('Linked inventory reservation was not found.');
+                }
+              }
+
+              const orderId = String(fresh.order_id || '');
+              const reservationForStock = reservationId ? (await tx.get(db.collection('inventory_reservations').doc(reservationId))).data() : null;
+              if (reservationForStock && Array.isArray(reservationForStock.items)) {
+                const movementBase = String(tenantId) + '_' + String(sessionId);
+                const productDeltas = new Map<string, { total:number; variants:Map<string,number> }>();
+                for (const ri of reservationForStock.items) {
+                  const pid = String(ri.productId || '');
+                  const qty = Number(ri.quantity || 0);
+                  if (!pid || qty <= 0) continue;
+                  const current = productDeltas.get(pid) || { total: 0, variants: new Map<string,number>() };
+                  if (ri.variantSku) current.variants.set(String(ri.variantSku), (current.variants.get(String(ri.variantSku)) || 0) + qty);
+                  else current.total += qty;
+                  productDeltas.set(pid, current);
+                }
+
+                let movementIndex = 0;
+                for (const [productId, delta] of productDeltas) {
+                  const productRef = db.collection('products').doc(productId);
+                  const productSnap = await tx.get(productRef);
+                  if (!productSnap.exists) throw new Error('Product not found during inventory settlement: ' + productId);
+                  const product = productSnap.data() || {};
+                  const variants = Array.isArray(product.variants) ? product.variants.map((v:any) => ({...v})) : [];
+                  let productStock = Number(product.stock || 0);
+
+                  for (const [sku, qty] of delta.variants) {
+                    const idx = variants.findIndex((v:any) => String(v.sku || '') === sku);
+                    if (idx < 0) throw new Error('Variant not found during inventory settlement: ' + sku);
+                    const before = Number(variants[idx].stock || 0);
+                    if (before < qty) throw new Error('Insufficient stock during payment settlement for variant ' + sku);
+                    variants[idx].stock = before - qty;
+                    const movementId = movementBase + '_v_' + String(movementIndex++);
+                    tx.create(db.collection('stock_movements').doc(movementId), {
+                      id: movementId, tenantId, date: new Date().toISOString(), productId,
+                      productName: String(product.name || ''), sku, type: 'Online Sale',
+                      quantityChange: -qty, quantityBefore: before, quantityAfter: before - qty,
+                      unitCost: Number(variants[idx].cost ?? product.cost ?? 0),
+                      totalCostImpact: Number(variants[idx].cost ?? product.cost ?? 0) * qty,
+                      location: String(product.location || 'Main Warehouse / Storefront'),
+                      referenceDoc: orderId || String(sessionId), performedBy: 'Monime Payment Settlement',
+                      notes: 'Atomic inventory deduction for verified Monime payment settlement'
+                    });
+                  }
+
+                  if (delta.total > 0) {
+                    if (productStock < delta.total) throw new Error('Insufficient stock during payment settlement for product ' + productId);
+                    const before = productStock;
+                    productStock -= delta.total;
+                    const movementId = movementBase + '_p_' + String(movementIndex++);
+                    tx.create(db.collection('stock_movements').doc(movementId), {
+                      id: movementId, tenantId, date: new Date().toISOString(), productId,
+                      productName: String(product.name || ''), sku: String(product.sku || productId),
+                      type: 'Online Sale', quantityChange: -delta.total, quantityBefore: before,
+                      quantityAfter: productStock, unitCost: Number(product.cost || 0),
+                      totalCostImpact: Number(product.cost || 0) * delta.total,
+                      location: String(product.location || 'Main Warehouse / Storefront'),
+                      referenceDoc: orderId || String(sessionId), performedBy: 'Monime Payment Settlement',
+                      notes: 'Atomic inventory deduction for verified Monime payment settlement'
+                    });
+                  } else if (delta.variants.size > 0) {
+                    productStock = variants.reduce((sum:number, v:any) => sum + Number(v.stock || 0), 0);
+                  }
+
+                  tx.set(productRef, {
+                    stock: productStock,
+                    variants,
+                    ...(product.onHand !== undefined ? { onHand: productStock } : {}),
+                    ...(product.available !== undefined ? { available: Math.max(0, productStock - Number(product.reserved || product.reservedStock || 0)) } : {}),
+                    updatedAt: new Date().toISOString()
+                  }, { merge: true });
+                }
+              }
+
+              if (orderId) {
+                const orderRef = db.collection('orders').doc(orderId);
+                const orderSnap = await tx.get(orderRef);
+                if (orderSnap.exists) {
+                  const order = orderSnap.data() || {};
+                  const orderTenant = String(order.tenantId || order.tenant_id || '');
+                  if (orderTenant && orderTenant !== tenantId) throw new Error('Order belongs to another tenant.');
+                  const currentStatus = String(order.paymentStatus || order.payment_status || '').toLowerCase();
+                  if (!['paid', 'completed', 'settled'].includes(currentStatus)) {
+                    tx.set(orderRef, {
+                      paymentStatus: 'paid',
+                      payment_status: 'paid',
+                      paidAt: new Date().toISOString(),
+                      paymentProvider: 'monime',
+                      monimeSessionId: String(sessionId),
+                      tenantId,
+                    }, { merge: true });
+                  }
+                }
+              }
+
+              tx.create(settlementRef, {
+                tenantId,
+                sessionId: String(sessionId),
+                orderId: String(fresh.order_id || ''),
+                amount: fresh.amount,
+                currency: fresh.currency,
+                status: 'settled',
+                settledAt: new Date().toISOString(),
+                webhookEventId: eventId,
+              });
+            });
+            existing.status = 'completed';
+            existing.updated_at = new Date().toISOString();
+            if (orderNumber) existing.monime_order_number = orderNumber;
+            serverMonimeSessions.set(sessionId, existing);
+            await eventRef.set({ status: 'processed', processed_at: new Date().toISOString() }, { merge: true });
+          }
         }
       } else if (eventType === 'checkout_session.cancelled' || eventType === 'checkout_session.expired') {
         const sessionId = data.id || data.sessionId;
-        if (sessionId && serverMonimeSessions.has(sessionId)) {
-          const existing = serverMonimeSessions.get(sessionId)!;
-          existing.status = eventType.includes('cancelled') ? 'cancelled' : 'expired';
-          existing.updated_at = new Date().toISOString();
-          serverMonimeSessions.set(sessionId, existing);
+        if (sessionId) {
+          const sessionRef = db.collection('monime_sessions').doc(String(sessionId));
+          const sessionSnap = await sessionRef.get();
+          if (sessionSnap.exists) {
+            const existing = sessionSnap.data() as MonimeServerSession;
+            existing.status = eventType.includes('cancelled') ? 'cancelled' : 'expired';
+            existing.updated_at = new Date().toISOString();
+            await sessionRef.set(existing, { merge: true });
+            serverMonimeSessions.set(sessionId, existing);
+          }
         }
       }
 
       return res.status(200).json({ received: true, eventType });
     } catch (err: any) {
       console.error('Monime webhook error:', err);
-      return res.status(500).json({ error: err?.message || 'Internal server error' });
+      return res.status(400).json({ error: 'Invalid webhook payload.' });
     }
   });
 
   // Get active Monime Sessions Endpoint
-  app.get('/api/monime/sessions', (req, res) => {
-    return res.json({
-      success: true,
-      sessions: Array.from(serverMonimeSessions.values())
-    });
+  app.get('/api/monime/sessions', requireServerAuth, requirePermission('payments.create'), async (req, res) => {
+    try {
+      const db = getFirestoreDb();
+      if (!db) return res.status(503).json({ error: 'Durable payment storage is not configured.' });
+      const snapshot = await db.collection('monime_sessions').orderBy('created_at', 'desc').limit(100).get();
+      return res.json({
+        success: true,
+        sessions: snapshot.docs.map(doc => doc.data())
+      });
+    } catch (err: any) {
+      console.error('Monime sessions query error:', err);
+      return res.status(500).json({ error: 'Unable to load payment sessions.' });
+    }
   });
 
   // =========================================================================
@@ -778,7 +1230,11 @@ async function startServer() {
   // =========================================================================
   app.post('/api/cart/validate', (req, res) => {
     try {
-      const payload = req.body || {};
+      const payload = { ...(req.body || {}) };
+      // Never allow the browser to replace the server catalog or promotion registry.
+      delete payload.productsCatalog;
+      delete payload.customersCatalog;
+      delete payload.couponsCatalog;
       const validationResult = validateCartBackend(payload);
 
       if (!validationResult.success) {
@@ -934,7 +1390,7 @@ async function startServer() {
   // =========================================================================
 
   // 1. Reserve Inventory (Locks items with TTL before payment)
-  app.post('/api/inventory/reserve', (req, res) => {
+  app.post('/api/inventory/reserve', requireServerAuth, requirePermission('inventory.view'), async (req, res) => {
     try {
       const { items, customerId, customerName, orderId, ttlMinutes, productsCatalog } = req.body || {};
 
@@ -945,7 +1401,7 @@ async function startServer() {
         });
       }
 
-      const result = reserveInventoryServer({
+      const result = await reserveInventoryServer({
         items,
         customerId,
         customerName,
@@ -969,11 +1425,11 @@ async function startServer() {
   });
 
   // 2. Finalize Reservation (Post-payment stock commit)
-  app.post('/api/inventory/reservations/:id/finalize', (req, res) => {
+  app.post('/api/inventory/reservations/:id/finalize', requireServerAuth, requirePermission('inventory.adjust'), async (req, res) => {
     try {
       const reservationId = req.params.id;
       const { orderId } = req.body || {};
-      const result = finalizeReservationServer(reservationId, orderId);
+      const result = await finalizeReservationServer(reservationId, orderId);
 
       if (!result.success) {
         return res.status(400).json(result);
@@ -986,11 +1442,11 @@ async function startServer() {
   });
 
   // 3. Release Reservation (Rollback on cancelled/failed checkout)
-  app.post('/api/inventory/reservations/:id/release', (req, res) => {
+  app.post('/api/inventory/reservations/:id/release', requireServerAuth, requirePermission('inventory.adjust'), async (req, res) => {
     try {
       const reservationId = req.params.id;
       const { reason } = req.body || {};
-      const result = releaseReservationServer(reservationId, reason);
+      const result = await releaseReservationServer(reservationId, reason);
 
       return res.json(result);
     } catch (err: any) {
@@ -999,9 +1455,9 @@ async function startServer() {
   });
 
   // 4. Get Active Unexpired Reservations
-  app.get('/api/inventory/reservations/active', (req, res) => {
+  app.get('/api/inventory/reservations/active', requireServerAuth, requirePermission('inventory.view'), async (req, res) => {
     try {
-      const active = getActiveReservationsServer();
+      const active = await getActiveReservationsServer();
       return res.json({
         success: true,
         count: active.length,
@@ -1369,7 +1825,7 @@ async function startServer() {
   });
 
   // Moderate Review endpoint (Approve, Hide, Flag)
-  app.patch('/api/reviews/:id/moderate', (req, res) => {
+  app.patch('/api/reviews/:id/moderate',  requireServerAuth, requirePermission('ecommerce.manage'),(req, res) => {
     try {
       const { id } = req.params;
       const { status, flagReason } = req.body || {};
@@ -1403,7 +1859,7 @@ async function startServer() {
   });
 
   // Admin Respond to Review endpoint
-  app.post('/api/reviews/:id/respond', (req, res) => {
+  app.post('/api/reviews/:id/respond',  requireServerAuth, requirePermission('ecommerce.manage'),(req, res) => {
     try {
       const { id } = req.params;
       const { text, responderName = 'Store Management', responderRole = 'Customer Experience' } = req.body || {};
@@ -1436,7 +1892,7 @@ async function startServer() {
   });
 
   // AI Product Photo Extraction Endpoint (Supports Single & Multi-Angle Product Photos)
-  app.post('/api/extract-product-photo', async (req, res) => {
+  app.post('/api/extract-product-photo',  requireServerAuth, requirePermission('inventory.create'),async (req, res) => {
     try {
       const { 
         imageBase64, 
@@ -1674,7 +2130,7 @@ Ensure the barcode digits are transcribed with 100% precision. Return raw JSON w
   });
 
   // Computer Vision Serial Number & Batch/Lot OCR Detection Endpoint
-  app.post('/api/vision-serial-batch', async (req, res) => {
+  app.post('/api/vision-serial-batch',  requireServerAuth, requirePermission('inventory.create'),async (req, res) => {
     try {
       const { imageBase64, mimeType = 'image/jpeg', targetMode = 'auto', contextHint } = req.body;
 

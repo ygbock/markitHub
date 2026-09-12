@@ -246,80 +246,19 @@ export default function App() {
     };
   }, []);
 
-  // Handle customer return from Monime Hosted Checkout redirect
+  // Payment completion is authoritative from the server/webhook.
+  // Never mark an order paid or decrement inventory from a browser redirect.
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const urlParams = new URLSearchParams(window.location.search);
-    const monimeSuccess = urlParams.get('monime_success');
     const returnOrderId = urlParams.get('order_id');
+    if (!returnOrderId) return;
 
-    if (monimeSuccess === 'true' && returnOrderId) {
-      const targetOrder = orders.find(o => o.id === returnOrderId || o.orderNumber === returnOrderId);
-      if (targetOrder && targetOrder.status !== 'Completed') {
-        const completedOrder: Order = {
-          ...targetOrder,
-          status: 'Completed',
-          paymentMethod: 'Monime Multi-Channel Gateway (Settled)'
-        };
-        saveOrderToDB(completedOrder).catch(() => {});
-        setOrders(prev => prev.map(o => (o.id === returnOrderId || o.orderNumber === returnOrderId) ? completedOrder : o));
-
-        // Deduct inventory stock
-        setProducts(prev => {
-          const updated = prev.map(p => {
-            let deductQty = 0;
-            targetOrder.items.forEach((item: any) => {
-              if (item.productId === p.id) deductQty += item.quantity;
-              if (item.product && item.product.productType === 'Bundle' && item.product.bundleKitItems) {
-                const kitItem = item.product.bundleKitItems.find((b: any) => b.productId === p.id);
-                if (kitItem) deductQty += item.quantity * kitItem.quantity;
-              }
-            });
-
-            if (deductQty > 0) {
-              return { 
-                ...p, 
-                stock: Math.max(0, p.stock - deductQty), 
-                salesCount: (p.salesCount || 0) + deductQty 
-              };
-            }
-            return p;
-          });
-          localStorage.setItem('nexus_products', JSON.stringify(updated));
-          return updated;
-        });
-
-        // Award loyalty points to customer
-        const pointsGained = Math.round(targetOrder.total / 10);
-        setCustomers(prev => {
-          const updated = prev.map(c => {
-            if (c.id === targetOrder.customerId || c.name === targetOrder.customerName) {
-              return {
-                ...c,
-                loyaltyPoints: c.loyaltyPoints + pointsGained,
-                segment: c.loyaltyPoints + pointsGained > 300 ? ('VIP' as const) : ('Regular' as const),
-                purchaseHistoryIds: [...(c.purchaseHistoryIds || []), targetOrder.id]
-              };
-            }
-            return c;
-          });
-          localStorage.setItem('nexus_customers', JSON.stringify(updated));
-          return updated;
-        });
-
-        const logs = createAuditRecord(
-          'Monime Payment Completed',
-          'Billing',
-          `Monime hosted checkout successfully settled for order ${returnOrderId}.`
-        );
-        saveToLocal(products, customers, orders, logs);
-      }
-
-      // Clean URL params quietly
-      const cleanUrl = window.location.pathname;
-      window.history.replaceState({}, document.title, cleanUrl);
-    }
-  }, [orders]);
+    // The success page is informational only. Firestore subscriptions will
+    // reflect the verified server-side settlement when it has completed.
+    const cleanUrl = window.location.pathname;
+    window.history.replaceState({}, document.title, cleanUrl);
+  }, []);
 
   const handleSaveCategory = async (category: Category) => {
     setCategories((prev) => {
