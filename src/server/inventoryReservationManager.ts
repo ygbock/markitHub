@@ -1,5 +1,9 @@
 import { InventoryReservation, InventoryReservationItem, Product, CartItem } from '../types';
 
+// NOTE: Reservations are still in-memory in this module. Production checkout
+// should migrate reservation state to Firestore transactions before launch.
+// This explicit marker prevents treating this module as durable inventory.
+
 // In-memory server-authoritative reservations registry
 const SERVER_RESERVATIONS_STORE = new Map<string, InventoryReservation>();
 
