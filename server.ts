@@ -217,7 +217,7 @@ async function startServer() {
   // Monime Checkout Session Creation Endpoint
   app.post('/api/monime/create-checkout-session', requireServerAuth, requirePermission('payments.create'), async (req, res) => {
     try {
-      const { orderId, items, customerName, currency = 'SLE' } = req.body || {};
+      const { orderId, items, customerName, currency = 'SLE', reservationId } = req.body || {};
 
       if (!orderId || !items || !Array.isArray(items) || items.length === 0) {
         return res.status(400).json({ error: 'Missing required fields: orderId, items' });
@@ -325,6 +325,7 @@ async function startServer() {
 
       const sessionRecord: MonimeServerSession = {
         order_id: orderId,
+        ...(reservationId ? { reservation_id: String(reservationId) } : {}),
         monime_session_id: session.id,
         monime_order_number: session.orderNumber,
         redirect_url: session.redirectUrl,
