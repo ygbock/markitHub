@@ -715,6 +715,7 @@ async function startServer() {
             existing.updated_at = new Date().toISOString();
             if (orderNumber) existing.monime_order_number = orderNumber;
             serverMonimeSessions.set(sessionId, existing);
+            await eventRef.set({ status: 'processed', processed_at: new Date().toISOString() }, { merge: true });
           }
         }
       } else if (eventType === 'checkout_session.cancelled' || eventType === 'checkout_session.expired') {
