@@ -135,6 +135,19 @@ async function startServer() {
     updated_at: string;
   }
 
+  const getFirestoreDb = () => {
+    const projectId = process.env.FIREBASE_PROJECT_ID;
+    const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
+    const privateKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n');
+    if (!projectId || !clientEmail || !privateKey) return null;
+    const app = getApps().length ? getApps()[0] : initializeApp({
+      credential: cert({ projectId, clientEmail, privateKey }),
+    });
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { getFirestore } = require('firebase-admin/firestore');
+    return getFirestore(app);
+  };
+
   const serverMonimeSessions = new Map<string, MonimeServerSession>();
 
   // Monime Checkout Session Creation Endpoint
@@ -236,7 +249,6 @@ async function startServer() {
         return res.status(502).json({ error: 'Unable to create Monime checkout session.' });
       }
 
-      // Store session in server memory
       const sessionRecord: MonimeServerSession = {
         order_id: orderId,
         monime_session_id: session.id,
@@ -244,12 +256,22 @@ async function startServer() {
         redirect_url: session.redirectUrl,
         status: session.status || 'pending',
         amount: totalAmount,
-        currency: currency || 'SLE',
-        line_items: items,
+        currency: validationResult.pricing.currency,
+        line_items: validationResult.items,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       };
 
+      const db = getFirestoreDb();
+      if (!db) {
+        return res.status(503).json({ error: 'Durable payment storage is not configured.' });
+      }
+      await db.collection('monime_sessions').doc(String(session.id)).set({
+        ...sessionRecord,
+        updated_at: new Date().toISOString(),
+      }, { merge: true });
+
+      // Keep a short-lived local cache only for compatibility; Firestore is authoritative.
       serverMonimeSessions.set(session.id, sessionRecord);
 
       return res.status(200).json({
