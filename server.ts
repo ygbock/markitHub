@@ -689,22 +689,34 @@ async function startServer() {
       const accessToken = String(body.monimeAccessToken || '').trim();
       const webhookSecret = String(body.webhookSecret || '').trim();
       const mode = body.monimeMode === 'live' ? 'live' : 'test';
-      if (!spaceId || !accessToken || webhookSecret.length < 32) {
-        return res.status(400).json({
-          error: 'Monime Space ID, API access token, and a webhook secret of at least 32 characters are required.'
-        });
+      if (!/^spc-[A-Za-z0-9_-]{3,64}$/.test(spaceId)) {
+        return res.status(400).json({ error: 'Monime Space ID must match the required spc-... format.' });
       }
-      if (accessToken.length < 20) {
+      const existingRef = db.collection('tenants').doc(tenantId).collection('payment_gateways').doc('monime');
+      const existingSnap = await existingRef.get();
+      const existing = existingSnap.data() || {};
+      const hasExistingToken = Boolean(existing.monimeAccessToken);
+      const hasExistingWebhookSecret = Boolean(existing.webhookSecret);
+      if (!accessToken && !hasExistingToken) {
+        return res.status(400).json({ error: 'A Monime API access token is required for initial setup.' });
+      }
+      if (!webhookSecret && !hasExistingWebhookSecret) {
+        return res.status(400).json({ error: 'A webhook verification secret of at least 32 characters is required for initial setup.' });
+      }
+      if (accessToken && accessToken.length < 20) {
         return res.status(400).json({ error: 'Monime API access token appears invalid.' });
       }
-      if (spaceId.length > 200 || accessToken.length > 1000 || webhookSecret.length > 1000) {
+      if (webhookSecret && (webhookSecret.length < 32 || webhookSecret.length > 1000)) {
+        return res.status(400).json({ error: 'Webhook verification secret must be between 32 and 1000 characters.' });
+      }
+      if (accessToken.length > 1000 || spaceId.length > 64) {
         return res.status(400).json({ error: 'Monime configuration value is too long.' });
       }
-      await db.collection('tenants').doc(tenantId).collection('payment_gateways').doc('monime').set({
+      await existingRef.set({
         provider: 'monime',
         monimeSpaceId: spaceId,
-        monimeAccessToken: encryptMonimeSecret(accessToken),
-        webhookSecret: encryptMonimeSecret(webhookSecret),
+        ...(accessToken ? { monimeAccessToken: encryptMonimeSecret(accessToken) } : {}),
+        ...(webhookSecret ? { webhookSecret: encryptMonimeSecret(webhookSecret) } : {}),
         monimeMode: mode,
         monimePreferredChannel: ['all', 'mobile_money', 'card', 'bank_transfer', 'payment_code'].includes(body.monimePreferredChannel) ? body.monimePreferredChannel : 'all',
         monimeVersion: 'caph.2025-08-23',
