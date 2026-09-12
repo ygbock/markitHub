@@ -459,7 +459,11 @@ async function startServer() {
   // =========================================================================
   app.post('/api/cart/validate', (req, res) => {
     try {
-      const payload = req.body || {};
+      const payload = { ...(req.body || {}) };
+      // Never allow the browser to replace the server catalog or promotion registry.
+      delete payload.productsCatalog;
+      delete payload.customersCatalog;
+      delete payload.couponsCatalog;
       const validationResult = validateCartBackend(payload);
 
       if (!validationResult.success) {
