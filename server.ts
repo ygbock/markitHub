@@ -566,6 +566,12 @@ async function startServer() {
                 if (reservationSnap.exists) {
                   const reservation = reservationSnap.data() || {};
                   if (String(reservation.status) === 'active') {
+                    const tenantReservation = String(reservation.tenantId || '');
+                    if (tenantReservation && tenantReservation !== tenantId) throw new Error('Inventory reservation belongs to another tenant.');
+                    const reservationExpiresAt = new Date(String(reservation.expiresAt || 0)).getTime();
+                    if (Number.isFinite(reservationExpiresAt) && reservationExpiresAt <= Date.now()) {
+                      throw new Error('Inventory reservation has expired.');
+                    }
                     tx.set(reservationRef, {
                       status: 'finalized',
                       finalizedAt: new Date().toISOString(),
@@ -586,6 +592,8 @@ async function startServer() {
                 const orderSnap = await tx.get(orderRef);
                 if (orderSnap.exists) {
                   const order = orderSnap.data() || {};
+                  const orderTenant = String(order.tenantId || order.tenant_id || '');
+                  if (orderTenant && orderTenant !== tenantId) throw new Error('Order belongs to another tenant.');
                   const currentStatus = String(order.paymentStatus || order.payment_status || '').toLowerCase();
                   if (!['paid', 'completed', 'settled'].includes(currentStatus)) {
                     tx.set(orderRef, {
