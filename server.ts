@@ -43,6 +43,23 @@ async function startServer() {
   app.use(express.urlencoded({ extended: true, limit: '30mb' }));
 
   // Health check endpoint
+  // -----------------------------------------------------------------------------
+  // SECURITY MIDDLEWARE
+  // -----------------------------------------------------------------------------
+  // Sensitive business endpoints must fail closed until Firebase Admin
+  // authentication is wired in. Public storefront endpoints remain available.
+  const requireServerAuth = (req: any, res: any, next: any) => {
+    const header = String(req.headers.authorization || '');
+    if (!header.startsWith('Bearer ')) {
+      return res.status(401).json({ error: 'Authentication required.' });
+    }
+    // Token verification is intentionally not implemented here because this
+    // process currently has no firebase-admin dependency. Do not treat a
+    // client-supplied bearer string as identity. This guard is a migration
+    // barrier; production authentication must verify the Firebase ID token.
+    return res.status(501).json({ error: 'Server authentication is not configured yet.' });
+  };
+
   app.get('/api/health', (req, res) => {
     res.json({
       status: 'ok',
@@ -72,7 +89,7 @@ async function startServer() {
   const serverMonimeSessions = new Map<string, MonimeServerSession>();
 
   // Monime Checkout Session Creation Endpoint
-  app.post('/api/monime/create-checkout-session', async (req, res) => {
+  app.post('/api/monime/create-checkout-session', requireServerAuth, async (req, res) => {
     try {
       const { orderId, items, successUrl, cancelUrl, customerName, currency = 'SLE' } = req.body || {};
 
@@ -181,7 +198,7 @@ async function startServer() {
   });
 
   // Monime Test Connection & Status Verification Endpoint
-  app.post('/api/monime/test-connection', async (req, res) => {
+  app.post('/api/monime/test-connection', requireServerAuth, async (req, res) => {
     try {
       const effectiveToken = (process.env.MONIME_API_TOKEN || '').trim();
       const effectiveSpaceId = (process.env.MONIME_SPACE_ID || '').trim();
@@ -313,7 +330,7 @@ async function startServer() {
   });
 
   // Get active Monime Sessions Endpoint
-  app.get('/api/monime/sessions', (req, res) => {
+  app.get('/api/monime/sessions', requireServerAuth, (req, res) => {
     return res.json({
       success: true,
       sessions: Array.from(serverMonimeSessions.values())
@@ -483,7 +500,7 @@ async function startServer() {
   // =========================================================================
 
   // 1. Reserve Inventory (Locks items with TTL before payment)
-  app.post('/api/inventory/reserve', (req, res) => {
+  app.post('/api/inventory/reserve', requireServerAuth, (req, res) => {
     try {
       const { items, customerId, customerName, orderId, ttlMinutes, productsCatalog } = req.body || {};
 
@@ -518,7 +535,7 @@ async function startServer() {
   });
 
   // 2. Finalize Reservation (Post-payment stock commit)
-  app.post('/api/inventory/reservations/:id/finalize', (req, res) => {
+  app.post('/api/inventory/reservations/:id/finalize', requireServerAuth, (req, res) => {
     try {
       const reservationId = req.params.id;
       const { orderId } = req.body || {};
@@ -535,7 +552,7 @@ async function startServer() {
   });
 
   // 3. Release Reservation (Rollback on cancelled/failed checkout)
-  app.post('/api/inventory/reservations/:id/release', (req, res) => {
+  app.post('/api/inventory/reservations/:id/release', requireServerAuth, (req, res) => {
     try {
       const reservationId = req.params.id;
       const { reason } = req.body || {};
@@ -548,7 +565,7 @@ async function startServer() {
   });
 
   // 4. Get Active Unexpired Reservations
-  app.get('/api/inventory/reservations/active', (req, res) => {
+  app.get('/api/inventory/reservations/active', requireServerAuth, (req, res) => {
     try {
       const active = getActiveReservationsServer();
       return res.json({
