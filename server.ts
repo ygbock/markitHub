@@ -690,10 +690,10 @@ async function startServer() {
       if (!response.ok) { const detail = await response.text(); throw new Error('Monime webhook registration failed (' + response.status + '): ' + detail.slice(0, 300)); }
       return await response.json();
     };
-    if (existingWebhookId) {
-      const response = await fetch(apiUrl + '/v1/webhooks/' + encodeURIComponent(existingWebhookId), { method: 'PATCH', headers, body: JSON.stringify({ name: 'markitHub Payment Webhook', url: webhookUrl, enabled: true, apiRelease: 'caph', events, metadata: { tenantId, managedBy: 'markitHub' } }) });
+    if (existingWebhookId && rotateSecret) {
+      const data = await createWebhook();
+      await fetch(apiUrl + '/v1/webhooks/' + encodeURIComponent(existingWebhookId), { method: 'PATCH', headers, body: JSON.stringify({ name: 'markitHub Payment Webhook', url: webhookUrl, enabled: true, apiRelease: 'caph', events, metadata: { tenantId, managedBy: 'markitHub' } }) });
       if (!response.ok) throw new Error('Monime webhook update failed (' + response.status + ').');
-      const data = await response.json();
       return { id: String(data.result?.id || existingWebhookId), url: webhookUrl, created: false };
     }
     const data = await createWebhook();
@@ -739,7 +739,7 @@ async function startServer() {
       const effectiveToken = accessToken ? accessToken : decryptMonimeSecret(existing.monimeAccessToken).trim();
       const effectiveWebhookSecret = webhookSecret ? webhookSecret : decryptMonimeSecret(existing.webhookSecret).trim();
       const apiUrl = (process.env.MONIME_API_URL || 'https://api.monime.io').replace(/\/+$/, '');
-      const webhookResult = await ensureMonimeWebhook({ apiUrl, accessToken: effectiveToken, spaceId, tenantId, webhookSecret: effectiveWebhookSecret, existingWebhookId: existing.monimeWebhookId ? String(existing.monimeWebhookId) : undefined });
+      const webhookResult = await ensureMonimeWebhook({ apiUrl, accessToken: effectiveToken, spaceId, tenantId, webhookSecret: effectiveWebhookSecret, existingWebhookId: existing.monimeWebhookId ? String(existing.monimeWebhookId) : undefined, rotateSecret: Boolean(webhookSecret) });
       await existingRef.set({ provider: 'monime', monimeSpaceId: spaceId, ...(accessToken ? { monimeAccessToken: encryptMonimeSecret(accessToken) } : {}), ...(webhookSecret ? { webhookSecret: encryptMonimeSecret(webhookSecret) } : {}), monimeMode: mode, monimePreferredChannel: ['all', 'mobile_money', 'card', 'bank_transfer', 'payment_code'].includes(body.monimePreferredChannel) ? body.monimePreferredChannel : 'all', monimeVersion: 'caph.2025-08-23', monimeWebhookId: webhookResult.id, monimeWebhookUrl: webhookResult.url, webhookManaged: true, updatedAt: new Date().toISOString(), updatedBy: req.user.uid }, { merge: true });
       return res.json({ success: true, configured: true, environment: mode === 'live' ? 'production' : 'sandbox', spaceId, webhookConfigured: true });
     } catch {
