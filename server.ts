@@ -20,6 +20,20 @@ import { DEFAULT_ROLE_PERMISSIONS } from './src/utils/permissions';
 
 dotenv.config();
 
+declare global {
+  namespace Express {
+    interface Request {
+      user?: {
+        uid: string;
+        email: string | null;
+        emailVerified: boolean;
+        claims: Record<string, any>;
+        permissions?: string[];
+      };
+    }
+  }
+}
+
 const PORT = 3000;
 const HOST = '0.0.0.0';
 
@@ -356,10 +370,6 @@ async function startServer() {
         updated_at: new Date().toISOString()
       };
 
-      const db = getFirestoreDb();
-      if (!db) {
-        return res.status(503).json({ error: 'Durable payment storage is not configured.' });
-      }
       await db.collection('monime_sessions').doc(String(session.id)).set({
         ...sessionRecord,
         updated_at: new Date().toISOString(),
