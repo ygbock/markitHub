@@ -1258,13 +1258,17 @@ async function startServer() {
   });
 
   // Get active Monime Sessions Endpoint
-  app.get('/api/monime/sessions', requireServerAuth, requirePermission('payments.create'), async (req, res) => {
+  app.get('/api/monime/sessions', requireServerAuth, requirePermission('payments.create'), async (req: any, res) => {
     try {
       const db = getFirestoreDb();
       if (!db) return res.status(503).json({ error: 'Durable payment storage is not configured.' });
-      const snapshot = await db.collection('monime_sessions').orderBy('created_at', 'desc').limit(100).get();
-      const verifiedAt = new Date().toISOString();
-      await db.collection('tenants').doc(tenantId).collection('payment_gateways').doc('monime').set({ lastVerifiedAt: verifiedAt, lastVerificationStatus: pingSuccess ? 'success' : 'failed', lastVerificationStatusCode: statusCode }, { merge: true });
+      const tenantId = String(req.user?.claims?.tenantId || req.user?.claims?.tenant_id || '').trim();
+      if (!tenantId) return res.status(400).json({ error: 'Tenant identity is required.' });
+      const snapshot = await db.collection('monime_sessions')
+        .where('tenant_id', '==', tenantId)
+        .orderBy('created_at', 'desc')
+        .limit(100)
+        .get();
 
       return res.json({
         success: true,
