@@ -28,6 +28,40 @@ import { DEFAULT_ROLE_PERMISSIONS } from './src/utils/permissions';
 
 dotenv.config();
 
+const MONIME_SECRET_PREFIX = 'enc:v1:';
+function getMonimeEncryptionKey(): Buffer | null {
+  const raw = String(process.env.MONIME_CREDENTIAL_ENCRYPTION_KEY || '').trim();
+  if (!raw) return null;
+  if (/^[0-9a-fA-F]{64}$/.test(raw)) return Buffer.from(raw, 'hex');
+  return Buffer.from(raw, 'base64').length === 32 ? Buffer.from(raw, 'base64') : null;
+}
+
+function encryptMonimeSecret(value: string): string {
+  const key = getMonimeEncryptionKey();
+  if (!key) throw new Error('MONIME_CREDENTIAL_ENCRYPTION_KEY is not configured.');
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+  const ciphertext = Buffer.concat([cipher.update(value, 'utf8'), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return MONIME_SECRET_PREFIX + [iv, tag, ciphertext].map(part => part.toString('base64url')).join('.');
+}
+
+function decryptMonimeSecret(value: unknown): string {
+  const stored = String(value || '');
+  if (!stored.startsWith(MONIME_SECRET_PREFIX)) return stored; // legacy plaintext; rewrite on next save
+  const key = getMonimeEncryptionKey();
+  if (!key) throw new Error('MONIME_CREDENTIAL_ENCRYPTION_KEY is not configured.');
+  const parts = stored.slice(MONIME_SECRET_PREFIX.length).split('.');
+  if (parts.length !== 3) throw new Error('Invalid encrypted Monime credential.');
+  const iv = Buffer.from(parts[0], 'base64url');
+  const tag = Buffer.from(parts[1], 'base64url');
+  const ciphertext = Buffer.from(parts[2], 'base64url');
+  if (iv.length !== 12 || tag.length !== 16 || ciphertext.length === 0) throw new Error('Invalid encrypted Monime credential.');
+  const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+  decipher.setAuthTag(tag);
+  return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString('utf8');
+}
+
 declare global {
   namespace Express {
     interface Request {
@@ -669,8 +703,8 @@ async function startServer() {
       await db.collection('tenants').doc(tenantId).collection('payment_gateways').doc('monime').set({
         provider: 'monime',
         monimeSpaceId: spaceId,
-        monimeAccessToken: accessToken,
-        webhookSecret,
+        monimeAccessToken: encryptMonimeSecret(accessToken),
+        webhookSecret: encryptMonimeSecret(webhookSecret),
         monimeMode: mode,
         monimePreferredChannel: ['all', 'mobile_money', 'card', 'bank_transfer', 'payment_code'].includes(body.monimePreferredChannel) ? body.monimePreferredChannel : 'all',
         monimeVersion: 'caph.2025-08-23',
@@ -746,9 +780,9 @@ async function startServer() {
         return res.status(503).json({ error: 'This tenant has not configured Monime payments.' });
       }
       const gateway = gatewaySnap.data() || {};
-      const monimeToken = String(gateway.monimeAccessToken || '').trim();
+      const monimeToken = decryptMonimeSecret(gateway.monimeAccessToken).trim();
       const monimeSpaceId = String(gateway.monimeSpaceId || '').trim();
-      const configuredWebhookSecret = String(gateway.webhookSecret || '').trim();
+      const configuredWebhookSecret = decryptMonimeSecret(gateway.webhookSecret).trim();
       if (!monimeToken || !monimeSpaceId || configuredWebhookSecret.length < 32) {
         return res.status(503).json({ error: 'This tenant has incomplete Monime payment configuration.' });
       }
@@ -855,7 +889,7 @@ async function startServer() {
       if (!tenantId) return res.status(400).json({ success: false, message: 'Tenant identity is required.' });
       const gatewaySnap = await db.collection('tenants').doc(tenantId).collection('payment_gateways').doc('monime').get();
       const gateway = gatewaySnap.data() || {};
-      const effectiveToken = String(gateway.monimeAccessToken || '').trim();
+      const effectiveToken = decryptMonimeSecret(gateway.monimeAccessToken).trim();
       const effectiveSpaceId = String(gateway.monimeSpaceId || '').trim();
       const apiUrl = (process.env.MONIME_API_URL || 'https://api.monime.io').replace(/\/+$/, '');
 
@@ -954,7 +988,7 @@ async function startServer() {
       const tenantId = String(req.params.tenantId || '').trim();
       if (!tenantId || !/^[A-Za-z0-9_-]{1,100}$/.test(tenantId)) return res.status(400).json({ error: 'Invalid webhook tenant identifier.' });
       const gatewaySnap = await db.collection('tenants').doc(tenantId).collection('payment_gateways').doc('monime').get();
-      const secret = String(gatewaySnap.data()?.webhookSecret || '').trim();
+      const secret = decryptMonimeSecret(gatewaySnap.data()?.webhookSecret).trim();
       if (!gatewaySnap.exists || secret.length < 32) {
         return res.status(503).json({ error: 'Monime webhook verification is not configured for this tenant.' });
       }
