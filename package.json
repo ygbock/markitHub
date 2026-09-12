@@ -27,7 +27,8 @@
     "qrcode": "^1.5.4",
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
-    "recharts": "^3.9.2"
+    "recharts": "^3.9.2",
+    "firebase-admin": "^13.6.0"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",
