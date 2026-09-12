@@ -488,7 +488,7 @@ async function startServer() {
       const db = getFirestoreDb();
       if (!db) return res.status(503).json({ error: 'Durable webhook storage is not configured.' });
       const tenantId = String(req.params.tenantId || '').trim();
-      if (!tenantId) return res.status(400).json({ error: 'Webhook tenant identifier is required.' });
+      if (!tenantId || !/^[A-Za-z0-9_-]{1,100}$/.test(tenantId)) return res.status(400).json({ error: 'Invalid webhook tenant identifier.' });
       const gatewaySnap = await db.collection('tenants').doc(tenantId).collection('payment_gateways').doc('monime').get();
       const secret = String(gatewaySnap.data()?.webhookSecret || '').trim();
       if (!gatewaySnap.exists || secret.length < 32) {
