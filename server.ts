@@ -559,6 +559,27 @@ async function startServer() {
                 ...(orderNumber ? { monime_order_number: orderNumber } : {}),
               }, { merge: true });
 
+              const reservationId = String((fresh as any).reservation_id || '');
+              if (reservationId) {
+                const reservationRef = db.collection('inventory_reservations').doc(reservationId);
+                const reservationSnap = await tx.get(reservationRef);
+                if (reservationSnap.exists) {
+                  const reservation = reservationSnap.data() || {};
+                  if (String(reservation.status) === 'active') {
+                    tx.set(reservationRef, {
+                      status: 'finalized',
+                      finalizedAt: new Date().toISOString(),
+                      finalizedByPaymentSession: String(sessionId),
+                      tenantId,
+                    }, { merge: true });
+                  } else if (String(reservation.status) !== 'finalized') {
+                    throw new Error('Inventory reservation is not active for payment settlement.');
+                  }
+                } else {
+                  throw new Error('Linked inventory reservation was not found.');
+                }
+              }
+
               const orderId = String(fresh.order_id || '');
               if (orderId) {
                 const orderRef = db.collection('orders').doc(orderId);
