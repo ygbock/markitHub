@@ -8,6 +8,7 @@ import {
   Home, LayoutGrid, Search, User, Sliders, Layers
 } from 'lucide-react';
 import { useCurrency } from '../context/CurrencyContext';
+import { useTenant } from '../context/TenantContext';
 import { DEFAULT_HOMEPAGE_CONFIG } from '../data/homepageConfig';
 import { searchProducts } from '../utils/searchEngine';
 import { slugify } from '../utils/seoUtils';
@@ -108,7 +109,7 @@ function getCategoryBreadcrumbTrail(category: string, activeTab: string, searchT
 }
 
 export default function ECommerceStorefront({
-  products,
+  products: initialProducts,
   customers,
   orders,
   onPlaceEcomOrder,
@@ -125,6 +126,38 @@ export default function ECommerceStorefront({
   systemSettings
 }: ECommerceStorefrontProps) {
   const { formatAmount } = useCurrency();
+  const { tenantConfig, tenantSlug, formatCurrency } = useTenant();
+
+  // Tenant-aware Product Catalog state
+  const [tenantProducts, setTenantProducts] = useState<Product[]>([]);
+  const [isLoadingTenantProducts, setIsLoadingTenantProducts] = useState(false);
+
+  useEffect(() => {
+    let isSubscribed = true;
+    async function loadTenantProducts() {
+      setIsLoadingTenantProducts(true);
+      try {
+        const res = await fetch(`/api/storefront/${tenantSlug}/products?limit=100`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.success && Array.isArray(data.products) && isSubscribed) {
+            setTenantProducts(data.products);
+          }
+        }
+      } catch (err) {
+        console.warn(`[Storefront] Error loading tenant products for ${tenantSlug}`, err);
+      } finally {
+        if (isSubscribed) setIsLoadingTenantProducts(false);
+      }
+    }
+    loadTenantProducts();
+    return () => { isSubscribed = false; };
+  }, [tenantSlug]);
+
+  const products = useMemo(() => {
+    if (tenantProducts.length > 0) return tenantProducts;
+    return initialProducts;
+  }, [tenantProducts, initialProducts]);
 
   // Navigation & Search States
   const [searchTerm, setSearchTerm] = useState('');
@@ -499,7 +532,7 @@ export default function ECommerceStorefront({
           if (specs['Memory']?.toLowerCase().includes(lower)) return true;
           return variants.some(v => 
             (v.name && v.name.toLowerCase().includes(lower)) ||
-            (v.options && Object.values(v.options).some(o => o.toLowerCase().includes(lower)))
+            (v.options && Object.values(v.options).some(o => String(o).toLowerCase().includes(lower)))
           );
         });
         if (!matchesStorage) return false;
@@ -517,7 +550,7 @@ export default function ECommerceStorefront({
           if (specs['Memory']?.toLowerCase().includes(lower)) return true;
           return variants.some(v => 
             (v.name && v.name.toLowerCase().includes(lower)) ||
-            (v.options && Object.values(v.options).some(o => o.toLowerCase().includes(lower)))
+            (v.options && Object.values(v.options).some(o => String(o).toLowerCase().includes(lower)))
           );
         });
         if (!matchesRam) return false;
@@ -533,7 +566,7 @@ export default function ECommerceStorefront({
           return variants.some(v => 
             (v.size && v.size.toLowerCase().includes(lower)) ||
             (v.name && v.name.toLowerCase().includes(lower)) ||
-            (v.options && Object.values(v.options).some(o => o.toLowerCase().includes(lower)))
+            (v.options && Object.values(v.options).some(o => String(o).toLowerCase().includes(lower)))
           );
         });
         if (!matchesSize) return false;
@@ -550,7 +583,7 @@ export default function ECommerceStorefront({
           if (specs['Color']?.toLowerCase().includes(lower)) return true;
           return variants.some(v => 
             (v.color && v.color.toLowerCase().includes(lower)) ||
-            (v.options && Object.values(v.options).some(o => o.toLowerCase().includes(lower)))
+            (v.options && Object.values(v.options).some(o => String(o).toLowerCase().includes(lower)))
           );
         });
         if (!matchesColor) return false;
@@ -567,7 +600,7 @@ export default function ECommerceStorefront({
           if (pName.includes(lower) || pDesc.includes(lower)) return true;
           if (specs['Gender']?.toLowerCase().includes(lower)) return true;
           return variants.some(v => 
-            (v.options && Object.values(v.options).some(o => o.toLowerCase().includes(lower)))
+            (v.options && Object.values(v.options).some(o => String(o).toLowerCase().includes(lower)))
           );
         });
         if (!matchesGender) return false;

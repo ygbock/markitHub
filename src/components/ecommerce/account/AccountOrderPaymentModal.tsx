@@ -241,7 +241,7 @@ export const AccountOrderPaymentModal: React.FC<AccountOrderPaymentModalProps> =
               )}
               <div className="flex justify-between text-slate-600">
                 <span>Payment Method:</span>
-                <span className="font-bold text-slate-900 capitalize">{selectedProvider.replace(/_/g, ' ')}</span>
+                <span className="font-bold text-slate-900 capitalize">{String(selectedProvider || '').replace(/_/g, ' ')}</span>
               </div>
               <div className="flex justify-between text-slate-600">
                 <span>Date & Time:</span>

@@ -1,8 +1,18 @@
 import { InventoryReservation, InventoryReservationItem, Product } from '../types';
 
 export interface ServerReserveParams {
-  items: { productId: string; productName?: string; variantSku?: string; quantity: number; }[];
-  customerId?: string; customerName?: string; orderId?: string; ttlMinutes?: number; productsCatalog?: Product[];
+  tenantId?: string;
+  items: {
+    productId: string;
+    productName?: string;
+    variantSku?: string;
+    quantity: number;
+  }[];
+  customerId?: string;
+  customerName?: string;
+  orderId?: string;
+  ttlMinutes?: number;
+  productsCatalog?: Product[];
 }
 export interface ServerReserveResult {
   success: boolean; reservation?: InventoryReservation; error?: string;
@@ -10,21 +20,57 @@ export interface ServerReserveResult {
   warnings?: string[];
 }
 
-const db = () => {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const { getFirestore } = require('firebase-admin/firestore');
-  return getFirestore();
-};
+/**
+ * Calculates current active reserved quantity for a specific product and optional variantSku
+ */
+export function getActiveReservedQuantity(
+  productId: string, 
+  variantSku?: string,
+  excludeReservationId?: string,
+  tenantId?: string
+): number {
+  const now = new Date().getTime();
+  let totalReserved = 0;
 
-const ref = (id: string) => db().collection('inventory_reservations').doc(id);
-const makeId = () => 'RES-' + cryptoRandom();
+  for (const [id, res] of SERVER_RESERVATIONS_STORE.entries()) {
+    if (excludeReservationId && id === excludeReservationId) continue;
+    if (tenantId && res.tenantId && res.tenantId !== tenantId) continue;
+    
+    // Check if expired
+    if (res.status === 'active' && new Date(res.expiresAt).getTime() > now) {
+      for (const item of res.items) {
+        if (item.productId === productId) {
+          if (!variantSku || !item.variantSku || item.variantSku === variantSku) {
+            totalReserved += item.quantity;
+          }
+        }
+      }
+    } else if (res.status === 'active' && new Date(res.expiresAt).getTime() <= now) {
+      // Auto mark expired
+      res.status = 'expired';
+    }
+  }
 
 function cryptoRandom() {
   const crypto = require('crypto');
   return crypto.randomBytes(12).toString('hex').toUpperCase();
 }
 
-export async function getActiveReservedQuantity(productId: string, variantSku?: string, excludeReservationId?: string): Promise<number> {
+/**
+ * Authoritative Server Stock Reservation
+ * Prevents selling items that have already been purchased or reserved by another concurrent customer.
+ */
+export function reserveInventoryServer(params: ServerReserveParams): ServerReserveResult {
+  const {
+    tenantId,
+    items,
+    customerId,
+    customerName = 'Guest Customer',
+    orderId,
+    ttlMinutes = 15,
+    productsCatalog = []
+  } = params;
+
   const now = new Date();
   const snap = await db().collection('inventory_reservations')
     .where('status', '==', 'active').get();
@@ -36,11 +82,47 @@ export async function getActiveReservedQuantity(productId: string, variantSku?: 
       await doc.ref.update({ status: 'expired', updatedAt: now.toISOString() });
       continue;
     }
-    for (const item of r.items || []) {
-      if (item.productId === productId && (!variantSku || !item.variantSku || item.variantSku === variantSku)) total += item.quantity;
+
+    const currentActiveReserved = getActiveReservedQuantity(item.productId, item.variantSku, undefined, tenantId);
+    const availableStock = Math.max(0, onHandStock - currentActiveReserved);
+
+    if (item.quantity > availableStock) {
+      return {
+        success: false,
+        error: `Insufficient available inventory for "${productName}". Requested: ${item.quantity}, Available: ${availableStock} (On Hand: ${onHandStock}, Reserved by other shoppers: ${currentActiveReserved}).`,
+        insufficientItem: {
+          productId: item.productId,
+          productName,
+          variantSku: item.variantSku,
+          requested: item.quantity,
+          available: availableStock,
+          onHand: onHandStock,
+          activeReserved: currentActiveReserved
+        }
+      };
     }
   }
-  return total;
+
+  // Phase 2: Create Active Reservation Lock
+  const reservation: InventoryReservation = {
+    reservationId,
+    tenantId,
+    orderId,
+    customerId,
+    customerName,
+    items: reservedItems,
+    createdAt: now.toISOString(),
+    expiresAt: expiresAt.toISOString(),
+    ttlSeconds,
+    status: 'active'
+  };
+
+  SERVER_RESERVATIONS_STORE.set(reservationId, reservation);
+
+  return {
+    success: true,
+    reservation
+  };
 }
 
 export async function reserveInventoryServer(params: ServerReserveParams): Promise<ServerReserveResult> {
@@ -109,27 +191,19 @@ export async function finalizeReservationServer(reservationId:string, orderId?:s
   return {success:true,reservation:result};
 }
 
-export async function releaseReservationServer(reservationId:string, reason='Customer checkout cancelled or payment failed') {
-  const result = await db().runTransaction(async (tx:any) => {
-    const snap = await tx.get(ref(reservationId));
-    if (!snap.exists) throw new Error('Reservation #' + reservationId + ' not found.');
-    const r = snap.data() as InventoryReservation;
-    if (r.status === 'released') return r;
-    if (r.status === 'finalized') throw new Error('Finalized reservation cannot be released.');
-    const updated = {...r,status:'released',releasedAt:new Date().toISOString(),releaseReason:reason};
-    tx.set(ref(reservationId),updated,{merge:true}); return updated;
-  });
-  return {success:true,reservation:result};
-}
+/**
+ * Get all active unexpired reservations
+ */
+export function getActiveReservationsServer(tenantId?: string): InventoryReservation[] {
+  const now = new Date().getTime();
+  const active: InventoryReservation[] = [];
 
-export async function getActiveReservationsServer() {
-  const snap = await db().collection('inventory_reservations').where('status','==','active').get();
-  const now=Date.now();
-  const active: InventoryReservation[]=[];
-  for(const doc of snap.docs) {
-    const r=doc.data() as InventoryReservation;
-    if(new Date(r.expiresAt).getTime()>now) active.push(r);
-    else await doc.ref.update({status:'expired',updatedAt:new Date().toISOString()});
+  for (const res of SERVER_RESERVATIONS_STORE.values()) {
+    if (res.status === 'active' && new Date(res.expiresAt).getTime() > now) {
+      if (!tenantId || !res.tenantId || res.tenantId === tenantId) {
+        active.push(res);
+      }
+    }
   }
   return active;
 }

@@ -54,10 +54,10 @@ export default function CampaignBroadcastModal({
 
   // Preview replacement using first customer sample
   const sampleCustomer = recipients[0] || customers[0] || { name: 'Sarah Connor', loyaltyPoints: 340, loyaltyTier: 'Gold' };
-  const previewText = message
-    .replace(/{{customer_name}}/g, sampleCustomer.name)
-    .replace(/{{points}}/g, String(sampleCustomer.loyaltyPoints || 0))
-    .replace(/{{tier}}/g, sampleCustomer.loyaltyTier || 'VIP')
+  const previewText = (message || '')
+    .replace(/{{customer_name}}/g, sampleCustomer?.name || 'Valued Customer')
+    .replace(/{{points}}/g, String(sampleCustomer?.loyaltyPoints || 0))
+    .replace(/{{tier}}/g, sampleCustomer?.loyaltyTier || 'VIP')
     .replace(/{{discount_code}}/g, attachedPromoCode || 'SAVE10')
     .replace(/{{store_name}}/g, 'Nexus Enterprise');
 

@@ -259,7 +259,7 @@ export default function SettingsModule({
                             {sec.title}
                           </span>
                           <span className="text-[10px] text-slate-400 capitalize font-mono">
-                            {sec.type.replace('_', ' ')}
+                            {String(sec.type || '').replace('_', ' ')}
                           </span>
                         </div>
                       </div>

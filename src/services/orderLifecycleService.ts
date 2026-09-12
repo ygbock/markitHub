@@ -695,18 +695,19 @@ export class OrderLifecycleService {
    * Generates mock warehouse fulfillment details (Pick, Pack, QC)
    */
   static createWarehouseFulfillmentData(order: Order): WarehouseFulfillmentData {
+    const orderIdStr = String(order.id || '');
     return {
-      fulfillmentOrderId: `FO-${order.id.replace(/[^0-9]/g, '') || '89201'}`,
+      fulfillmentOrderId: `FO-${orderIdStr.replace(/[^0-9]/g, '') || '89201'}`,
       assignedWarehouseId: 'WH-FREETOWN-CENTRAL',
       assignedWarehouseName: 'Freetown Central Logistics Hub (Facility #1)',
-      pickTaskId: `PICK-${order.id.slice(-6).toUpperCase()}`,
+      pickTaskId: `PICK-${(orderIdStr || 'ORDER').slice(-6).toUpperCase()}`,
       pickerStaffId: 'STF-WH-08',
       pickerStaffName: 'Mohamed Sesay (Pick Lead)',
-      pickedItems: order.items.map(item => ({
+      pickedItems: (order.items || []).map(item => ({
         productId: item.productId,
         productName: item.productName,
         variantSku: item.variantSku || 'DEFAULT-SKU',
-        barcodeScanned: `EAN-${item.productId.slice(-8)}`,
+        barcodeScanned: `EAN-${String(item.productId || '00000000').slice(-8)}`,
         scannedValid: true,
         quantity: item.quantity
       })),
@@ -721,7 +722,7 @@ export class OrderLifecycleService {
         passed: true,
         inspectorName: 'Alhaji Koroma (Senior QA Lead)',
         inspectedAt: new Date().toISOString(),
-        serialNumbersRecorded: order.items.map((it, idx) => `SN-${it.productId.slice(0, 4).toUpperCase()}-983021-${idx + 1}`),
+        serialNumbersRecorded: (order.items || []).map((it, idx) => `SN-${String(it.productId || 'PROD').slice(0, 4).toUpperCase()}-983021-${idx + 1}`),
         tamperSealNumber: 'SEAL-SEC-99824'
       }
     };
@@ -731,9 +732,10 @@ export class OrderLifecycleService {
    * Generates mock shipping handover data with barcode and driver details
    */
   static createShippingHandoverData(order: Order): ShippingHandoverData {
-    const trackingNumber = order.trackingNumber || `SL-EXP-${order.id.replace(/[^0-9]/g, '') || '77890'}`;
+    const orderIdStr = String(order.id || '');
+    const trackingNumber = order.trackingNumber || `SL-EXP-${orderIdStr.replace(/[^0-9]/g, '') || '77890'}`;
     return {
-      shipmentId: `SHP-${order.id.slice(-6).toUpperCase()}`,
+      shipmentId: `SHP-${(orderIdStr || 'ORDER').slice(-6).toUpperCase()}`,
       trackingNumber,
       carrierId: 'CARRIER-SL-EXPRESS',
       carrierName: 'Sierra Express Courier Services (Freetown Hub)',

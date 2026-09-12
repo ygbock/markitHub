@@ -102,7 +102,7 @@ export default function ReportsExecutiveModal({
               <p className="text-xs text-slate-500 font-medium mt-0.5">Location Scope: {branchLabel}</p>
             </div>
             <div className="text-left md:text-right text-[11px] text-slate-600 space-y-0.5 pt-2 md:pt-0 border-t md:border-t-0 border-slate-200 font-mono">
-              <div><span className="font-sans font-bold text-slate-800">Period:</span> {datePreset.toUpperCase().replace(/_/g, ' ')}</div>
+              <div><span className="font-sans font-bold text-slate-800">Period:</span> {String(datePreset || '').toUpperCase().replace(/_/g, ' ')}</div>
               <div><span className="font-sans font-bold text-slate-800">Prepared By:</span> {activeStaff.name} ({activeStaff.role})</div>
               <div><span className="font-sans font-bold text-slate-800">Generated:</span> {new Date().toLocaleDateString()} {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
             </div>

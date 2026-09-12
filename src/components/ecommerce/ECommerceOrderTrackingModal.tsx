@@ -68,13 +68,13 @@ export const ECommerceOrderTrackingModal: React.FC<ECommerceOrderTrackingModalPr
       return orders[0] || null;
     }
 
-    const cleanQ = q.replace(/^#/, '');
+    const cleanQ = String(q || '').replace(/^#/, '');
 
     const found = orders.find(o => 
-      o.id.toLowerCase() === cleanQ ||
-      o.id.toLowerCase().includes(cleanQ) ||
-      (o.trackingNumber && o.trackingNumber.toLowerCase().includes(cleanQ)) ||
-      (o.customerEmail && o.customerEmail.toLowerCase() === q)
+      String(o.id || '').toLowerCase() === cleanQ ||
+      String(o.id || '').toLowerCase().includes(cleanQ) ||
+      (o.trackingNumber && String(o.trackingNumber).toLowerCase().includes(cleanQ)) ||
+      (o.customerEmail && String(o.customerEmail).toLowerCase() === q)
     );
 
     return found || null;
@@ -98,7 +98,7 @@ export const ECommerceOrderTrackingModal: React.FC<ECommerceOrderTrackingModalPr
   // Resolve telemetry
   const telemetry = currentOrder ? getOrderDeliveryTelemetry(currentOrder) : null;
   const status = telemetry?.effectiveStatus || currentOrder?.deliveryStatus || currentOrder?.status || 'Processing';
-  const trackingNumber = currentOrder?.trackingNumber || (currentOrder ? `TRK-SL-${currentOrder.id.replace(/[^0-9]/g, '') || '98231'}` : '');
+  const trackingNumber = currentOrder?.trackingNumber || (currentOrder ? `TRK-SL-${String(currentOrder.id || '').replace(/[^0-9]/g, '') || '98231'}` : '');
   const carrierName = currentOrder?.carrierName || 'Sierra Express Courier Services (Freetown Hub)';
   const etaText = currentOrder?.estimatedDelivery || 'Today by 5:00 PM';
 

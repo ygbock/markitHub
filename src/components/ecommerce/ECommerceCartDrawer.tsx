@@ -7,6 +7,7 @@ import {
   ChevronUp, Info, Clock, UserCheck, DollarSign, PackageCheck, Hash, Boxes
 } from 'lucide-react';
 import { useCurrency } from '../../context/CurrencyContext';
+import { useTenant } from '../../context/TenantContext';
 import { validateCouponCodeAuthoritativeService } from '../../services/cartValidationService';
 import { SERVER_PROMOTIONS_REGISTRY } from '../../server/cartValidator';
 
@@ -99,6 +100,9 @@ export default function ECommerceCartDrawer({
   customers = []
 }: ECommerceCartDrawerProps) {
   const { formatAmount, currentCurrency } = useCurrency();
+  const { tenantConfig, formatCurrency: tenantFormatCurrency } = useTenant();
+  const formatCurrency = (amount: number) => tenantConfig ? tenantFormatCurrency(amount) : formatAmount(amount);
+
   const [couponInput, setCouponInput] = useState('');
   const [isValidatingCoupon, setIsValidatingCoupon] = useState(false);
   const [validationFeedback, setValidationFeedback] = useState<{
@@ -112,7 +116,7 @@ export default function ECommerceCartDrawer({
 
   if (!isOpen) return null;
 
-  const FREE_SHIPPING_THRESHOLD = 150;
+  const FREE_SHIPPING_THRESHOLD = tenantConfig?.policies?.shipping?.freeShippingThreshold ?? 150;
   const rawSubtotal = cart.reduce((sum, item) => sum + (item.product.price * item.quantity), 0);
 
 

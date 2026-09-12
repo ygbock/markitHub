@@ -84,7 +84,7 @@ export default function ECommerceCategories({
                   ? 'bg-indigo-600 text-white border-indigo-600 shadow-md shadow-indigo-600/20 ring-2 ring-indigo-600/30'
                   : 'bg-white hover:bg-slate-50/90 text-slate-900 border-slate-200/80 hover:border-slate-300 shadow-2xs hover:shadow-xs'
               }`}
-              id={`cat-card-${cat.toLowerCase().replace(/[^a-z0-9]/g, '-')}`}
+              id={`cat-card-${String(cat || '').toLowerCase().replace(/[^a-z0-9]/g, '-')}`}
             >
               {/* Background preview thumbnail on hover */}
               {imgUrl && (

@@ -944,6 +944,7 @@ export interface InventoryReservationItem {
 
 export interface InventoryReservation {
   reservationId: string;
+  tenantId?: string;
   orderId?: string;
   customerId?: string;
   customerName?: string;

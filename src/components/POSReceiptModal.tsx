@@ -517,7 +517,7 @@ export default function POSReceiptModal({
                     </a>
                   </div>
                   <div className="text-[10px] text-gray-500 font-mono bg-white p-2 rounded-lg border border-gray-200 truncate">
-                    {orderSummaryText.replace(/\n/g, ' • ')}
+                    {String(orderSummaryText || '').replace(/\n/g, ' • ')}
                   </div>
                 </div>
               )}
