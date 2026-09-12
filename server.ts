@@ -7,6 +7,7 @@ import { getApps, cert, initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 import { GoogleGenAI } from '@google/genai';
 import { createServer as createViteServer } from 'vite';
+import express from 'express';
 import { validateCartBackend, validateCouponAuthoritative, SERVER_PROMOTIONS_REGISTRY } from './src/server/cartValidator';
 import { 
   reserveInventoryServer, 
