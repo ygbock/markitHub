@@ -149,6 +149,71 @@ async function startServer() {
 
   const serverMonimeSessions = new Map<string, MonimeServerSession>();
 
+
+  // Tenant-scoped Monime configuration. Secrets live only in this server-side
+  // collection and are never returned to the browser.
+  app.get('/api/monime/config', requireServerAuth, requirePermission('system.settings'), async (req: any, res) => {
+    try {
+      const db = getFirestoreDb();
+      if (!db) return res.status(503).json({ error: 'Durable configuration storage is not configured.' });
+      const tenantId = String(req.user?.claims?.tenantId || req.user?.claims?.tenant_id || '').trim();
+      if (!tenantId) return res.status(400).json({ error: 'Tenant identity is required.' });
+      const snap = await db.collection('tenants').doc(tenantId).collection('payment_gateways').doc('monime').get();
+      if (!snap.exists) return res.json({ configured: false, provider: 'monime' });
+      const data = snap.data() || {};
+      return res.json({
+        configured: Boolean(data.monimeSpaceId && data.monimeAccessToken && data.webhookSecret),
+        provider: 'monime',
+        environment: data.monimeMode === 'live' ? 'production' : 'sandbox',
+        spaceId: data.monimeSpaceId || null,
+        webhookConfigured: Boolean(data.webhookSecret),
+        preferredChannel: data.monimePreferredChannel || 'all',
+        version: data.monimeVersion || 'caph.2025-08-23',
+      });
+    } catch {
+      return res.status(500).json({ error: 'Unable to load Monime configuration.' });
+    }
+  });
+
+  app.put('/api/monime/config', requireServerAuth, requirePermission('system.settings'), async (req: any, res) => {
+    try {
+      const db = getFirestoreDb();
+      if (!db) return res.status(503).json({ error: 'Durable configuration storage is not configured.' });
+      const tenantId = String(req.user?.claims?.tenantId || req.user?.claims?.tenant_id || '').trim();
+      if (!tenantId) return res.status(400).json({ error: 'Tenant identity is required.' });
+      const body = req.body || {};
+      const spaceId = String(body.monimeSpaceId || '').trim();
+      const accessToken = String(body.monimeAccessToken || '').trim();
+      const webhookSecret = String(body.webhookSecret || '').trim();
+      const mode = body.monimeMode === 'live' ? 'live' : 'test';
+      if (!spaceId || !accessToken || webhookSecret.length < 32) {
+        return res.status(400).json({
+          error: 'Monime Space ID, API access token, and a webhook secret of at least 32 characters are required.'
+        });
+      }
+      if (accessToken.length < 20) {
+        return res.status(400).json({ error: 'Monime API access token appears invalid.' });
+      }
+      if (spaceId.length > 200 || accessToken.length > 1000 || webhookSecret.length > 1000) {
+        return res.status(400).json({ error: 'Monime configuration value is too long.' });
+      }
+      await db.collection('tenants').doc(tenantId).collection('payment_gateways').doc('monime').set({
+        provider: 'monime',
+        monimeSpaceId: spaceId,
+        monimeAccessToken: accessToken,
+        webhookSecret,
+        monimeMode: mode,
+        monimePreferredChannel: ['all', 'mobile_money', 'card', 'bank_transfer', 'payment_code'].includes(body.monimePreferredChannel) ? body.monimePreferredChannel : 'all',
+        monimeVersion: 'caph.2025-08-23',
+        updatedAt: new Date().toISOString(),
+        updatedBy: req.user.uid,
+      }, { merge: true });
+      return res.json({ success: true, configured: true, environment: mode === 'live' ? 'production' : 'sandbox', spaceId });
+    } catch {
+      return res.status(500).json({ error: 'Unable to save Monime configuration.' });
+    }
+  });
+
   // Monime Checkout Session Creation Endpoint
   app.post('/api/monime/create-checkout-session', requireServerAuth, requirePermission('payments.create'), async (req, res) => {
     try {
