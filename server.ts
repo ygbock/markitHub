@@ -809,6 +809,13 @@ async function startServer() {
         }
       }
 
+      const order = serverStorefrontOrders.get(String(orderId));
+      if (!order || String((order as any).tenantId || '') !== tenantId) {
+        return res.status(404).json({ error: 'Order not found for this tenant.' });
+      }
+      if (String((order as any).paymentStatus || '').toLowerCase() === 'paid') {
+        return res.status(409).json({ error: 'Order has already been paid.' });
+      }
       const gatewaySnap = await db.collection('tenants').doc(tenantId).collection('payment_gateways').doc('monime').get();
       if (!gatewaySnap.exists) {
         return res.status(503).json({ error: 'This tenant has not configured Monime payments.' });
@@ -879,6 +886,7 @@ async function startServer() {
       }
 
       const sessionRecord: MonimeServerSession = {
+        tenant_id: tenantId,
         order_id: orderId,
         ...(reservationId ? { reservation_id: String(reservationId) } : {}),
         monime_session_id: session.id,
@@ -1068,6 +1076,8 @@ async function startServer() {
         const orderNumber = data.orderNumber || data.monime_order_number;
         if (sessionId) {
           const sessionRef = db.collection('monime_sessions').doc(String(sessionId));
+          const sessionTenantId = String((await sessionRef.get()).data()?.tenant_id || '');
+          if (sessionTenantId !== tenantId) return res.status(200).json({ received: true, ignored: true });
           const sessionSnap = await sessionRef.get();
           if (sessionSnap.exists) {
             const existing = sessionSnap.data() as MonimeServerSession;
@@ -1239,6 +1249,8 @@ async function startServer() {
         const sessionId = data.id || data.sessionId;
         if (sessionId) {
           const sessionRef = db.collection('monime_sessions').doc(String(sessionId));
+          const sessionTenantId = String((await sessionRef.get()).data()?.tenant_id || '');
+          if (sessionTenantId !== tenantId) return res.status(200).json({ received: true, ignored: true });
           const sessionSnap = await sessionRef.get();
           if (sessionSnap.exists) {
             const existing = sessionSnap.data() as MonimeServerSession;
