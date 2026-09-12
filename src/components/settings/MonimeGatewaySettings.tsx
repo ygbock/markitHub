@@ -23,6 +23,7 @@ export default function MonimeGatewaySettings() {
   const [busy, setBusy] = useState(false);
   const [testing, setTesting] = useState(false);
   const [message, setMessage] = useState('');
+  const [showRequirements, setShowRequirements] = useState(false);
 
   const load = async () => {
     const res = await fetch('/api/monime/config', { credentials: 'include' });
@@ -100,7 +101,9 @@ export default function MonimeGatewaySettings() {
 
       <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-2">
         <div className="flex gap-2"><LockKeyhole className="w-4 h-4 text-slate-600 mt-0.5" /><p className="text-xs text-slate-700 font-semibold">Security boundary</p></div>
-        <p className="text-[11px] text-slate-500">The API token and webhook secret are stored server-side per tenant. They are not written to localStorage and are not returned by the configuration API.</p>
+        <p className="text-[11px] text-slate-500">The API token and webhook secret are stored encrypted server-side per tenant. They are not written to localStorage and are never returned by the configuration API.</p>
+        <button type="button" onClick={()=>setShowRequirements(v=>!v)} className="text-[11px] font-bold text-indigo-700 hover:text-indigo-800">{showRequirements ? 'Hide setup requirements' : 'Show setup requirements'}</button>
+        {showRequirements && <ul className="text-[11px] text-slate-600 list-disc pl-5 space-y-1"><li>Monime Space ID in the <code>spc-...</code> format.</li><li>Monime Personal Access Token for this Space.</li><li>Webhook verification secret, 32–256+ characters; keep it identical to the secret configured for your Monime webhook.</li><li>Use a test/sandbox token for testing and a live token only for production.</li></ul>}
         <p className="text-[11px] text-slate-500">Configure Monime to send webhooks to this tenant's dedicated endpoint: <code>/api/monime/webhook/&lt;tenantId&gt;</code>.</p>
       </div>
 
