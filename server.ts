@@ -942,6 +942,8 @@ async function startServer() {
         });
       }
 
+      if (!gatewaySnap.exists) return res.status(404).json({ success: false, message: 'Monime gateway is not configured for this tenant.' });
+      const webhookConfigured = Boolean(gateway.monimeWebhookId && gateway.monimeWebhookUrl && gateway.webhookManaged);
       const startTime = Date.now();
       let pingSuccess = true;
       let statusCode = 200;
@@ -1281,6 +1283,9 @@ async function startServer() {
       const db = getFirestoreDb();
       if (!db) return res.status(503).json({ error: 'Durable payment storage is not configured.' });
       const snapshot = await db.collection('monime_sessions').orderBy('created_at', 'desc').limit(100).get();
+      const verifiedAt = new Date().toISOString();
+      await db.collection('tenants').doc(tenantId).collection('payment_gateways').doc('monime').set({ lastVerifiedAt: verifiedAt, lastVerificationStatus: pingSuccess ? 'success' : 'failed', lastVerificationStatusCode: statusCode }, { merge: true });
+
       return res.json({
         success: true,
         sessions: snapshot.docs.map(doc => doc.data())
