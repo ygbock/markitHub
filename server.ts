@@ -678,7 +678,7 @@ async function startServer() {
     }
   });
 
-  const ensureMonimeWebhook = async ({ apiUrl, accessToken, spaceId, tenantId, webhookSecret, existingWebhookId }: { apiUrl: string; accessToken: string; spaceId: string; tenantId: string; webhookSecret: string; existingWebhookId?: string }) => {
+  const ensureMonimeWebhook = async ({ apiUrl, accessToken, spaceId, tenantId, webhookSecret, existingWebhookId, rotateSecret }: { apiUrl: string; accessToken: string; spaceId: string; tenantId: string; webhookSecret: string; existingWebhookId?: string; rotateSecret?: boolean }) => {
     const webhookBaseUrl = String(process.env.MONIME_WEBHOOK_BASE_URL || '').trim().replace(/\/+$/, '');
     if (!webhookBaseUrl) throw new Error('MONIME_WEBHOOK_BASE_URL is not configured on the server.');
     const webhookUrl = webhookBaseUrl + '/api/monime/webhook/' + encodeURIComponent(tenantId);
@@ -692,13 +692,17 @@ async function startServer() {
     };
     if (existingWebhookId && rotateSecret) {
       const data = await createWebhook();
-      await fetch(apiUrl + '/v1/webhooks/' + encodeURIComponent(existingWebhookId), { method: 'PATCH', headers, body: JSON.stringify({ name: 'markitHub Payment Webhook', url: webhookUrl, enabled: true, apiRelease: 'caph', events, metadata: { tenantId, managedBy: 'markitHub' } }) });
+      const disableResponse = await fetch(apiUrl + '/v1/webhooks/' + encodeURIComponent(existingWebhookId), { method: 'PATCH', headers, body: JSON.stringify({ enabled: false }) });
+      if (!disableResponse.ok) throw new Error('Monime previous webhook could not be disabled (' + disableResponse.status + ').');
+      return { id: String(data.result?.id || ''), url: webhookUrl, created: true };
+    }
+    if (existingWebhookId) {
+      const response = await fetch(apiUrl + '/v1/webhooks/' + encodeURIComponent(existingWebhookId), { method: 'PATCH', headers, body: JSON.stringify({ name: 'markitHub Payment Webhook', url: webhookUrl, enabled: true, apiRelease: 'caph', events, metadata: { tenantId, managedBy: 'markitHub' } }) });
       if (!response.ok) throw new Error('Monime webhook update failed (' + response.status + ').');
+      const data = await response.json();
       return { id: String(data.result?.id || existingWebhookId), url: webhookUrl, created: false };
     }
     const data = await createWebhook();
-    if (!response.ok) { const detail = await response.text(); throw new Error('Monime webhook registration failed (' + response.status + '): ' + detail.slice(0, 300)); }
-    const data = await response.json();
     return { id: String(data.result?.id || ''), url: webhookUrl, created: true };
   };
 
