@@ -921,101 +921,81 @@ async function startServer() {
       if (!db) return res.status(503).json({ success: false, message: 'Durable configuration storage is not configured.' });
       const tenantId = String(req.user?.claims?.tenantId || req.user?.claims?.tenant_id || '').trim();
       if (!tenantId) return res.status(400).json({ success: false, message: 'Tenant identity is required.' });
+
       const gatewaySnap = await db.collection('tenants').doc(tenantId).collection('payment_gateways').doc('monime').get();
+      if (!gatewaySnap.exists) return res.status(404).json({ success: false, message: 'Monime gateway is not configured for this tenant.' });
       const gateway = gatewaySnap.data() || {};
       const effectiveToken = decryptMonimeSecret(gateway.monimeAccessToken).trim();
       const effectiveSpaceId = String(gateway.monimeSpaceId || '').trim();
-      const apiUrl = (process.env.MONIME_API_URL || 'https://api.monime.io').replace(/\/+$/, '');
+      const apiUrl = (process.env.MONIME_API_URL || 'https://api.monime.io').replace(/\\/+$/, '');
+      const monimeVersion = 'caph.2025-08-23';
 
-      if (!effectiveSpaceId) {
-        return res.status(400).json({ 
-          success: false, 
-          message: 'MONIME_SPACE_ID is required. Enter your Space Identifier in System Settings.',
-          diagnostics: { spaceIdValid: false, tokenValid: !!effectiveToken, status: 'missing_space_id' }
-        });
-      }
-      if (!effectiveToken) {
-        return res.status(400).json({ 
-          success: false, 
-          message: 'MONIME_API_TOKEN is required. Enter your Bearer API token in System Settings.',
-          diagnostics: { spaceIdValid: true, tokenValid: false, status: 'missing_token' }
-        });
-      }
+      if (!effectiveSpaceId) return res.status(400).json({ success: false, message: 'Monime Space ID is missing.' });
+      if (!effectiveToken) return res.status(400).json({ success: false, message: 'Monime API access token is missing.' });
 
-      if (!gatewaySnap.exists) return res.status(404).json({ success: false, message: 'Monime gateway is not configured for this tenant.' });
-      const webhookConfigured = Boolean(gateway.monimeWebhookId && gateway.monimeWebhookUrl && gateway.webhookManaged);
       const startTime = Date.now();
-      let pingSuccess = true;
-      let statusCode = 200;
-      let note = 'Handshake verified successfully';
-      let endpointTested = `${apiUrl}/v1/checkout-sessions`;
-      let monimeVersion = 'caph.2025-08-23';
+      let statusCode = 0;
+      let success = false;
+      let note = 'Monime credentials could not be verified.';
 
       try {
-        // Test Monime API status / probe session creation
-        const pingRes = await fetch(`${apiUrl}/v1/checkout-sessions`, {
-          method: 'POST',
+        // Read-only verification: listing the tenant's managed webhooks does not create a payment,
+        // checkout session, or other financial resource.
+        const pingRes = await fetch(`${apiUrl}/v1/webhooks?limit=1`, {
+          method: 'GET',
           headers: {
-            'Content-Type': 'application/json',
             'Authorization': `Bearer ${effectiveToken}`,
             'Monime-Space-Id': effectiveSpaceId,
             'Monime-Version': monimeVersion,
+            'Accept': 'application/json',
           },
-          body: JSON.stringify({
-            name: 'Connection Test Verification Probe',
-            reference: `probe-${Date.now()}`,
-            lineItems: [{
-              name: 'System Diagnostic Probe',
-              quantity: 1,
-              price: { currency: 'SLE', value: 100 }
-            }]
-          })
         });
-
         statusCode = pingRes.status;
-        if (pingRes.status === 401) {
-          pingSuccess = false;
-          note = `Monime API responded with 401 Unauthorized: Invalid or expired MONIME_API_TOKEN.`;
-        } else if (pingRes.status === 403) {
-          pingSuccess = false;
-          note = `Monime API responded with 403 Forbidden: Space ID '${effectiveSpaceId}' does not have access permissions for this token.`;
-        } else if (pingRes.status === 404) {
-          note = `Monime API reachable (404). Space '${effectiveSpaceId}' registered.`;
-          pingSuccess = true;
-        } else if (pingRes.ok || pingRes.status === 200 || pingRes.status === 201) {
-          note = `Monime Live API (Status 200/201 OK) verified. Space ID '${effectiveSpaceId}' is active and ready.`;
-          pingSuccess = true;
+        if (pingRes.ok) {
+          success = true;
+          note = 'Monime credentials and Space access verified without creating a payment resource.';
+        } else if (statusCode === 401) {
+          note = 'Monime rejected the API token (401 Unauthorized). Check that the token is valid and active.';
+        } else if (statusCode === 403) {
+          note = 'Monime denied access to this Space (403 Forbidden). Check the token permissions and Space ID.';
+        } else if (statusCode === 404) {
+          note = 'Monime API endpoint was not found. Check the configured Monime API version/base URL.';
         } else {
-          note = `Monime API connected (Status ${pingRes.status}). Space ID and API credentials are functional.`;
-          pingSuccess = true;
+          const detail = await pingRes.text().catch(() => '');
+          note = `Monime verification returned HTTP ${statusCode}.${detail ? ' ' + detail.slice(0, 180) : ''}`;
         }
-      } catch (netErr: any) {
+      } catch {
         statusCode = 503;
         note = 'Unable to reach the configured Monime API. Credentials were not verified.';
-        pingSuccess = false;
       }
 
       const latencyMs = Date.now() - startTime;
+      const verifiedAt = new Date().toISOString();
+      const webhookConfigured = Boolean(gateway.monimeWebhookId && gateway.monimeWebhookUrl && gateway.webhookManaged);
+      await gatewaySnap.ref.set({
+        lastVerifiedAt: verifiedAt,
+        lastVerificationStatus: success ? 'success' : 'failed',
+        lastVerificationStatusCode: statusCode,
+      }, { merge: true });
+
       return res.status(200).json({
-        success: pingSuccess,
+        success,
         message: note,
         spaceId: effectiveSpaceId,
+        webhookConfigured,
         latencyMs,
         diagnostics: {
           statusCode,
-          endpoint: endpointTested,
+          endpoint: `${apiUrl}/v1/webhooks?limit=1`,
           apiVersion: monimeVersion,
-          timestamp: new Date().toISOString(),
-          currencySupported: ['SLE', 'SLL', 'USD'],
-          minorUnitScale: 100,
-          paymentRails: ['Orange Money Sierra Leone', 'Afrimoney Africell', 'Visa / Mastercard Card Checkout']
+          timestamp: verifiedAt,
+          readOnly: true,
         }
       });
     } catch (err: any) {
       return res.status(500).json({ success: false, message: err?.message || 'Connection test error' });
     }
   });
-
   // Monime Webhook Receiver Endpoint
   app.post('/api/monime/webhook/:tenantId', express.raw({ type: 'application/json', limit: '256kb' }), async (req: any, res) => {
     try {
