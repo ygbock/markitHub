@@ -365,8 +365,14 @@ async function startServer() {
   // Monime Test Connection & Status Verification Endpoint
   app.post('/api/monime/test-connection', requireServerAuth, requirePermission('system.sync'), async (req, res) => {
     try {
-      const effectiveToken = (process.env.MONIME_API_TOKEN || '').trim();
-      const effectiveSpaceId = (process.env.MONIME_SPACE_ID || '').trim();
+      const db = getFirestoreDb();
+      if (!db) return res.status(503).json({ success: false, message: 'Durable configuration storage is not configured.' });
+      const tenantId = String(req.user?.claims?.tenantId || req.user?.claims?.tenant_id || '').trim();
+      if (!tenantId) return res.status(400).json({ success: false, message: 'Tenant identity is required.' });
+      const gatewaySnap = await db.collection('tenants').doc(tenantId).collection('payment_gateways').doc('monime').get();
+      const gateway = gatewaySnap.data() || {};
+      const effectiveToken = String(gateway.monimeAccessToken || '').trim();
+      const effectiveSpaceId = String(gateway.monimeSpaceId || '').trim();
       const apiUrl = (process.env.MONIME_API_URL || 'https://api.monime.io').replace(/\/+$/, '');
 
       if (!effectiveSpaceId) {
