@@ -481,11 +481,19 @@ async function startServer() {
   });
 
   // Get active Monime Sessions Endpoint
-  app.get('/api/monime/sessions', requireServerAuth, requirePermission('payments.create'), (req, res) => {
-    return res.json({
-      success: true,
-      sessions: Array.from(serverMonimeSessions.values())
-    });
+  app.get('/api/monime/sessions', requireServerAuth, requirePermission('payments.create'), async (req, res) => {
+    try {
+      const db = getFirestoreDb();
+      if (!db) return res.status(503).json({ error: 'Durable payment storage is not configured.' });
+      const snapshot = await db.collection('monime_sessions').orderBy('created_at', 'desc').limit(100).get();
+      return res.json({
+        success: true,
+        sessions: snapshot.docs.map(doc => doc.data())
+      });
+    } catch (err: any) {
+      console.error('Monime sessions query error:', err);
+      return res.status(500).json({ error: 'Unable to load payment sessions.' });
+    }
   });
 
   // =========================================================================
