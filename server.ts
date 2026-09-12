@@ -2,6 +2,9 @@ import express from 'express';
 import fs from 'fs';
 import path from 'path';
 import dotenv from 'dotenv';
+import express from 'express';
+import { getApps, cert, initializeApp } from 'firebase-admin/app';
+import { getAuth } from 'firebase-admin/auth';
 import { GoogleGenAI } from '@google/genai';
 import { createServer as createViteServer } from 'vite';
 import { validateCartBackend, validateCouponAuthoritative, SERVER_PROMOTIONS_REGISTRY } from './src/server/cartValidator';
@@ -48,16 +51,46 @@ async function startServer() {
   // -----------------------------------------------------------------------------
   // Sensitive business endpoints must fail closed until Firebase Admin
   // authentication is wired in. Public storefront endpoints remain available.
-  const requireServerAuth = (req: any, res: any, next: any) => {
+  function getFirebaseAdminAuth() {
+    if (getApps().length === 0) {
+      const projectId = process.env.FIREBASE_PROJECT_ID;
+      const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
+      const privateKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\\n');
+      if (!projectId || !clientEmail || !privateKey) {
+        return null;
+      }
+      initializeApp({
+        credential: cert({ projectId, clientEmail, privateKey }),
+      });
+    }
+    return getAuth();
+  }
+
+  const requireServerAuth = async (req: any, res: any, next: any) => {
     const header = String(req.headers.authorization || '');
     if (!header.startsWith('Bearer ')) {
       return res.status(401).json({ error: 'Authentication required.' });
     }
-    // Token verification is intentionally not implemented here because this
-    // process currently has no firebase-admin dependency. Do not treat a
-    // client-supplied bearer string as identity. This guard is a migration
-    // barrier; production authentication must verify the Firebase ID token.
-    return res.status(501).json({ error: 'Server authentication is not configured yet.' });
+    const token = header.slice('Bearer '.length).trim();
+    if (!token) {
+      return res.status(401).json({ error: 'Authentication required.' });
+    }
+    try {
+      const auth = getFirebaseAdminAuth();
+      if (!auth) {
+        return res.status(503).json({ error: 'Server authentication is not configured.' });
+      }
+      const decoded = await auth.verifyIdToken(token);
+      req.user = {
+        uid: decoded.uid,
+        email: decoded.email ?? null,
+        emailVerified: decoded.email_verified === true,
+        claims: decoded,
+      };
+      return next();
+    } catch {
+      return res.status(401).json({ error: 'Invalid or expired authentication token.' });
+    }
   };
 
   app.get('/api/health', (req, res) => {
