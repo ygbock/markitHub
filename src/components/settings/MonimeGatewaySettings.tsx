@@ -9,6 +9,10 @@ type MonimeConfig = {
   webhookConfigured?: boolean;
   preferredChannel?: string;
   version?: string;
+  webhookUrl?: string | null;
+  webhookId?: string | null;
+  webhookManaged?: boolean;
+  lastVerifiedAt?: string | null;
 };
 
 export default function MonimeGatewaySettings() {
@@ -74,8 +78,10 @@ export default function MonimeGatewaySettings() {
           <h3 className="text-lg font-black text-slate-900 flex items-center gap-2"><ShieldCheck className="w-5 h-5 text-indigo-600" />Monime Payment Gateway</h3>
           <p className="text-xs text-gray-500 mt-1 max-w-2xl">Connect this merchant tenant directly to its own Monime Space. Credentials are sent to the server and are never displayed back in full.</p>
         </div>
-        {config?.configured ? <span className="px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-black uppercase">Configured</span> : <span className="px-2.5 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-200 text-[10px] font-black uppercase">Setup required</span>}
+        {config?.configured && config?.webhookConfigured ? <span className="px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-black uppercase">Connected</span> : config?.configured ? <span className="px-2.5 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-200 text-[10px] font-black uppercase">Needs verification</span> : <span className="px-2.5 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-200 text-[10px] font-black uppercase">Setup required</span>}
       </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3"><div className="p-3 rounded-xl border bg-slate-50"><div className="text-[10px] uppercase font-black text-slate-400">Space</div><div className="text-xs font-bold font-mono mt-1">{config?.spaceId || "Not configured"}</div></div><div className="p-3 rounded-xl border bg-slate-50"><div className="text-[10px] uppercase font-black text-slate-400">Environment</div><div className="text-xs font-bold mt-1">{config?.environment === "production" ? "Production" : "Sandbox"}</div></div><div className="p-3 rounded-xl border bg-slate-50"><div className="text-[10px] uppercase font-black text-slate-400">Webhook</div><div className="text-xs font-bold mt-1">{config?.webhookConfigured ? "Active" : "Not configured"}</div></div><div className="p-3 rounded-xl border bg-slate-50"><div className="text-[10px] uppercase font-black text-slate-400">Last verified</div><div className="text-xs font-bold mt-1">{config?.lastVerifiedAt ? new Date(config.lastVerifiedAt).toLocaleString() : "Not verified"}</div></div></div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <label className="text-xs font-bold text-slate-700">Monime Space ID
