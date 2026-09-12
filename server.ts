@@ -140,11 +140,38 @@ async function startServer() {
   // Monime Checkout Session Creation Endpoint
   app.post('/api/monime/create-checkout-session', requireServerAuth, requirePermission('payments.create'), async (req, res) => {
     try {
-      const { orderId, items, successUrl, cancelUrl, customerName, currency = 'SLE' } = req.body || {};
+      const { orderId, items, customerName, currency = 'SLE' } = req.body || {};
 
       if (!orderId || !items || !Array.isArray(items) || items.length === 0) {
         return res.status(400).json({ error: 'Missing required fields: orderId, items' });
       }
+
+      // Rebuild checkout pricing exclusively from the server catalog. Browser
+      // prices, names, images, and catalog overrides are never authoritative.
+      const validationResult = validateCartBackend({
+        items: items.map((item: any) => ({
+          productId: String(item.productId || item.id || ''),
+          variantSku: item.variantSku ? String(item.variantSku) : undefined,
+          quantity: Number(item.quantity),
+          clientPrice: typeof item.price === 'number' ? item.price : undefined,
+        })),
+      });
+      if (!validationResult.success) {
+        return res.status(400).json({
+          error: 'Cart validation failed.',
+          details: validationResult.errors,
+          warnings: validationResult.warnings,
+        });
+      }
+
+      const appUrl = (process.env.APP_URL || '').trim().replace(/\/+$/, '');
+      if (!appUrl) {
+        return res.status(503).json({ error: 'APP_URL is not configured on the server.' });
+      }
+      const successUrl = new URL('/checkout/success', appUrl);
+      successUrl.searchParams.set('orderId', String(orderId));
+      const cancelUrl = new URL('/checkout/cancel', appUrl);
+      cancelUrl.searchParams.set('orderId', String(orderId));
 
       const monimeToken = (process.env.MONIME_API_TOKEN || '').trim();
       const monimeSpaceId = (process.env.MONIME_SPACE_ID || '').trim();
@@ -155,21 +182,20 @@ async function startServer() {
       const monimeApiUrl = (process.env.MONIME_API_URL || 'https://api.monime.io').replace(/\/+$/, '');
 
       // Build line items for Monime (minor units = cents, e.g. SLE * 100)
-      const lineItems = items.map((item: any) => ({
+      const lineItems = validationResult.items.map((item) => ({
         type: 'custom',
-        name: item.name,
-        description: item.description || undefined,
-        quantity: item.quantity || 1,
+        name: item.productName,
+        quantity: item.quantity,
         price: {
-          currency: currency || 'SLE',
-          value: Math.round((Number(item.price) || 0) * 100),
+          currency: validationResult.pricing.currency,
+          value: Math.round(item.serverUnitPrice * 100),
         },
-        reference: item.sku || undefined,
-        images: item.image ? [item.image] : undefined,
+        reference: item.variantSku || item.productId,
+        images: item.imageUrl ? [item.imageUrl] : undefined,
       }));
 
-      const totalAmount = items.reduce((sum: number, item: any) => sum + ((Number(item.price) || 0) * (Number(item.quantity) || 1)), 0);
-      const idempotencyKey = `nexus-${orderId}`;
+      const totalAmount = validationResult.pricing.grandTotal;
+      const idempotencyKey = `nexus-${crypto.createHash('sha256').update(String(orderId)).digest('hex').slice(0, 32)}`;
 
       let session: any = null;
 
@@ -205,15 +231,9 @@ async function startServer() {
         console.warn('[Monime API Network Notice] Using high-availability sandbox session generator:', networkErr?.message);
       }
 
-      // If session not created by external network (e.g. sandbox or token placeholder), generate compliant session
+      // Never fabricate a successful payment session when Monime is unavailable.
       if (!session) {
-        const pseudoId = `cs_monime_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-        session = {
-          id: pseudoId,
-          orderNumber: `MNM-${Date.now().toString().slice(-6)}`,
-          redirectUrl: `https://checkout.monime.io/pay/${pseudoId}?ref=${encodeURIComponent(orderId)}`,
-          status: 'pending'
-        };
+        return res.status(502).json({ error: 'Unable to create Monime checkout session.' });
       }
 
       // Store session in server memory
