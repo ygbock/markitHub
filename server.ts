@@ -1081,6 +1081,10 @@ async function startServer() {
           const sessionSnap = await sessionRef.get();
           if (sessionSnap.exists) {
             const existing = sessionSnap.data() as MonimeServerSession;
+            const currentSessionStatus = String(existing.status || 'pending').toLowerCase();
+            if (['cancelled', 'expired'].includes(currentSessionStatus)) {
+              return res.status(200).json({ received: true, ignored: true, reason: 'terminal_session_state' });
+            }
             existing.status = 'completed';
             existing.updated_at = new Date().toISOString();
             if (orderNumber) existing.monime_order_number = orderNumber;
@@ -1278,6 +1282,11 @@ async function startServer() {
           const sessionSnap = await sessionRef.get();
           if (sessionSnap.exists) {
             const existing = sessionSnap.data() as MonimeServerSession;
+            const currentSessionStatus = String(existing.status || 'pending').toLowerCase();
+            // Terminal successful sessions cannot be moved backwards by a late cancel/expiry event.
+            if (['completed', 'paid'].includes(currentSessionStatus)) {
+              return res.status(200).json({ received: true, ignored: true, reason: 'terminal_session_state' });
+            }
             existing.status = eventType.includes('cancelled') ? 'cancelled' : 'expired';
             existing.updated_at = new Date().toISOString();
             await sessionRef.set(existing, { merge: true });
