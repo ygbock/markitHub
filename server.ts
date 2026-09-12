@@ -935,7 +935,7 @@ async function startServer() {
       const gateway = gatewaySnap.data() || {};
       const effectiveToken = decryptMonimeSecret(gateway.monimeAccessToken).trim();
       const effectiveSpaceId = String(gateway.monimeSpaceId || '').trim();
-      const apiUrl = (process.env.MONIME_API_URL || 'https://api.monime.io').replace(/\\/+$/, '');
+      const apiUrl = (process.env.MONIME_API_URL || 'https://api.monime.io').replace(/\/+$/, '');
       const monimeVersion = 'caph.2025-08-23';
 
       if (!effectiveSpaceId) return res.status(400).json({ success: false, message: 'Monime Space ID is missing.' });
@@ -1023,7 +1023,7 @@ async function startServer() {
       }
 
       const rawBody = Buffer.isBuffer(req.body) ? req.body : Buffer.from(String(req.body || ''), 'utf8');
-      const timestampMatch = signatureHeader.match(/(?:^|,)t=(\\d+)/);
+      const timestampMatch = signatureHeader.match(/(?:^|,)t=(\d+)/);
       const signatureMatch = signatureHeader.match(/(?:^|,)v1=([a-fA-F0-9]+)/);
       if (!timestampMatch || !signatureMatch) {
         return res.status(401).json({ error: 'Invalid Monime-Signature format.' });
