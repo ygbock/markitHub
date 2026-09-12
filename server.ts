@@ -457,11 +457,11 @@ async function startServer() {
   });
 
   // Monime Webhook Receiver Endpoint
-  app.post('/api/monime/webhook', express.raw({ type: 'application/json', limit: '256kb' }), async (req: any, res) => {
+  app.post('/api/monime/webhook/:tenantId', express.raw({ type: 'application/json', limit: '256kb' }), async (req: any, res) => {
     try {
       const db = getFirestoreDb();
       if (!db) return res.status(503).json({ error: 'Durable webhook storage is not configured.' });
-      const tenantId = String(req.headers['x-tenant-id'] || '').trim();
+      const tenantId = String(req.params.tenantId || '').trim();
       if (!tenantId) return res.status(400).json({ error: 'Webhook tenant identifier is required.' });
       const gatewaySnap = await db.collection('tenants').doc(tenantId).collection('payment_gateways').doc('monime').get();
       const secret = String(gatewaySnap.data()?.webhookSecret || '').trim();
