@@ -1,4 +1,5 @@
 import express from 'express';
+import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import dotenv from 'dotenv';
@@ -340,19 +341,65 @@ async function startServer() {
   });
 
   // Monime Webhook Receiver Endpoint
-  app.post('/api/monime/webhook', async (req, res) => {
+  app.post('/api/monime/webhook', express.raw({ type: 'application/json', limit: '256kb' }), async (req: any, res) => {
     try {
-      const event = req.body || {};
-      const eventType = event.type || event.eventType || 'checkout_session.completed';
-      const data = event.data || event.result || event;
+      const secret = (process.env.MONIME_WEBHOOK_SECRET || '').trim();
+      if (!secret || secret.length < 32) {
+        return res.status(503).json({ error: 'Monime webhook verification is not configured.' });
+      }
 
-      console.log(`[Monime Webhook] Received event: ${eventType}`, data);
+      const signatureHeader = String(req.headers['monime-signature'] || '');
+      if (!signatureHeader) {
+        return res.status(401).json({ error: 'Missing Monime-Signature.' });
+      }
+
+      const rawBody = Buffer.isBuffer(req.body) ? req.body : Buffer.from(String(req.body || ''), 'utf8');
+      const timestampMatch = signatureHeader.match(/(?:^|,)t=(\\d+)/);
+      const signatureMatch = signatureHeader.match(/(?:^|,)v1=([a-fA-F0-9]+)/);
+      if (!timestampMatch || !signatureMatch) {
+        return res.status(401).json({ error: 'Invalid Monime-Signature format.' });
+      }
+
+      const timestamp = Number(timestampMatch[1]);
+      if (!Number.isSafeInteger(timestamp)) {
+        return res.status(401).json({ error: 'Invalid webhook timestamp.' });
+      }
+      const timestampMs = timestamp < 100000000000 ? timestamp * 1000 : timestamp;
+      if (Math.abs(Date.now() - timestampMs) > 5 * 60 * 1000) {
+        return res.status(401).json({ error: 'Expired webhook signature.' });
+      }
+
+      const signedPayload = Buffer.concat([Buffer.from(String(timestamp)), Buffer.from('.'), rawBody]);
+      const expected = crypto.createHmac('sha256', secret).update(signedPayload).digest('hex');
+      const provided = signatureMatch[1].toLowerCase();
+      if (provided.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(provided), Buffer.from(expected))) {
+        return res.status(401).json({ error: 'Invalid webhook signature.' });
+      }
+
+      const event = JSON.parse(rawBody.toString('utf8'));
+      const eventId = String(event.id || event.eventId || event.data?.id || '');
+      if (!eventId) {
+        return res.status(400).json({ error: 'Webhook event ID is required.' });
+      }
+
+      const seen = (globalThis as any).__monimeWebhookEvents || new Map<string, number>();
+      (globalThis as any).__monimeWebhookEvents = seen;
+      const now = Date.now();
+      for (const [id, seenAt] of seen.entries()) {
+        if (now - seenAt > 24 * 60 * 60 * 1000) seen.delete(id);
+      }
+      if (seen.has(eventId)) {
+        return res.status(200).json({ received: true, duplicate: true });
+      }
+      seen.set(eventId, now);
+
+      const eventType = event.type || event.eventType;
+      const data = event.data || event.result || {};
+      console.log('[Monime Webhook] Verified event:', eventType, eventId);
 
       if (eventType === 'checkout_session.completed' || eventType === 'payment.completed') {
         const sessionId = data.id || data.sessionId;
         const orderNumber = data.orderNumber || data.monime_order_number;
-        const reference = data.reference || data.orderId;
-
         if (sessionId && serverMonimeSessions.has(sessionId)) {
           const existing = serverMonimeSessions.get(sessionId)!;
           existing.status = 'completed';
@@ -373,7 +420,7 @@ async function startServer() {
       return res.status(200).json({ received: true, eventType });
     } catch (err: any) {
       console.error('Monime webhook error:', err);
-      return res.status(500).json({ error: err?.message || 'Internal server error' });
+      return res.status(400).json({ error: 'Invalid webhook payload.' });
     }
   });
 
