@@ -206,6 +206,17 @@ async function startServer() {
     };
   }
 
+  function assertStaffRoleManagementAllowed(req: express.Request, body: any, existing?: any) {
+    const requestedRole = body?.role;
+    const requestedOverrides = body?.customPermissions;
+    const roleChanged = requestedRole !== undefined && String(requestedRole) !== String(existing?.role || '');
+    const overridesChanged = requestedOverrides !== undefined &&
+      JSON.stringify(requestedOverrides) !== JSON.stringify(existing?.customPermissions || []);
+    if ((roleChanged || overridesChanged) && !(req.user?.permissions || []).includes('users.roles')) {
+      throw new Error('Role or permission changes require users.roles.');
+    }
+  }
+
   app.get('/api/tenant/staff', requireServerAuth, requirePermission('users.view'), async (req, res) => {
     const tenantId = getAuthenticatedTenantId(req);
     const db = getAdminDb();
@@ -223,6 +234,7 @@ async function startServer() {
     const db = getAdminDb();
     if (!tenantId || !db) return res.status(503).json({ error: 'Tenant staff service is not configured.' });
     try {
+      assertStaffRoleManagementAllowed(req, req.body);
       const staff = normalizeStaffPayload(req.body, tenantId);
       if (!staff.name) return res.status(400).json({ error: 'Staff name is required.' });
       const ref = db.collection('staff').doc(staff.id);
@@ -246,7 +258,9 @@ async function startServer() {
       const snap = await ref.get();
       if (!snap.exists) return res.status(404).json({ error: 'Staff member not found.' });
       if (String(snap.data()?.tenantId || '') !== tenantId) return res.status(403).json({ error: 'Access denied.' });
+      assertStaffRoleManagementAllowed(req, req.body, snap.data());
       const staff = normalizeStaffPayload(req.body, tenantId, snap.data());
+      if (staff.id === req.user?.uid && staff.role !== snap.data()?.role) return res.status(400).json({ error: 'You cannot change your own role.' });
       await ref.set(staff, { merge: true });
       return res.json({ success: true, staff });
     } catch (err: any) {
