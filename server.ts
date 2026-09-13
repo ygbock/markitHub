@@ -199,7 +199,31 @@ async function startServer() {
     return auth ? getFirestore() : null;
   }
 
-  app.get('/api/tenant/staff', requireServerAuth, requirePermission('users.view'), async (req, res) => {
+  const requireActiveTenantMembership = async (req: any, res: any, next: any) => {
+    const tenantId = extractAuthenticatedTenantId(req.user);
+    const db = getAdminDb();
+    if (!tenantId || !db || !req.user?.uid) {
+      return res.status(403).json({ error: 'Active tenant membership is required.' });
+    }
+    try {
+      const tenantSnap = await db.collection('tenants').doc(tenantId).get();
+      if (!tenantSnap.exists || String(tenantSnap.data()?.status || 'active').toLowerCase() !== 'active') {
+        return res.status(403).json({ error: 'Tenant is suspended or unavailable.' });
+      }
+      const ownerUid = String(tenantSnap.data()?.ownerUid || '');
+      if (ownerUid === req.user.uid) return next();
+
+      const staffSnap = await db.collection('staff').where('tenantId', '==', tenantId).where('uid', '==', req.user.uid).limit(1).get();
+      if (staffSnap.empty || String(staffSnap.docs[0].data()?.status || 'active').toLowerCase() !== 'active') {
+        return res.status(403).json({ error: 'Staff account is inactive or suspended.' });
+      }
+      return next();
+    } catch {
+      return res.status(500).json({ error: 'Unable to verify tenant membership status.' });
+    }
+  };
+
+  app.get('/api/tenant/staff', requireServerAuth, requireActiveTenantMembership, requirePermission('users.view'), async (req, res) => {
     const tenantId = extractAuthenticatedTenantId(req.user);
     const db = getAdminDb();
     if (!tenantId || !db) return res.status(503).json({ error: 'Tenant staff service is not configured.' });
@@ -211,7 +235,7 @@ async function startServer() {
     }
   });
 
-  app.get('/api/tenant/staff/:staffId', requireServerAuth, requirePermission('users.view'), async (req, res) => {
+  app.get('/api/tenant/staff/:staffId', requireServerAuth, requireActiveTenantMembership, requirePermission('users.view'), async (req, res) => {
     const tenantId = extractAuthenticatedTenantId(req.user);
     const db = getAdminDb();
     if (!tenantId || !db) return res.status(503).json({ error: 'Tenant staff service is not configured.' });
@@ -227,7 +251,7 @@ async function startServer() {
     }
   });
 
-  app.post('/api/tenant/staff', requireServerAuth, requirePermission('users.manage'), async (req, res) => {
+  app.post('/api/tenant/staff', requireServerAuth, requireActiveTenantMembership, requirePermission('users.manage'), async (req, res) => {
     const tenantId = extractAuthenticatedTenantId(req.user);
     const db = getAdminDb();
     if (!tenantId || !db) return res.status(503).json({ error: 'Tenant staff service is not configured.' });
@@ -254,7 +278,7 @@ async function startServer() {
     }
   });
 
-  app.patch('/api/tenant/staff/:staffId', requireServerAuth, requirePermission('users.manage'), async (req, res) => {
+  app.patch('/api/tenant/staff/:staffId', requireServerAuth, requireActiveTenantMembership, requirePermission('users.manage'), async (req, res) => {
     const tenantId = extractAuthenticatedTenantId(req.user);
     const db = getAdminDb();
     if (!tenantId || !db) return res.status(503).json({ error: 'Tenant staff service is not configured.' });
@@ -281,7 +305,7 @@ async function startServer() {
     }
   });
 
-  app.delete('/api/tenant/staff/:staffId', requireServerAuth, requirePermission('users.manage'), async (req, res) => {
+  app.delete('/api/tenant/staff/:staffId', requireServerAuth, requireActiveTenantMembership, requirePermission('users.manage'), async (req, res) => {
     const tenantId = extractAuthenticatedTenantId(req.user);
     const db = getAdminDb();
     if (!tenantId || !db) return res.status(503).json({ error: 'Tenant staff service is not configured.' });
@@ -307,6 +331,35 @@ async function startServer() {
       return res.status(status).json({ error: err?.message || 'Unable to delete staff.' });
     }
   });
+  
+  app.patch('/api/tenant/staff/:staffId/status', requireServerAuth, requireActiveTenantMembership, requirePermission('users.manage'), async (req, res) => {
+    const tenantId = extractAuthenticatedTenantId(req.user);
+    const db = getAdminDb();
+    if (!tenantId || !db) return res.status(503).json({ error: 'Tenant staff service is not configured.' });
+    try {
+      const ref = db.collection('staff').doc(req.params.staffId);
+      const snap = await ref.get();
+      if (!snap.exists) return res.status(404).json({ error: 'Staff member not found.' });
+      assertTenantStaffAccess(snap.data(), tenantId);
+      const tenantSnap = await db.collection('tenants').doc(tenantId).get();
+      if (tenantSnap.exists) {
+        assertNotTenantOwnerDeletion(snap.data(), { id: tenantSnap.id, ...tenantSnap.data() } as any);
+      }
+      const status = String(req.body?.status || '').toLowerCase();
+      if (status !== 'active' && status !== 'suspended') {
+        return res.status(400).json({ error: 'Status must be active or suspended.' });
+      }
+      if (isSelfStaffOperation(req.user, req.params.staffId, snap.data())) {
+        return res.status(400).json({ error: 'You cannot change your own account status.' });
+      }
+      await ref.set({ status, updatedAt: new Date().toISOString() }, { merge: true });
+      return res.json({ success: true, staff: { ...snap.data(), id: snap.id, status } });
+    } catch (err: any) {
+      const status = err?.statusCode || 500;
+      return res.status(status).json({ error: err?.message || 'Unable to update staff status.' });
+    }
+  });
+
 
   // =========================================================================
   // CANONICAL TENANT OWNERSHIP & SETTINGS
