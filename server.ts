@@ -737,7 +737,7 @@ async function startServer() {
         return res.status(400).json({ error: 'Monime API access token appears invalid.' });
       }
       if (webhookSecret && (webhookSecret.length < 32 || webhookSecret.length > 256)) {
-        return res.status(400).json({ error: 'Webhook verification secret must be between 32 and 1000 characters.' });
+        return res.status(400).json({ error: 'Webhook verification secret must be between 32 and 256 characters.' });
       }
       if (accessToken.length > 1000 || spaceId.length > 64) {
         return res.status(400).json({ error: 'Monime configuration value is too long.' });
@@ -925,7 +925,7 @@ async function startServer() {
   });
 
   // Monime Test Connection & Status Verification Endpoint
-  app.post('/api/monime/test-connection', requireServerAuth, requirePermission('system.sync'), async (req, res) => {
+  app.post('/api/monime/test-connection', requireServerAuth, requirePermission('system.settings'), async (req, res) => {
     try {
       const db = getFirestoreDb();
       if (!db) return res.status(503).json({ success: false, message: 'Durable configuration storage is not configured.' });
