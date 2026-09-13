@@ -25,7 +25,7 @@ import {
 } from './src/server/tenantManager';
 import { INITIAL_PRODUCTS } from './src/data/mockData';
 import { slugify } from './src/utils/seoUtils';
-import { DEFAULT_ROLE_PERMISSIONS } from './src/utils/permissions';
+import { DEFAULT_ROLE_PERMISSIONS, ALL_PERMISSION_KEYS } from './src/utils/permissions';
 import { transitionPaymentState, type PaymentState } from './src/server/paymentState';
 
 dotenv.config();
