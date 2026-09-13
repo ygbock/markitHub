@@ -27,6 +27,14 @@ import { INITIAL_PRODUCTS } from './src/data/mockData';
 import { slugify } from './src/utils/seoUtils';
 import { DEFAULT_ROLE_PERMISSIONS, ALL_PERMISSION_KEYS } from './src/utils/permissions';
 import { transitionPaymentState, type PaymentState } from './src/server/paymentState';
+import {
+  extractAuthenticatedTenantId,
+  assertTenantStaffAccess,
+  assertStaffRoleManagementAllowed,
+  assertNotSelfRoleChange,
+  normalizeStaffPayload,
+  isSelfStaffOperation,
+} from './src/server/tenantStaffAuth';
 
 dotenv.config();
 
@@ -182,43 +190,8 @@ async function startServer() {
     return auth ? getFirestore() : null;
   }
 
-  function getAuthenticatedTenantId(req: express.Request): string {
-    return String(req.user?.claims?.tenantId || req.user?.claims?.tenant_id || '').trim();
-  }
-
-  function normalizeStaffPayload(body: any, tenantId: string, existing?: any) {
-    const role = String(body?.role || existing?.role || 'Cashier').trim();
-    const allowedRoles = Object.keys(DEFAULT_ROLE_PERMISSIONS);
-    if (!allowedRoles.includes(role)) throw new Error('Invalid staff role.');
-
-    const customPermissions = Array.isArray(body?.customPermissions)
-      ? body.customPermissions.filter((p: unknown): p is string => typeof p === 'string' && (ALL_PERMISSION_KEYS as string[]).includes(p))
-      : existing?.customPermissions;
-    return {
-      ...(existing || {}),
-      id: String(body?.id || existing?.id || crypto.randomUUID()),
-      tenantId,
-      name: String(body?.name ?? existing?.name ?? '').trim(),
-      email: String(body?.email ?? existing?.email ?? '').trim() || null,
-      role,
-      ...(customPermissions ? { customPermissions } : {}),
-      updatedAt: new Date().toISOString()
-    };
-  }
-
-  function assertStaffRoleManagementAllowed(req: express.Request, body: any, existing?: any) {
-    const requestedRole = body?.role;
-    const requestedOverrides = body?.customPermissions;
-    const roleChanged = requestedRole !== undefined && String(requestedRole) !== String(existing?.role || '');
-    const overridesChanged = requestedOverrides !== undefined &&
-      JSON.stringify(requestedOverrides) !== JSON.stringify(existing?.customPermissions || []);
-    if ((roleChanged || overridesChanged) && !(req.user?.permissions || []).includes('users.roles')) {
-      throw new Error('Role or permission changes require users.roles.');
-    }
-  }
-
   app.get('/api/tenant/staff', requireServerAuth, requirePermission('users.view'), async (req, res) => {
-    const tenantId = getAuthenticatedTenantId(req);
+    const tenantId = extractAuthenticatedTenantId(req.user);
     const db = getAdminDb();
     if (!tenantId || !db) return res.status(503).json({ error: 'Tenant staff service is not configured.' });
     try {
@@ -229,12 +202,28 @@ async function startServer() {
     }
   });
 
-  app.post('/api/tenant/staff', requireServerAuth, requirePermission('users.manage'), async (req, res) => {
-    const tenantId = getAuthenticatedTenantId(req);
+  app.get('/api/tenant/staff/:staffId', requireServerAuth, requirePermission('users.view'), async (req, res) => {
+    const tenantId = extractAuthenticatedTenantId(req.user);
     const db = getAdminDb();
     if (!tenantId || !db) return res.status(503).json({ error: 'Tenant staff service is not configured.' });
     try {
-      assertStaffRoleManagementAllowed(req, req.body);
+      const ref = db.collection('staff').doc(req.params.staffId);
+      const snap = await ref.get();
+      if (!snap.exists) return res.status(404).json({ error: 'Staff member not found.' });
+      assertTenantStaffAccess(snap.data(), tenantId);
+      return res.json({ success: true, staff: { ...snap.data(), id: snap.id } });
+    } catch (err: any) {
+      const status = err?.statusCode || 500;
+      return res.status(status).json({ error: err?.message || 'Unable to load staff.' });
+    }
+  });
+
+  app.post('/api/tenant/staff', requireServerAuth, requirePermission('users.manage'), async (req, res) => {
+    const tenantId = extractAuthenticatedTenantId(req.user);
+    const db = getAdminDb();
+    if (!tenantId || !db) return res.status(503).json({ error: 'Tenant staff service is not configured.' });
+    try {
+      assertStaffRoleManagementAllowed(req.user?.permissions, req.body);
       const requestedId = String(req.body?.id || '').trim();
       const staff = normalizeStaffPayload(req.body, tenantId);
       if (requestedId) {
@@ -244,49 +233,55 @@ async function startServer() {
       if (!staff.name) return res.status(400).json({ error: 'Staff name is required.' });
       const ref = db.collection('staff').doc(staff.id);
       const existing = await ref.get();
-      if (existing.exists && String(existing.data()?.tenantId || '') !== tenantId) {
-        return res.status(403).json({ error: 'Staff record belongs to another tenant.' });
+      if (existing.exists) {
+        assertTenantStaffAccess(existing.data(), tenantId);
+        return res.status(409).json({ error: 'A staff record with this ID already exists.' });
       }
       await ref.set(staff, { merge: true });
-      return res.status(existing.exists ? 200 : 201).json({ success: true, staff });
+      return res.status(201).json({ success: true, staff });
     } catch (err: any) {
-      return res.status(400).json({ error: err?.message || 'Unable to save staff.' });
+      const status = err?.statusCode || 400;
+      return res.status(status).json({ error: err?.message || 'Unable to save staff.' });
     }
   });
 
   app.patch('/api/tenant/staff/:staffId', requireServerAuth, requirePermission('users.manage'), async (req, res) => {
-    const tenantId = getAuthenticatedTenantId(req);
+    const tenantId = extractAuthenticatedTenantId(req.user);
     const db = getAdminDb();
     if (!tenantId || !db) return res.status(503).json({ error: 'Tenant staff service is not configured.' });
     try {
       const ref = db.collection('staff').doc(req.params.staffId);
       const snap = await ref.get();
       if (!snap.exists) return res.status(404).json({ error: 'Staff member not found.' });
-      if (String(snap.data()?.tenantId || '') !== tenantId) return res.status(403).json({ error: 'Access denied.' });
-      assertStaffRoleManagementAllowed(req, req.body, snap.data());
+      assertTenantStaffAccess(snap.data(), tenantId);
+      assertStaffRoleManagementAllowed(req.user?.permissions, req.body, snap.data());
+      assertNotSelfRoleChange(req.user, req.params.staffId, req.body?.role, snap.data());
       const staff = normalizeStaffPayload(req.body, tenantId, snap.data());
-      if (String(snap.data()?.uid || '') === req.user?.uid && staff.role !== snap.data()?.role) return res.status(400).json({ error: 'You cannot change your own role.' });
       await ref.set(staff, { merge: true });
       return res.json({ success: true, staff });
     } catch (err: any) {
-      return res.status(400).json({ error: err?.message || 'Unable to update staff.' });
+      const status = err?.statusCode || 400;
+      return res.status(status).json({ error: err?.message || 'Unable to update staff.' });
     }
   });
 
   app.delete('/api/tenant/staff/:staffId', requireServerAuth, requirePermission('users.manage'), async (req, res) => {
-    const tenantId = getAuthenticatedTenantId(req);
+    const tenantId = extractAuthenticatedTenantId(req.user);
     const db = getAdminDb();
     if (!tenantId || !db) return res.status(503).json({ error: 'Tenant staff service is not configured.' });
     try {
       const ref = db.collection('staff').doc(req.params.staffId);
       const snap = await ref.get();
       if (!snap.exists) return res.status(404).json({ error: 'Staff member not found.' });
-      if (String(snap.data()?.tenantId || '') !== tenantId) return res.status(403).json({ error: 'Access denied.' });
-      if (String(snap.data()?.uid || '') === req.user?.uid) return res.status(400).json({ error: 'You cannot delete your own staff account.' });
+      assertTenantStaffAccess(snap.data(), tenantId);
+      if (isSelfStaffOperation(req.user, req.params.staffId, snap.data())) {
+        return res.status(400).json({ error: 'You cannot delete your own staff account.' });
+      }
       await ref.delete();
       return res.json({ success: true });
     } catch (err: any) {
-      return res.status(500).json({ error: err?.message || 'Unable to delete staff.' });
+      const status = err?.statusCode || 500;
+      return res.status(status).json({ error: err?.message || 'Unable to delete staff.' });
     }
   });
 
