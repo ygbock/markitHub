@@ -25,7 +25,7 @@ import {
 import { INITIAL_PRODUCTS } from './src/data/mockData';
 import { slugify } from './src/utils/seoUtils';
 import { DEFAULT_ROLE_PERMISSIONS } from './src/utils/permissions';
-import { transitionPaymentState, type PaymentState, type PaymentEvent } from './src/server/paymentState';
+import { transitionPaymentState, type PaymentState } from './src/server/paymentState';
 
 dotenv.config();
 
