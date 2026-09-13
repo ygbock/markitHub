@@ -72,7 +72,7 @@ export default function MonimeGatewaySettings() {
   };
 
   return (
-    <div className="bg-white rounded-2xl border border-gray-200 p-4 sm:p-7 shadow-xs space-y-6" id="settings-section-monime">
+    <div className="bg-white rounded-2xl border border-gray-200 p-4 sm:p-6 xl:p-7 shadow-xs space-y-5 xl:space-y-6 overflow-hidden" id="settings-section-monime">
       <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 border-b border-gray-100 pb-5">
         <div>
           <h3 className="text-lg font-black text-slate-900 flex items-center gap-2"><ShieldCheck className="w-5 h-5 text-indigo-600" />Monime Payment Gateway</h3>
@@ -81,9 +81,9 @@ export default function MonimeGatewaySettings() {
         {config?.configured && config?.webhookConfigured ? <span className="px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-black uppercase">Connected</span> : config?.configured ? <span className="px-2.5 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-200 text-[10px] font-black uppercase">Needs verification</span> : <span className="px-2.5 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-200 text-[10px] font-black uppercase">Setup required</span>}
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3"><div className="p-3 rounded-xl border bg-slate-50"><div className="text-[10px] uppercase font-black text-slate-400">Space</div><div className="text-xs font-bold font-mono mt-1">{config?.spaceId || "Not configured"}</div></div><div className="p-3 rounded-xl border bg-slate-50"><div className="text-[10px] uppercase font-black text-slate-400">Environment</div><div className="text-xs font-bold mt-1">{config?.environment === "production" ? "Production" : "Sandbox"}</div></div><div className="p-3 rounded-xl border bg-slate-50"><div className="text-[10px] uppercase font-black text-slate-400">Webhook</div><div className="text-xs font-bold mt-1">{config?.webhookConfigured ? "Active" : "Not configured"}</div></div><div className="p-3 rounded-xl border bg-slate-50"><div className="text-[10px] uppercase font-black text-slate-400">Last verified</div><div className="text-xs font-bold mt-1">{config?.lastVerifiedAt ? new Date(config.lastVerifiedAt).toLocaleString() : "Not verified"}</div></div></div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3"><div className="p-3 rounded-xl border bg-slate-50"><div className="text-[10px] uppercase font-black text-slate-400">Space</div><div className="text-xs font-bold font-mono mt-1">{config?.spaceId || "Not configured"}</div></div><div className="p-3 rounded-xl border bg-slate-50"><div className="text-[10px] uppercase font-black text-slate-400">Environment</div><div className="text-xs font-bold mt-1">{config?.environment === "production" ? "Production" : "Sandbox"}</div></div><div className="p-3 rounded-xl border bg-slate-50"><div className="text-[10px] uppercase font-black text-slate-400">Webhook</div><div className="text-xs font-bold mt-1">{config?.webhookConfigured ? "Active" : "Not configured"}</div></div><div className="p-3 rounded-xl border bg-slate-50"><div className="text-[10px] uppercase font-black text-slate-400">Last verified</div><div className="text-xs font-bold mt-1">{config?.lastVerifiedAt ? new Date(config.lastVerifiedAt).toLocaleString() : "Not verified"}</div></div></div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 xl:gap-5">
         <label className="text-xs font-bold text-slate-700">Monime Space ID
           <input value={spaceId} onChange={e=>setSpaceId(e.target.value)} className="mt-1 w-full px-3 py-2.5 bg-slate-50 border border-gray-200 rounded-xl font-mono" placeholder="Your Monime Space ID" autoComplete="off" />
         </label>
@@ -115,7 +115,7 @@ export default function MonimeGatewaySettings() {
 
       {message && <div className="p-3 rounded-xl bg-slate-50 border text-xs font-semibold flex items-center gap-2">{message.includes('saved')||message.includes('verified')?<CheckCircle2 className="w-4 h-4 text-emerald-600"/>:<AlertTriangle className="w-4 h-4 text-amber-600"/>}{message}</div>}
 
-      <div className="flex flex-wrap gap-2 justify-end">
+      <div className="flex flex-col sm:flex-row gap-2 justify-end pt-1">
         <button type="button" onClick={()=>test()} disabled={testing||!config?.configured} className="px-4 py-2.5 rounded-xl border border-gray-200 text-xs font-bold flex items-center gap-2 disabled:opacity-50"><RefreshCw className={`w-4 h-4 ${testing?'animate-spin':''}`}/>Test Connection</button>
         <button type="button" onClick={()=>save()} disabled={busy||!spaceId||(!config?.configured && (!accessToken||!webhookSecret))} className="px-4 py-2.5 rounded-xl bg-slate-900 text-white text-xs font-bold flex items-center gap-2 disabled:opacity-50"><Save className="w-4 h-4"/>{busy?'Saving…':'Save Monime Configuration'}</button>
       </div>
