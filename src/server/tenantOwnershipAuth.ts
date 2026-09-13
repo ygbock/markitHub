@@ -224,6 +224,57 @@ export function assertNotTenantOwnerDeletion(
 }
 
 /**
+ * Prevents the tenant owner account from being suspended.
+ */
+export function assertNotTenantOwnerSuspension(
+  targetStaff: { uid?: string; id?: string; email?: string | null; tenantId?: string } | null | undefined,
+  tenant: TenantRecord,
+  requestedStatus?: unknown
+): void {
+  if (!targetStaff || String(requestedStatus).toLowerCase() !== 'suspended') return;
+  const ownerUid = String(tenant.ownerUid || '').trim();
+  if (!ownerUid) return;
+
+  const targetUid = String(targetStaff.uid || '').trim();
+  const targetId = String(targetStaff.id || '').trim();
+
+  if (targetUid === ownerUid || targetId === ownerUid) {
+    const error = new Error('The tenant owner account cannot be suspended.');
+    (error as any).statusCode = 403;
+    throw error;
+  }
+}
+
+/**
+ * Evaluates whether a user identity holds active membership within a tenant.
+ * - Enforces that the tenant exists and is active.
+ * - Recognizes the authoritative owner regardless of staff doc presence.
+ * - For non-owners, strictly requires an existing, active staff record.
+ */
+export function evaluateActiveTenantMembership(params: {
+  tenantId: string;
+  userUid: string;
+  tenant: { ownerUid?: string; status?: string } | null | undefined;
+  staff: { status?: string; tenantId?: string; uid?: string } | null | undefined;
+}): { allowed: boolean; error?: string; statusCode?: number } {
+  const { tenantId, userUid, tenant, staff } = params;
+  if (!tenantId || !userUid) {
+    return { allowed: false, error: 'Active tenant membership is required.', statusCode: 403 };
+  }
+  if (!tenant || String(tenant.status || 'active').toLowerCase() !== 'active') {
+    return { allowed: false, error: 'Tenant is suspended or unavailable.', statusCode: 403 };
+  }
+  const ownerUid = String(tenant.ownerUid || '').trim();
+  if (ownerUid && ownerUid === userUid) {
+    return { allowed: true };
+  }
+  if (!staff || String(staff.status || 'active').toLowerCase() !== 'active') {
+    return { allowed: false, error: 'Staff account is inactive or suspended.', statusCode: 403 };
+  }
+  return { allowed: true };
+}
+
+/**
  * Prevents the tenant owner from being demoted or modified by staff administrators.
  */
 export function assertNotTenantOwnerDemotion(

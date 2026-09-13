@@ -41,6 +41,8 @@ import {
   assertOwnershipTransferAllowed,
   assertNotTenantOwnerDeletion,
   assertNotTenantOwnerDemotion,
+  assertNotTenantOwnerSuspension,
+  evaluateActiveTenantMembership,
   sanitizeTenantUpdatePayload,
   createOwnershipTransferAuditRecord,
 } from './src/server/tenantOwnershipAuth';
@@ -207,16 +209,28 @@ async function startServer() {
     }
     try {
       const tenantSnap = await db.collection('tenants').doc(tenantId).get();
-      if (!tenantSnap.exists || String(tenantSnap.data()?.status || 'active').toLowerCase() !== 'active') {
-        return res.status(403).json({ error: 'Tenant is suspended or unavailable.' });
-      }
-      const ownerUid = String(tenantSnap.data()?.ownerUid || '');
-      if (ownerUid === req.user.uid) return next();
+      const tenantData = tenantSnap.exists ? tenantSnap.data() : null;
 
-      const staffSnap = await db.collection('staff').where('tenantId', '==', tenantId).where('uid', '==', req.user.uid).limit(1).get();
-      if (staffSnap.empty || String(staffSnap.docs[0].data()?.status || 'active').toLowerCase() !== 'active') {
-        return res.status(403).json({ error: 'Staff account is inactive or suspended.' });
+      let staffData = null;
+      const ownerUid = String(tenantData?.ownerUid || '');
+      if (ownerUid !== req.user.uid) {
+        const staffSnap = await db.collection('staff').where('tenantId', '==', tenantId).where('uid', '==', req.user.uid).limit(1).get();
+        if (!staffSnap.empty) {
+          staffData = staffSnap.docs[0].data();
+        }
       }
+
+      const evaluation = evaluateActiveTenantMembership({
+        tenantId,
+        userUid: req.user.uid,
+        tenant: tenantData as any,
+        staff: staffData as any,
+      });
+
+      if (!evaluation.allowed) {
+        return res.status(evaluation.statusCode || 403).json({ error: evaluation.error });
+      }
+
       return next();
     } catch {
       return res.status(500).json({ error: 'Unable to verify tenant membership status.' });
@@ -288,10 +302,23 @@ async function startServer() {
       if (!snap.exists) return res.status(404).json({ error: 'Staff member not found.' });
       assertTenantStaffAccess(snap.data(), tenantId);
 
-      // Check tenant owner protection against demotion
+      // Check tenant owner protection against demotion & suspension
       const tenantSnap = await db.collection('tenants').doc(tenantId).get();
       if (tenantSnap.exists) {
         assertNotTenantOwnerDemotion(snap.data(), { id: tenantSnap.id, ...tenantSnap.data() } as any, req.body?.role);
+        if (req.body?.status !== undefined) {
+          assertNotTenantOwnerSuspension(snap.data(), { id: tenantSnap.id, ...tenantSnap.data() } as any, req.body.status);
+        }
+      }
+
+      if (req.body?.status !== undefined) {
+        const newStatus = String(req.body.status).toLowerCase();
+        if (newStatus !== 'active' && newStatus !== 'suspended') {
+          return res.status(400).json({ error: 'Status must be active or suspended.' });
+        }
+        if (isSelfStaffOperation(req.user, req.params.staffId, snap.data()) && newStatus !== String(snap.data()?.status || 'active').toLowerCase()) {
+          return res.status(400).json({ error: 'You cannot change your own account status.' });
+        }
       }
 
       assertStaffRoleManagementAllowed(req.user?.permissions, req.body, snap.data());
@@ -341,14 +368,17 @@ async function startServer() {
       const snap = await ref.get();
       if (!snap.exists) return res.status(404).json({ error: 'Staff member not found.' });
       assertTenantStaffAccess(snap.data(), tenantId);
-      const tenantSnap = await db.collection('tenants').doc(tenantId).get();
-      if (tenantSnap.exists) {
-        assertNotTenantOwnerDeletion(snap.data(), { id: tenantSnap.id, ...tenantSnap.data() } as any);
-      }
+
       const status = String(req.body?.status || '').toLowerCase();
       if (status !== 'active' && status !== 'suspended') {
         return res.status(400).json({ error: 'Status must be active or suspended.' });
       }
+
+      const tenantSnap = await db.collection('tenants').doc(tenantId).get();
+      if (tenantSnap.exists) {
+        assertNotTenantOwnerSuspension(snap.data(), { id: tenantSnap.id, ...tenantSnap.data() } as any, status);
+      }
+
       if (isSelfStaffOperation(req.user, req.params.staffId, snap.data())) {
         return res.status(400).json({ error: 'You cannot change your own account status.' });
       }
