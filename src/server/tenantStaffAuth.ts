@@ -131,6 +131,13 @@ export function normalizeStaffPayload(
     throw error;
   }
 
+  // 0. Forbid ownerUid injection through staff payload
+  if (body && (body.ownerUid !== undefined || body.owner_uid !== undefined)) {
+    const error = new Error('Direct assignment or modification of ownerUid via staff payload is strictly prohibited.');
+    (error as any).statusCode = 403;
+    throw error;
+  }
+
   // 1. Enforce valid role
   const role = String(body?.role || existing?.role || 'Cashier').trim();
   const allowedRoles = Object.keys(DEFAULT_ROLE_PERMISSIONS);
@@ -167,6 +174,7 @@ export function normalizeStaffPayload(
     name: String(body?.name ?? existing?.name ?? '').trim(),
     email: String(body?.email ?? existing?.email ?? '').trim() || null,
     role,
+    status: String(body?.status ?? existing?.status ?? 'active'),
     ...(customPermissions ? { customPermissions } : {}),
     updatedAt: new Date().toISOString(),
   };

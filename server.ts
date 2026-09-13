@@ -35,6 +35,15 @@ import {
   normalizeStaffPayload,
   isSelfStaffOperation,
 } from './src/server/tenantStaffAuth';
+import {
+  establishTenantSecurityContext,
+  assertCallerIsOwner,
+  assertOwnershipTransferAllowed,
+  assertNotTenantOwnerDeletion,
+  assertNotTenantOwnerDemotion,
+  sanitizeTenantUpdatePayload,
+  createOwnershipTransferAuditRecord,
+} from './src/server/tenantOwnershipAuth';
 
 dotenv.config();
 
@@ -254,6 +263,13 @@ async function startServer() {
       const snap = await ref.get();
       if (!snap.exists) return res.status(404).json({ error: 'Staff member not found.' });
       assertTenantStaffAccess(snap.data(), tenantId);
+
+      // Check tenant owner protection against demotion
+      const tenantSnap = await db.collection('tenants').doc(tenantId).get();
+      if (tenantSnap.exists) {
+        assertNotTenantOwnerDemotion(snap.data(), { id: tenantSnap.id, ...tenantSnap.data() } as any, req.body?.role);
+      }
+
       assertStaffRoleManagementAllowed(req.user?.permissions, req.body, snap.data());
       assertNotSelfRoleChange(req.user, req.params.staffId, req.body?.role, snap.data());
       const staff = normalizeStaffPayload(req.body, tenantId, snap.data());
@@ -274,6 +290,13 @@ async function startServer() {
       const snap = await ref.get();
       if (!snap.exists) return res.status(404).json({ error: 'Staff member not found.' });
       assertTenantStaffAccess(snap.data(), tenantId);
+
+      // Check tenant owner protection against deletion
+      const tenantSnap = await db.collection('tenants').doc(tenantId).get();
+      if (tenantSnap.exists) {
+        assertNotTenantOwnerDeletion(snap.data(), { id: tenantSnap.id, ...tenantSnap.data() } as any);
+      }
+
       if (isSelfStaffOperation(req.user, req.params.staffId, snap.data())) {
         return res.status(400).json({ error: 'You cannot delete your own staff account.' });
       }
@@ -282,6 +305,163 @@ async function startServer() {
     } catch (err: any) {
       const status = err?.statusCode || 500;
       return res.status(status).json({ error: err?.message || 'Unable to delete staff.' });
+    }
+  });
+
+  // =========================================================================
+  // CANONICAL TENANT OWNERSHIP & SETTINGS
+  // =========================================================================
+  app.get('/api/tenant', requireServerAuth, async (req, res) => {
+    const tenantId = extractAuthenticatedTenantId(req.user);
+    const db = getAdminDb();
+    if (!tenantId || !db) return res.status(503).json({ error: 'Tenant service is not configured.' });
+    try {
+      const tenantRef = db.collection('tenants').doc(tenantId);
+      const tenantSnap = await tenantRef.get();
+      if (!tenantSnap.exists) {
+        return res.status(404).json({ error: `Tenant '${tenantId}' not found.` });
+      }
+      const tenantData = { id: tenantSnap.id, ...tenantSnap.data() } as any;
+      const isOwner = req.user?.uid === tenantData.ownerUid;
+
+      return res.json({
+        success: true,
+        tenant: tenantData,
+        isOwner,
+      });
+    } catch (err: any) {
+      const status = err?.statusCode || 500;
+      return res.status(status).json({ error: err?.message || 'Unable to load tenant.' });
+    }
+  });
+
+  app.patch('/api/tenant', requireServerAuth, requirePermission('system.settings'), async (req, res) => {
+    const tenantId = extractAuthenticatedTenantId(req.user);
+    const db = getAdminDb();
+    if (!tenantId || !db) return res.status(503).json({ error: 'Tenant service is not configured.' });
+    try {
+      const tenantRef = db.collection('tenants').doc(tenantId);
+      const tenantSnap = await tenantRef.get();
+      if (!tenantSnap.exists) {
+        return res.status(404).json({ error: `Tenant '${tenantId}' not found.` });
+      }
+      // sanitizeTenantUpdatePayload rejects any attempt to modify ownerUid or tenantId
+      const cleanUpdate = sanitizeTenantUpdatePayload(req.body, tenantId);
+      await tenantRef.set(cleanUpdate, { merge: true });
+      const updatedSnap = await tenantRef.get();
+      return res.json({ success: true, tenant: { id: updatedSnap.id, ...updatedSnap.data() } });
+    } catch (err: any) {
+      const status = err?.statusCode || 400;
+      return res.status(status).json({ error: err?.message || 'Unable to update tenant settings.' });
+    }
+  });
+
+  app.post('/api/tenant/ownership/transfer', requireServerAuth, async (req, res) => {
+    const tenantId = extractAuthenticatedTenantId(req.user);
+    const db = getAdminDb();
+    if (!tenantId || !db) return res.status(503).json({ error: 'Tenant service is not configured.' });
+
+    const targetParam = String(req.body?.targetUid || req.body?.targetStaffId || '').trim();
+    if (!targetParam) {
+      return res.status(400).json({ error: 'Target user UID or staff ID is required for ownership transfer.' });
+    }
+
+    try {
+      const tenantRef = db.collection('tenants').doc(tenantId);
+      let auditRecord: any = null;
+      let newOwnerUid = '';
+
+      await db.runTransaction(async (transaction) => {
+        const tenantSnap = await transaction.get(tenantRef);
+        if (!tenantSnap.exists) {
+          const err = new Error(`Tenant '${tenantId}' not found.`);
+          (err as any).statusCode = 404;
+          throw err;
+        }
+        const tenantData = { id: tenantSnap.id, ...tenantSnap.data() } as any;
+
+        // Retrieve caller's staff/membership record if one exists
+        let callerStaff: any = null;
+        const callerQuery = await db.collection('staff')
+          .where('tenantId', '==', tenantId)
+          .where('uid', '==', req.user?.uid)
+          .get();
+        if (!callerQuery.empty) {
+          callerStaff = callerQuery.docs[0].data();
+        }
+
+        const callerContext = establishTenantSecurityContext({
+          user: req.user,
+          tenantRecord: tenantData,
+          staffRecord: callerStaff,
+        });
+
+        // Resolve target member within the same tenant
+        let targetMember: any = null;
+        const targetDocRef = db.collection('staff').doc(targetParam);
+        const targetDocSnap = await transaction.get(targetDocRef);
+
+        if (targetDocSnap.exists) {
+          targetMember = { id: targetDocSnap.id, ...targetDocSnap.data() };
+        } else {
+          const targetUidQuery = await db.collection('staff')
+            .where('tenantId', '==', tenantId)
+            .where('uid', '==', targetParam)
+            .get();
+          if (!targetUidQuery.empty) {
+            targetMember = { id: targetUidQuery.docs[0].id, ...targetUidQuery.docs[0].data() };
+          }
+        }
+
+        newOwnerUid = assertOwnershipTransferAllowed({
+          callerContext,
+          targetMember,
+        });
+
+        const previousOwner = tenantData.ownerUid;
+        const now = new Date().toISOString();
+
+        // Atomically update tenant ownerUid
+        transaction.update(tenantRef, {
+          ownerUid: newOwnerUid,
+          updatedAt: now,
+        });
+
+        // Record immutable audit event
+        const auditRef = db.collection('audit_logs').doc();
+        auditRecord = createOwnershipTransferAuditRecord({
+          tenantId,
+          actorUid: req.user.uid,
+          targetUid: newOwnerUid,
+          previousOwner,
+          newOwner: newOwnerUid,
+          metadata: {
+            actorEmail: req.user.email,
+            reason: req.body?.reason || 'Owner-authorized transfer',
+          },
+        });
+        auditRecord.id = auditRef.id;
+        auditRecord.module = 'User Management';
+        auditRecord.action = 'TENANT_OWNERSHIP_TRANSFERRED';
+        auditRecord.details = `Tenant ownership transferred from ${previousOwner} to ${newOwnerUid}`;
+        auditRecord.role = 'Tenant Owner';
+        auditRecord.staffName = req.user.email || req.user.uid;
+
+        transaction.set(auditRef, auditRecord);
+      });
+
+      return res.json({
+        success: true,
+        message: 'Tenant ownership successfully transferred.',
+        tenant: {
+          id: tenantId,
+          ownerUid: newOwnerUid,
+        },
+        auditLog: auditRecord,
+      });
+    } catch (err: any) {
+      const status = err?.statusCode || 400;
+      return res.status(status).json({ error: err?.message || 'Failed to transfer ownership.' });
     }
   });
 

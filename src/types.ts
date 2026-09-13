@@ -1911,4 +1911,48 @@ export interface DbVariantPrice {
   effective_to?: string;
 }
 
+// ==========================================
+// Canonical Tenant Ownership & Membership
+// ==========================================
+
+export type TenantStatus = 'active' | 'suspended';
+
+export interface TenantRecord {
+  id: string;
+  ownerUid: string;
+  status: TenantStatus;
+  createdAt: string;
+  updatedAt: string;
+  name?: string;
+  slug?: string;
+  currency?: string;
+  [key: string]: unknown;
+}
+
+export type MembershipStatus = 'active' | 'suspended' | 'deactivated';
+
+export interface TenantMembership {
+  uid: string;
+  tenantId: string;
+  role: string;
+  status: MembershipStatus;
+  createdAt?: string;
+  updatedAt?: string;
+  email?: string | null;
+  name?: string;
+}
+
+export interface OwnershipTransferAuditLog {
+  id?: string;
+  tenantId: string;
+  actorUid: string;
+  targetUid: string;
+  action: 'TENANT_OWNERSHIP_TRANSFERRED' | string;
+  timestamp: string;
+  previousOwner: string;
+  newOwner: string;
+  metadata?: Record<string, unknown>;
+}
+
+
 

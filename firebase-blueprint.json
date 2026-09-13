@@ -149,9 +149,26 @@
         "maxUsagePerCustomer": { "type": "number" }
       },
       "required": ["id", "code", "discountType", "value"]
+    },
+    "tenant": {
+      "title": "Tenant",
+      "description": "Tenant organization record with canonical server-authoritative ownerUid and status",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "ownerUid": { "type": "string" },
+        "status": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "ownerUid", "status", "createdAt", "updatedAt"]
     }
   },
   "firestore": {
+    "/tenants/{tenantId}": {
+      "schema": "tenant",
+      "description": "Store canonical tenant ownership, status, and metadata"
+    },
     "/coupons/{couponId}": {
       "schema": "coupon",
       "description": "Store promotional coupons, discounts, eligibility criteria, and usage limits"
