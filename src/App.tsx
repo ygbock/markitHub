@@ -14,7 +14,6 @@ import {
   subscribeProducts, saveProductToDB, deleteProductFromDB,
   subscribeCustomers, saveCustomerToDB, deleteCustomerFromDB,
   subscribeOrders, saveOrderToDB,
-  subscribeStaff, saveStaffToDB, deleteStaffFromDB,
   subscribeAuditLogs, saveAuditLogToDB,
   subscribeSettings, saveSettingsToDB, DEFAULT_SETTINGS,
   subscribeCategories, saveCategoryToDB, deleteCategoryFromDB,
@@ -200,11 +199,27 @@ export default function App() {
       }
     }, handleSubscriptionError);
 
-    const unsubStaff = subscribeStaff((liveStaff) => {
-      if (liveStaff.length > 0) {
-        setStaffMembers(liveStaff);
+    // Staff data is security-sensitive: load it through the authenticated
+    // tenant API rather than subscribing directly to Firestore from the browser.
+    let staffRefreshTimer: ReturnType<typeof setInterval> | undefined;
+    const loadTenantStaff = async () => {
+      try {
+        const res = await fetch('/api/tenant/staff');
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok || !json.success) {
+          throw new Error(json.error || 'Unable to load tenant staff.');
+        }
+        const liveStaff = Array.isArray(json.staff) ? json.staff as StaffMember[] : [];
+        if (liveStaff.length > 0) setStaffMembers(liveStaff);
+      } catch (error) {
+        handleSubscriptionError(error);
       }
-    }, handleSubscriptionError);
+    };
+    void loadTenantStaff();
+    staffRefreshTimer = setInterval(() => { void loadTenantStaff(); }, 60000);
+    const unsubStaff = () => {
+      if (staffRefreshTimer) clearInterval(staffRefreshTimer);
+    };
 
     const unsubLogs = subscribeAuditLogs((liveLogs) => {
       if (liveLogs.length > 0) {
