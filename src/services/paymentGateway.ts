@@ -292,8 +292,6 @@ export class MonimeAdapter implements IPaymentGatewayAdapter {
           items,
           customerName,
           currency: currency || 'SLE',
-          spaceId,
-          token,
           successUrl: typeof window !== 'undefined' ? `${window.location.origin}/?monime_success=true&order_id=${encodeURIComponent(orderId)}` : undefined,
           cancelUrl: typeof window !== 'undefined' ? `${window.location.origin}/?monime_cancel=true&order_id=${encodeURIComponent(orderId)}` : undefined
         })
