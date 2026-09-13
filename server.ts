@@ -192,7 +192,7 @@ async function startServer() {
     if (!allowedRoles.includes(role)) throw new Error('Invalid staff role.');
 
     const customPermissions = Array.isArray(body?.customPermissions)
-      ? body.customPermissions.filter((p: unknown) => typeof p === 'string')
+      ? body.customPermissions.filter((p: unknown): p is string => typeof p === 'string' && (ALL_PERMISSION_KEYS as string[]).includes(p))
       : existing?.customPermissions;
     return {
       ...(existing || {}),
@@ -235,7 +235,12 @@ async function startServer() {
     if (!tenantId || !db) return res.status(503).json({ error: 'Tenant staff service is not configured.' });
     try {
       assertStaffRoleManagementAllowed(req, req.body);
+      const requestedId = String(req.body?.id || '').trim();
       const staff = normalizeStaffPayload(req.body, tenantId);
+      if (requestedId) {
+        const existing = await db.collection('staff').doc(requestedId).get();
+        if (existing.exists) return res.status(409).json({ error: 'A staff record with this ID already exists.' });
+      }
       if (!staff.name) return res.status(400).json({ error: 'Staff name is required.' });
       const ref = db.collection('staff').doc(staff.id);
       const existing = await ref.get();
@@ -260,7 +265,7 @@ async function startServer() {
       if (String(snap.data()?.tenantId || '') !== tenantId) return res.status(403).json({ error: 'Access denied.' });
       assertStaffRoleManagementAllowed(req, req.body, snap.data());
       const staff = normalizeStaffPayload(req.body, tenantId, snap.data());
-      if (staff.id === req.user?.uid && staff.role !== snap.data()?.role) return res.status(400).json({ error: 'You cannot change your own role.' });
+      if (String(snap.data()?.uid || '') === req.user?.uid && staff.role !== snap.data()?.role) return res.status(400).json({ error: 'You cannot change your own role.' });
       await ref.set(staff, { merge: true });
       return res.json({ success: true, staff });
     } catch (err: any) {
