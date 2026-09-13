@@ -15,7 +15,6 @@ import GeneralAndFinanceSections from './settings/sections/GeneralAndFinanceSect
 import OperationsAndSalesSections from './settings/sections/OperationsAndSalesSections';
 import SystemAndSecuritySections from './settings/sections/SystemAndSecuritySections';
 import ECommerceCMSModal from './ecommerce/ECommerceCMSModal';
-import MonimeGatewaySettings from './settings/MonimeGatewaySettings';
 
 interface SettingsModuleProps {
   settings: SystemSettings;
@@ -206,8 +205,6 @@ export default function SettingsModule({
             onNavigateSection={setActiveSection}
             activeStaff={activeStaff}
           />
-
-          {activeSection === 'payments' && <MonimeGatewaySettings />}
 
           {/* Storefront Homepage CMS Section */}
           {activeSection === 'homepage' && (

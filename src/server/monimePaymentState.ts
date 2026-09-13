@@ -74,6 +74,10 @@ export function sanitizeMonimeConfigResponse(data: any) {
     preferredChannel: data?.monimePreferredChannel || 'all',
     version: data?.monimeVersion || 'caph.2025-08-23',
     lastVerifiedAt: data?.lastVerifiedAt || null,
+    lastVerificationStatus: data?.lastVerificationStatus || null,
+    webhookRegistered: Boolean(data?.monimeWebhookId),
+    webhookManaged: Boolean(data?.webhookManaged),
+    webhookUrl: data?.monimeWebhookUrl || null,
   };
 }
 
