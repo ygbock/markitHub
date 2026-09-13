@@ -837,44 +837,67 @@ export default function App() {
     }
   };
 
-  const handleAddStaff = (newStaff: StaffMember) => {
-    const updated = [...staffMembers, newStaff];
-    setStaffMembers(updated);
-    saveStaffToDB(newStaff).catch(() => {});
-    const logs = createAuditRecord(
-      'Staff Member Registered',
-      'User Management',
-      `Registered employee: ${newStaff.name} with role ${newStaff.role} (${newStaff.department || 'General Operations'}).`
-    );
-    saveToLocal(products, customers, orders, logs);
-  };
-
-  const handleUpdateStaff = (updatedStaff: StaffMember) => {
-    const updated = staffMembers.map(s => s.id === updatedStaff.id ? updatedStaff : s);
-    setStaffMembers(updated);
-    if (activeStaff.id === updatedStaff.id) {
-      setActiveStaff(updatedStaff);
+  const handleAddStaff = async (newStaff: StaffMember) => {
+    try {
+      const res = await fetch('/api/tenant/staff', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newStaff)
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json.success) throw new Error(json.error || 'Unable to create staff member.');
+      const savedStaff = json.staff as StaffMember;
+      setStaffMembers(prev => [...prev, savedStaff]);
+      const logs = createAuditRecord(
+        'Staff Member Registered',
+        'User Management',
+        `Registered employee: ${savedStaff.name} with role ${savedStaff.role} (${savedStaff.department || 'General Operations'}).`
+      );
+      saveToLocal(products, customers, orders, logs);
+    } catch (error: any) {
+      alert(error?.message || 'Unable to create staff member.');
     }
-    saveStaffToDB(updatedStaff).catch(() => {});
-    const logs = createAuditRecord(
-      'Staff Permissions Updated',
-      'User Management',
-      `Updated profile & rights for: ${updatedStaff.name} (${updatedStaff.role}).`
-    );
-    saveToLocal(products, customers, orders, logs);
   };
 
-  const handleDeleteStaff = (staffId: string) => {
+  const handleUpdateStaff = async (updatedStaff: StaffMember) => {
+    try {
+      const res = await fetch(`/api/tenant/staff/${encodeURIComponent(updatedStaff.id)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updatedStaff)
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json.success) throw new Error(json.error || 'Unable to update staff member.');
+      const savedStaff = json.staff as StaffMember;
+      setStaffMembers(prev => prev.map(s => s.id === savedStaff.id ? savedStaff : s));
+      if (activeStaff.id === savedStaff.id) setActiveStaff(savedStaff);
+      const logs = createAuditRecord(
+        'Staff Permissions Updated',
+        'User Management',
+        `Updated profile & rights for: ${savedStaff.name} (${savedStaff.role}).`
+      );
+      saveToLocal(products, customers, orders, logs);
+    } catch (error: any) {
+      alert(error?.message || 'Unable to update staff member.');
+    }
+  };
+
+  const handleDeleteStaff = async (staffId: string) => {
     const target = staffMembers.find(s => s.id === staffId);
-    const updated = staffMembers.filter(s => s.id !== staffId);
-    setStaffMembers(updated);
-    deleteStaffFromDB(staffId).catch(() => {});
-    const logs = createAuditRecord(
-      'Staff Member Removed',
-      'User Management',
-      `Decommissioned employee account: ${target?.name || staffId} (${target?.role || 'Staff'}).`
-    );
-    saveToLocal(products, customers, orders, logs);
+    try {
+      const res = await fetch(`/api/tenant/staff/${encodeURIComponent(staffId)}`, { method: 'DELETE' });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json.success) throw new Error(json.error || 'Unable to remove staff member.');
+      setStaffMembers(prev => prev.filter(s => s.id !== staffId));
+      const logs = createAuditRecord(
+        'Staff Member Removed',
+        'User Management',
+        `Decommissioned employee account: ${target?.name || staffId} (${target?.role || 'Staff'}).`
+      );
+      saveToLocal(products, customers, orders, logs);
+    } catch (error: any) {
+      alert(error?.message || 'Unable to remove staff member.');
+    }
   };
 
   // 9. Customer Logins inside eCommerce storefront
