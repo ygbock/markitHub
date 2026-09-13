@@ -212,7 +212,7 @@ export default function App() {
         const liveStaff = Array.isArray(json.staff) ? json.staff as StaffMember[] : [];
         if (liveStaff.length > 0) setStaffMembers(liveStaff);
       } catch (error) {
-        handleSubscriptionError(error);
+        handleSubscriptionError();
       }
     };
     void loadTenantStaff();
