@@ -6,7 +6,7 @@ import {
   Sparkles, Layers, FileText, DollarSign, Activity,
   Sliders, Server, ArrowDownUp, CheckCheck, Send, ExternalLink, Zap,
   BookOpen, Terminal, ShieldCheck, XCircle, Star, Store, Monitor,
-  ToggleLeft, ToggleRight, ShoppingBag, Info
+  ToggleLeft, ToggleRight, ShoppingBag, Info, X
 } from 'lucide-react';
 import { 
   SystemSettings, 
@@ -20,6 +20,7 @@ import { STANDARD_CHART_OF_ACCOUNTS, getLedgerJournalEntries } from '../../../se
 import { DEFAULT_SETTINGS, subscribeMonimeSessions, processMonimeWebhookInFirebase, saveSettingsToDB } from '../../../services/dbService';
 import { MonimeDocumentationModal } from '../MonimeDocumentationModal';
 import MonimeGatewaySettings from '../MonimeGatewaySettings';
+import { PaymentGatewayConfigDialog } from './PaymentGatewayConfigDialog';
 
 interface PaymentGatewaysSectionProps {
   activeSection: SettingsSection;
@@ -37,6 +38,7 @@ export default function PaymentGatewaysSection({
   activeStaff
 }: PaymentGatewaysSectionProps) {
   const [activeGatewayTab, setActiveGatewayTab] = useState<string>('gw_monime');
+  const [configuringGatewayId, setConfiguringGatewayId] = useState<string | null>(null);
   const [showSecretKeys, setShowSecretKeys] = useState<Record<string, boolean>>({});
   const [testingGatewayId, setTestingGatewayId] = useState<string | null>(null);
   const [testResults, setTestResults] = useState<Record<string, { success: boolean; message: string; timestamp: string; latencyMs?: number; diagnostics?: any }>>({});
@@ -107,6 +109,7 @@ export default function PaymentGatewaysSection({
     formData.paymentMethods.gateways || DEFAULT_SETTINGS.paymentMethods.gateways || [];
 
   const activeGateway = gateways.find(g => g.id === activeGatewayTab) || gateways[0];
+  const configuringGateway = configuringGatewayId ? (gateways.find(g => g.id === configuringGatewayId) || null) : null;
 
   const updateGateway = (gatewayId: string, updates: Partial<PaymentGatewayConfig>) => {
     const updatedGateways = gateways.map(g => {
@@ -293,6 +296,7 @@ export default function PaymentGatewaysSection({
     const updated = [...gateways, newGw];
     updateSection('paymentMethods', { gateways: updated });
     setActiveGatewayTab(newGw.id);
+    setConfiguringGatewayId(newGw.id);
     setIsAddGatewayModalOpen(false);
     setNewGwName('');
     setNewGwDesc('');
@@ -637,15 +641,15 @@ export default function PaymentGatewaysSection({
 
                     <button
                       type="button"
-                      onClick={() => setActiveGatewayTab(gw.id)}
-                      className={`px-3 py-1 rounded-xl text-xs font-bold transition-colors cursor-pointer flex items-center gap-1 ${
-                        activeGatewayTab === gw.id
-                          ? 'bg-indigo-600 text-white shadow-xs'
-                          : 'bg-slate-800 hover:bg-slate-700 text-indigo-300 border border-slate-700'
-                      }`}
+                      onClick={() => {
+                        setActiveGatewayTab(gw.id);
+                        setConfiguringGatewayId(gw.id);
+                      }}
+                      className="px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white shadow-xs"
+                      id={`btn-configure-${gw.id}`}
                     >
+                      <Key className="w-3.5 h-3.5" />
                       <span>Configure Credentials</span>
-                      <ArrowRight className="w-3 h-3" />
                     </button>
                   </div>
                 </div>
@@ -653,482 +657,6 @@ export default function PaymentGatewaysSection({
             })}
           </div>
         </div>
-
-        {/* ========================================================================= */}
-        {/* 3. GATEWAY SELECTOR PILLS */}
-        {/* ========================================================================= */}
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <label className="text-xs font-bold text-slate-800 uppercase tracking-wider">
-              Installed Gateways ({gateways.length})
-            </label>
-            <span className="text-[11px] text-slate-500">
-              {gateways.filter(g => g.enabled && g.availableInStorefront !== false).length} active for Storefront • {gateways.filter(g => g.availableInPOS !== false).length} active for POS
-            </span>
-          </div>
-
-          <div className="flex items-center gap-2 overflow-x-auto pb-1.5 no-scrollbar -mx-1 px-1">
-            {gateways.map((gw) => {
-              const isSelected = activeGatewayTab === gw.id;
-              const isEnabled = gw.enabled && gw.availableInStorefront !== false;
-
-              return (
-                <button
-                  key={gw.id}
-                  type="button"
-                  onClick={() => setActiveGatewayTab(gw.id)}
-                  className={`px-3.5 py-2.5 rounded-2xl text-xs font-bold flex items-center gap-2.5 transition-all whitespace-nowrap cursor-pointer border ${
-                    isSelected
-                      ? 'bg-slate-900 text-white border-slate-900 shadow-xs'
-                      : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
-                  }`}
-                >
-                  <div className={`w-2 h-2 rounded-full ${isEnabled ? 'bg-emerald-500 ring-2 ring-emerald-400/20' : 'bg-slate-300'}`} />
-                  <span>{gw.name}</span>
-                  {gw.isDefault && (
-                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-400/30 text-amber-200 font-bold">DEFAULT</span>
-                  )}
-                  <span className={`text-[10px] px-1.5 py-0.5 rounded-md font-mono ${
-                    isSelected ? 'bg-white/20 text-white' : 'bg-slate-200/80 text-slate-600'
-                  }`}>
-                    {gw.environment === 'production' ? 'LIVE' : 'SANDBOX'}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* ========================================================================= */}
-        {/* 4. ACTIVE GATEWAY DETAIL EDITOR */}
-        {/* ========================================================================= */}
-        {activeGateway && (
-          <div className="bg-slate-50 rounded-2xl p-4 sm:p-6 border border-slate-200 space-y-5">
-            
-            {/* Header & Status Toggle */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-200/80">
-              <div>
-                <div className="flex items-center gap-2">
-                  <h4 className="text-sm sm:text-base font-black text-slate-900">
-                    {activeGateway.name}
-                  </h4>
-                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                    activeGateway.enabled 
-                      ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' 
-                      : 'bg-slate-200 text-slate-600'
-                  }`}>
-                    {activeGateway.enabled ? 'Enabled in Storefront' : 'Disabled'}
-                  </span>
-                </div>
-                <p className="text-xs text-slate-500 mt-0.5">{activeGateway.description}</p>
-              </div>
-
-              <div className="flex items-center gap-2 shrink-0 flex-wrap">
-                {activeGateway.provider === 'monime' && (
-                  <button
-                    type="button"
-                    onClick={() => setIsMonimeDocOpen(true)}
-                    className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
-                  >
-                    <BookOpen className="w-3.5 h-3.5 text-indigo-600" />
-                    <span>Documentation Guide</span>
-                  </button>
-                )}
-
-                <button
-                  type="button"
-                  onClick={() => handleTestConnection(activeGateway)}
-                  disabled={testingGatewayId === activeGateway.id}
-                  className="px-3 py-1.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
-                >
-                  <RefreshCw className={`w-3.5 h-3.5 ${testingGatewayId === activeGateway.id ? 'animate-spin text-indigo-600' : ''}`} />
-                  <span>{testingGatewayId === activeGateway.id ? 'Verifying Probe...' : 'Test Connection'}</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => handleToggleGateway(activeGateway.id, !activeGateway.enabled)}
-                  className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5 ${
-                    activeGateway.enabled
-                      ? 'bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100'
-                      : 'bg-emerald-600 text-white hover:bg-emerald-700'
-                  }`}
-                >
-                  {activeGateway.enabled ? 'Disable Gateway' : 'Enable Gateway'}
-                </button>
-              </div>
-            </div>
-
-            {/* Test Connection Output Alert */}
-            {testResults[activeGateway.id] && (
-              <div className={`p-3.5 rounded-2xl border flex flex-col sm:flex-row sm:items-start justify-between gap-3 text-xs animate-in fade-in ${
-                testResults[activeGateway.id].success 
-                  ? 'bg-emerald-50 border-emerald-200 text-emerald-950' 
-                  : 'bg-amber-50 border-amber-200 text-amber-950'
-              }`}>
-                <div className="flex items-start gap-2.5">
-                  {testResults[activeGateway.id].success ? (
-                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-                  ) : (
-                    <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-                  )}
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-black text-slate-900">
-                        {testResults[activeGateway.id].success ? 'Handshake Successful' : 'API Diagnostic Notice'} ({testResults[activeGateway.id].timestamp})
-                      </span>
-                      {testResults[activeGateway.id].latencyMs !== undefined && (
-                        <span className="px-2 py-0.5 bg-white rounded-md text-[10px] font-mono font-bold border border-slate-200 shadow-2xs">
-                          {testResults[activeGateway.id].latencyMs}ms Latency
-                        </span>
-                      )}
-                      {testResults[activeGateway.id].diagnostics?.statusCode && (
-                        <span className="px-1.5 py-0.5 bg-indigo-100 text-indigo-800 rounded text-[9px] font-mono font-bold">
-                          HTTP {testResults[activeGateway.id].diagnostics.statusCode}
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-xs text-slate-700">{testResults[activeGateway.id].message}</p>
-                  </div>
-                </div>
-
-                {activeGateway.provider === 'monime' && (
-                  <button
-                    type="button"
-                    onClick={() => setIsMonimeDocOpen(true)}
-                    className="px-2.5 py-1 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 font-bold rounded-lg text-[11px] flex items-center gap-1 shrink-0 self-start cursor-pointer"
-                  >
-                    <BookOpen className="w-3 h-3 text-indigo-600" />
-                    <span>View Docs</span>
-                  </button>
-                )}
-              </div>
-            )}
-
-            {/* General Gateway Parameters & Channel Controls */}
-            <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200 space-y-4">
-              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-                <span className="text-xs font-bold text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
-                  <Sliders className="w-3.5 h-3.5 text-indigo-600" />
-                  <span>Channel Availability & Checkout Experience</span>
-                </span>
-                {activeGateway.isDefault && (
-                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-amber-100 text-amber-800 border border-amber-200 flex items-center gap-1">
-                    <Star className="w-3 h-3 fill-amber-500 text-amber-500" />
-                    <span>Storefront Default</span>
-                  </span>
-                )}
-              </div>
-
-              {/* Toggles & Options */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                {/* Storefront toggle */}
-                <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between">
-                  <div>
-                    <span className="text-xs font-bold text-slate-800 block">Online Storefront</span>
-                    <span className="text-[10px] text-slate-500">Show to customers during checkout</span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => handleToggleStorefront(activeGateway.id, !(activeGateway.enabled && activeGateway.availableInStorefront !== false))}
-                    className={`w-10 h-5.5 flex items-center rounded-full p-0.5 transition-colors cursor-pointer ${
-                      activeGateway.enabled && activeGateway.availableInStorefront !== false ? 'bg-emerald-600 justify-end' : 'bg-slate-300 justify-start'
-                    }`}
-                  >
-                    <div className="w-4.5 h-4.5 rounded-full bg-white shadow-xs" />
-                  </button>
-                </div>
-
-                {/* POS toggle */}
-                <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between">
-                  <div>
-                    <span className="text-xs font-bold text-slate-800 block">POS Terminal</span>
-                    <span className="text-[10px] text-slate-500">Available at physical cashier</span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => handleTogglePOS(activeGateway.id, !(activeGateway.availableInPOS !== false))}
-                    className={`w-10 h-5.5 flex items-center rounded-full p-0.5 transition-colors cursor-pointer ${
-                      activeGateway.availableInPOS !== false ? 'bg-indigo-600 justify-end' : 'bg-slate-300 justify-start'
-                    }`}
-                  >
-                    <div className="w-4.5 h-4.5 rounded-full bg-white shadow-xs" />
-                  </button>
-                </div>
-
-                {/* Default radio */}
-                <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between">
-                  <div>
-                    <span className="text-xs font-bold text-slate-800 block">Preselect as Default</span>
-                    <span className="text-[10px] text-slate-500">Preselected method in checkout</span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => handleSetDefaultGateway(activeGateway.id)}
-                    className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1 ${
-                      activeGateway.isDefault 
-                        ? 'bg-amber-100 text-amber-800 border border-amber-300' 
-                        : 'bg-white hover:bg-slate-100 text-slate-700 border border-slate-200'
-                    }`}
-                  >
-                    <Star className={`w-3 h-3 ${activeGateway.isDefault ? 'fill-amber-500 text-amber-500' : 'text-slate-400'}`} />
-                    <span>{activeGateway.isDefault ? 'Default' : 'Set Default'}</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* Customer Instruction Field */}
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Customer Guidance Prompt / Instructions (shown under payment method name at checkout)
-                </label>
-                <input
-                  type="text"
-                  value={activeGateway.customerInstruction || ''}
-                  onChange={(e) => updateGateway(activeGateway.id, { customerInstruction: e.target.value })}
-                  placeholder="e.g. Enter your phone number to receive instant USSD authorization"
-                  className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-800 focus:ring-2 focus:ring-slate-900 focus:outline-hidden"
-                />
-              </div>
-
-              {/* General Technical Parameters */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5 pt-1">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Environment Mode</label>
-                  <select
-                    value={activeGateway.environment}
-                    onChange={(e) => updateGateway(activeGateway.id, { environment: e.target.value as any })}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:ring-2 focus:ring-slate-900 focus:outline-hidden"
-                  >
-                    <option value="sandbox">Sandbox / Test Simulated Mode</option>
-                    <option value="production">Production (Live Gateway Rail)</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Surcharge Fee % (Optional)</label>
-                  <div className="relative">
-                    <input
-                      type="number"
-                      min="0"
-                      max="15"
-                      step="0.1"
-                      value={activeGateway.surchargePercent}
-                      onChange={(e) => updateGateway(activeGateway.id, { surchargePercent: parseFloat(e.target.value) || 0 })}
-                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:ring-2 focus:ring-slate-900 focus:outline-hidden pr-7"
-                    />
-                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-xs">%</span>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Settlement Ledger Account</label>
-                  <select
-                    value={activeGateway.settlementLedgerAccount}
-                    onChange={(e) => updateGateway(activeGateway.id, { settlementLedgerAccount: e.target.value })}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:ring-2 focus:ring-slate-900 focus:outline-hidden font-mono"
-                  >
-                    {STANDARD_CHART_OF_ACCOUNTS.filter(a => a.type === 'Asset').map(acc => (
-                      <option key={acc.code} value={`${acc.code} - ${acc.name}`}>
-                        {acc.code} - {acc.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-            </div>
-
-            {/* Provider-Specific Credentials */}
-            <div className="bg-white rounded-xl p-4 border border-slate-200 space-y-3.5">
-              <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-                <span className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
-                  <Key className="w-3.5 h-3.5 text-indigo-600" />
-                  <span>API Credentials & Provider Parameters</span>
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setShowSecretKeys(prev => ({ ...prev, [activeGateway.id]: !prev[activeGateway.id] }))}
-                  className="text-[11px] font-bold text-indigo-600 hover:text-indigo-800 flex items-center gap-1 cursor-pointer"
-                >
-                  {showSecretKeys[activeGateway.id] ? (
-                    <>
-                      <EyeOff className="w-3 h-3" />
-                      <span>Mask Secrets</span>
-                    </>
-                  ) : (
-                    <>
-                      <Eye className="w-3 h-3" />
-                      <span>Reveal Keys</span>
-                    </>
-                  )}
-                </button>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                {/* Monime API Infrastructure Fields & Configuration Experience */}
-                {activeGateway.provider === 'monime' && (
-                  <div className="sm:col-span-2">
-                    <MonimeGatewaySettings />
-                  </div>
-                )}
-
-                {/* Orange / Afrimoney Mobile Money Fields */}
-                {(activeGateway.provider === 'orange_money' || activeGateway.provider === 'afrimoney') && (
-                  <>
-                    <div>
-                      <label className="block text-[11px] font-bold text-slate-700 mb-1">Merchant Shortcode / ID</label>
-                      <input
-                        type="text"
-                        value={activeGateway.credentials.merchantId || ''}
-                        onChange={(e) => updateGateway(activeGateway.id, { credentials: { merchantId: e.target.value } })}
-                        placeholder="e.g. OM-NEXUS-884920"
-                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-bold focus:ring-2 focus:ring-slate-900 focus:outline-hidden"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-[11px] font-bold text-slate-700 mb-1">Carrier USSD Trigger Code</label>
-                      <input
-                        type="text"
-                        value={activeGateway.credentials.ussdCode || ''}
-                        onChange={(e) => updateGateway(activeGateway.id, { credentials: { ussdCode: e.target.value } })}
-                        placeholder="*144*4*4# or *161#"
-                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-bold focus:ring-2 focus:ring-slate-900 focus:outline-hidden"
-                      />
-                    </div>
-
-                    <div className="sm:col-span-2">
-                      <label className="block text-[11px] font-bold text-slate-700 mb-1">Webhook Callback Signing Secret</label>
-                      <input
-                        type={showSecretKeys[activeGateway.id] ? 'text' : 'password'}
-                        value={activeGateway.credentials.webhookSecret || ''}
-                        onChange={(e) => updateGateway(activeGateway.id, { credentials: { webhookSecret: e.target.value } })}
-                        placeholder="whsec_..."
-                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono focus:ring-2 focus:ring-slate-900 focus:outline-hidden"
-                      />
-                    </div>
-                  </>
-                )}
-
-                {/* Stripe / Card Gateway Fields */}
-                {(activeGateway.provider === 'stripe' || activeGateway.provider === 'card_terminal') && (
-                  <>
-                    <div>
-                      <label className="block text-[11px] font-bold text-slate-700 mb-1">Publishable Key</label>
-                      <input
-                        type="text"
-                        value={activeGateway.credentials.publishableKey || ''}
-                        onChange={(e) => updateGateway(activeGateway.id, { credentials: { publishableKey: e.target.value } })}
-                        placeholder="pk_test_..."
-                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono focus:ring-2 focus:ring-slate-900 focus:outline-hidden"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-[11px] font-bold text-slate-700 mb-1">Secret Key</label>
-                      <input
-                        type={showSecretKeys[activeGateway.id] ? 'text' : 'password'}
-                        value={activeGateway.credentials.secretKey || ''}
-                        onChange={(e) => updateGateway(activeGateway.id, { credentials: { secretKey: e.target.value } })}
-                        placeholder="sk_test_..."
-                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono focus:ring-2 focus:ring-slate-900 focus:outline-hidden"
-                      />
-                    </div>
-
-                    <div className="sm:col-span-2">
-                      <label className="block text-[11px] font-bold text-slate-700 mb-1">Stripe Webhook Secret</label>
-                      <input
-                        type={showSecretKeys[activeGateway.id] ? 'text' : 'password'}
-                        value={activeGateway.credentials.webhookSecret || ''}
-                        onChange={(e) => updateGateway(activeGateway.id, { credentials: { webhookSecret: e.target.value } })}
-                        placeholder="whsec_..."
-                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono focus:ring-2 focus:ring-slate-900 focus:outline-hidden"
-                      />
-                    </div>
-                  </>
-                )}
-
-                {/* Direct Bank Wire Fields */}
-                {activeGateway.provider === 'bank_wire' && (
-                  <>
-                    <div>
-                      <label className="block text-[11px] font-bold text-slate-700 mb-1">Beneficiary Bank Name</label>
-                      <input
-                        type="text"
-                        value={activeGateway.credentials.bankName || ''}
-                        onChange={(e) => updateGateway(activeGateway.id, { credentials: { bankName: e.target.value } })}
-                        placeholder="Sierra Leone Commercial Bank (SLCB)"
-                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold focus:ring-2 focus:ring-slate-900 focus:outline-hidden"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-[11px] font-bold text-slate-700 mb-1">Account Number / IBAN</label>
-                      <input
-                        type="text"
-                        value={activeGateway.credentials.accountNumber || ''}
-                        onChange={(e) => updateGateway(activeGateway.id, { credentials: { accountNumber: e.target.value } })}
-                        placeholder="00300188920194"
-                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-bold focus:ring-2 focus:ring-slate-900 focus:outline-hidden"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-[11px] font-bold text-slate-700 mb-1">Account Entity Name</label>
-                      <input
-                        type="text"
-                        value={activeGateway.credentials.accountName || ''}
-                        onChange={(e) => updateGateway(activeGateway.id, { credentials: { accountName: e.target.value } })}
-                        placeholder="Nexus Retail & POS Global LLC"
-                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold focus:ring-2 focus:ring-slate-900 focus:outline-hidden"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-[11px] font-bold text-slate-700 mb-1">SWIFT / BIC Code</label>
-                      <input
-                        type="text"
-                        value={activeGateway.credentials.swiftBic || ''}
-                        onChange={(e) => updateGateway(activeGateway.id, { credentials: { swiftBic: e.target.value } })}
-                        placeholder="SLCBSLFR"
-                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-bold focus:ring-2 focus:ring-slate-900 focus:outline-hidden"
-                      />
-                    </div>
-                  </>
-                )}
-              </div>
-            </div>
-
-            {/* Checkbox Inclusions */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
-              <label className="flex items-center gap-3 p-3 bg-white rounded-xl border border-slate-200 cursor-pointer text-xs font-semibold text-slate-700">
-                <input
-                  type="checkbox"
-                  checked={activeGateway.autoCapture}
-                  onChange={(e) => updateGateway(activeGateway.id, { autoCapture: e.target.checked })}
-                  className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 shrink-0"
-                />
-                <div>
-                  <span className="font-bold block">Instant Auto-Capture</span>
-                  <span className="text-[10px] text-slate-500">Capture funds immediately upon checkout approval</span>
-                </div>
-              </label>
-
-              <label className="flex items-center gap-3 p-3 bg-white rounded-xl border border-slate-200 cursor-pointer text-xs font-semibold text-slate-700">
-                <input
-                  type="checkbox"
-                  checked={activeGateway.allowGuestCheckout}
-                  onChange={(e) => updateGateway(activeGateway.id, { allowGuestCheckout: e.target.checked })}
-                  className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 shrink-0"
-                />
-                <div>
-                  <span className="font-bold block">Allow for Guest Shoppers</span>
-                  <span className="text-[10px] text-slate-500">Permit non-authenticated checkout through this rail</span>
-                </div>
-              </label>
-            </div>
-          </div>
-        )}
 
         {/* Navigation Footer */}
         <div className="pt-4 border-t border-slate-100 flex items-center justify-between">
@@ -1150,6 +678,34 @@ export default function PaymentGatewaysSection({
           </button>
         </div>
       </div>
+
+      {/* ========================================================================= */}
+      {/* GATEWAY CREDENTIALS & CONFIGURATION DIALOG */}
+      {/* ========================================================================= */}
+      <PaymentGatewayConfigDialog
+        isOpen={!!configuringGateway}
+        gateway={configuringGateway}
+        allGateways={gateways}
+        onClose={() => setConfiguringGatewayId(null)}
+        onSelectGateway={(id) => {
+          setActiveGatewayTab(id);
+          setConfiguringGatewayId(id);
+        }}
+        onUpdateGateway={updateGateway}
+        onToggleGateway={handleToggleGateway}
+        onToggleStorefront={handleToggleStorefront}
+        onTogglePOS={handleTogglePOS}
+        onSetDefaultGateway={handleSetDefaultGateway}
+        onTestConnection={handleTestConnection}
+        testingGatewayId={testingGatewayId}
+        testResults={testResults}
+        showSecretKeys={showSecretKeys}
+        onToggleShowSecretKeys={(id) => setShowSecretKeys(prev => ({ ...prev, [id]: !prev[id] }))}
+        onOpenMonimeDoc={() => setIsMonimeDocOpen(true)}
+        onSaveDirect={handleDirectSaveGatewaySettings}
+        isDirectSaving={isDirectSaving}
+        directSaveSuccess={directSaveSuccess}
+      />
 
       {/* ========================================================================= */}
       {/* ADD GATEWAY MODAL */}

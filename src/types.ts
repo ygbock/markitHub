@@ -1111,6 +1111,8 @@ export interface AuditLog {
   details: string;
 }
 
+export type StaffStatus = 'active' | 'suspended';
+
 export interface StaffMember {
   id: string;
   name: string;
@@ -1118,12 +1120,18 @@ export interface StaffMember {
   role: StaffRole;
   avatar: string;
   pin: string;
-  status: 'Active' | 'Inactive' | 'On Leave';
+  status: 'active' | 'suspended' | 'Active' | 'Inactive' | 'On Leave';
   department?: string;
   phone?: string;
   permissionsOverride?: PermissionKey[];
+  customPermissions?: string[];
   lastActive?: string;
   notes?: string;
+  isOwner?: boolean;
+  uid?: string;
+  tenantId?: string;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface Coupon {

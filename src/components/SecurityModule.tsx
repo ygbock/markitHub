@@ -1,5 +1,5 @@
 import React from 'react';
-import { StaffMember, AuditLog } from '../types';
+import { StaffMember, AuditLog, StaffStatus } from '../types';
 import UserManagementModule from './UserManagementModule';
 
 interface SecurityModuleProps {
@@ -10,6 +10,9 @@ interface SecurityModuleProps {
   onAddStaff?: (staff: StaffMember) => void;
   onUpdateStaff?: (staff: StaffMember) => void;
   onDeleteStaff?: (staffId: string) => void;
+  onUpdateStaffStatus?: (staffId: string, status: StaffStatus) => Promise<{ success: boolean; error?: string }>;
+  tenantOwnerUid?: string;
+  tenantOwnerId?: string;
 }
 
 export default function SecurityModule(props: SecurityModuleProps) {

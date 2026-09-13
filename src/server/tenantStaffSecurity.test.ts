@@ -250,3 +250,55 @@ test('Security Test 12: UserManagementModule has no direct staff Firestore CRUD 
   assert.match(appContent, /\/api\/tenant\/staff/);
   assert.match(appContent, /fetch\s*\(\s*['"]\/api\/tenant\/staff/);
 });
+
+// Scenario 13: Suspended staff members are denied all permissions regardless of their configured role
+test('Security Test 13: Suspended staff members are denied permissions regardless of role', async () => {
+  const { hasPermission, isStaffSuspended, isStaffActive } = await import('../utils/permissions.js');
+
+  const suspendedAdmin: any = {
+    id: 'staff-suspended-1',
+    name: 'Suspended Admin',
+    role: 'Admin',
+    status: 'suspended'
+  };
+
+  const activeAdmin: any = {
+    id: 'staff-active-1',
+    name: 'Active Admin',
+    role: 'Admin',
+    status: 'active'
+  };
+
+  assert.equal(isStaffSuspended(suspendedAdmin), true);
+  assert.equal(isStaffActive(suspendedAdmin), false);
+  assert.equal(hasPermission(suspendedAdmin, 'users.manage'), false);
+  assert.equal(hasPermission(suspendedAdmin, 'pos.access'), false);
+  assert.equal(hasPermission(suspendedAdmin, 'inventory.manage'), false);
+
+  assert.equal(isStaffSuspended(activeAdmin), false);
+  assert.equal(isStaffActive(activeAdmin), true);
+  assert.equal(hasPermission(activeAdmin, 'users.manage'), true);
+});
+
+// Scenario 14: Tenant Owner detection respects authoritative ownerUid
+test('Security Test 14: Tenant owner identification respects authoritative ownerUid', async () => {
+  const { isTenantOwner } = await import('../utils/permissions.js');
+
+  const ownerStaff: any = { id: 'staff-100', uid: 'user-owner-abc', role: 'Admin' };
+  const regularStaff: any = { id: 'staff-200', uid: 'user-regular-xyz', role: 'Admin' };
+
+  assert.equal(isTenantOwner(ownerStaff, 'user-owner-abc'), true);
+  assert.equal(isTenantOwner(regularStaff, 'user-owner-abc'), false);
+  assert.equal(isTenantOwner(ownerStaff, undefined), false);
+});
+
+// Scenario 15: Staff status transition API endpoint is defined and enforced in server
+test('Security Test 15: Staff status endpoint is defined with proper authorization checks', () => {
+  const serverPath = path.resolve(process.cwd(), 'server.ts');
+  const serverContent = fs.readFileSync(serverPath, 'utf8');
+
+  assert.match(serverContent, /app\.patch\s*\(\s*['"]\/api\/tenant\/staff\/:staffId\/status['"]/);
+  assert.match(serverContent, /assertNotTenantOwnerSuspension/);
+  assert.match(serverContent, /isSelfStaffOperation/);
+});
+

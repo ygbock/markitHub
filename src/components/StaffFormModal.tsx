@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { 
   X, User, Mail, Phone, Shield, Key, Building, 
-  Check, AlertCircle, Sparkles, RefreshCw, Eye, EyeOff, Lock, HelpCircle
+  Check, AlertCircle, Sparkles, RefreshCw, Eye, EyeOff, Lock, HelpCircle,
+  ShieldAlert, ShieldCheck, Crown
 } from 'lucide-react';
-import { StaffMember, StaffRole, PermissionKey } from '../types';
+import { StaffMember, StaffRole, PermissionKey, StaffStatus } from '../types';
 import { 
   OFFICIAL_ROLES, ALL_PERMISSIONS, PERMISSION_CATEGORIES, 
-  DEFAULT_ROLE_PERMISSIONS, getRoleConfig, getEffectivePermissions 
+  DEFAULT_ROLE_PERMISSIONS, getRoleConfig, getEffectivePermissions,
+  isTenantOwner, isStaffSuspended
 } from '../utils/permissions';
 
 interface StaffFormModalProps {
@@ -14,6 +16,9 @@ interface StaffFormModalProps {
   onClose: () => void;
   onSave: (staff: StaffMember) => void;
   editingStaff?: StaffMember | null;
+  activeStaff?: StaffMember;
+  tenantOwnerUid?: string;
+  canManageRoles?: boolean;
 }
 
 const AVATAR_PRESETS = [
@@ -33,7 +38,10 @@ export default function StaffFormModal({
   isOpen,
   onClose,
   onSave,
-  editingStaff
+  editingStaff,
+  activeStaff,
+  tenantOwnerUid,
+  canManageRoles = true
 }: StaffFormModalProps) {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -42,7 +50,7 @@ export default function StaffFormModal({
   const [role, setRole] = useState<StaffRole>('Cashier');
   const [avatar, setAvatar] = useState(AVATAR_PRESETS[0]);
   const [pin, setPin] = useState('1234');
-  const [status, setStatus] = useState<'Active' | 'Inactive' | 'On Leave'>('Active');
+  const [status, setStatus] = useState<StaffStatus>('active');
   const [notes, setNotes] = useState('');
   const [showPin, setShowPin] = useState(false);
 
@@ -50,6 +58,11 @@ export default function StaffFormModal({
   const [enableCustomOverrides, setEnableCustomOverrides] = useState(false);
   const [selectedPermissions, setSelectedPermissions] = useState<PermissionKey[]>([]);
   const [activeCategoryTab, setActiveCategoryTab] = useState<string>('all');
+
+  // Security checks
+  const isEditingSelf = Boolean(editingStaff && activeStaff && editingStaff.id === activeStaff.id);
+  const isEditingOwner = Boolean(editingStaff && isTenantOwner(editingStaff, tenantOwnerUid));
+  const roleChangeBlocked = !canManageRoles || isEditingSelf || isEditingOwner;
 
   useEffect(() => {
     if (!isOpen) return;
@@ -61,7 +74,7 @@ export default function StaffFormModal({
       setRole(editingStaff.role);
       setAvatar(editingStaff.avatar);
       setPin(editingStaff.pin);
-      setStatus(editingStaff.status);
+      setStatus(isStaffSuspended(editingStaff) ? 'suspended' : 'active');
       setNotes(editingStaff.notes || '');
 
       if (editingStaff.permissionsOverride && editingStaff.permissionsOverride.length > 0) {
@@ -80,7 +93,7 @@ export default function StaffFormModal({
       setRole('Cashier');
       setAvatar(AVATAR_PRESETS[Math.floor(Math.random() * AVATAR_PRESETS.length)]);
       setPin(String(Math.floor(1000 + Math.random() * 9000)));
-      setStatus('Active');
+      setStatus('active');
       setNotes('');
       setEnableCustomOverrides(false);
       setSelectedPermissions(DEFAULT_ROLE_PERMISSIONS['Cashier']);
@@ -89,6 +102,7 @@ export default function StaffFormModal({
 
   // When role changes, if not using custom overrides, update selected permissions to role defaults
   const handleRoleChange = (newRole: StaffRole) => {
+    if (roleChangeBlocked) return;
     setRole(newRole);
     if (!enableCustomOverrides) {
       setSelectedPermissions(DEFAULT_ROLE_PERMISSIONS[newRole] || []);
@@ -96,6 +110,7 @@ export default function StaffFormModal({
   };
 
   const handleToggleCustomOverrides = (checked: boolean) => {
+    if (!canManageRoles) return;
     setEnableCustomOverrides(checked);
     if (checked) {
       setSelectedPermissions(selectedPermissions.length > 0 ? selectedPermissions : (DEFAULT_ROLE_PERMISSIONS[role] || []));
@@ -103,6 +118,7 @@ export default function StaffFormModal({
   };
 
   const handleTogglePermission = (key: PermissionKey) => {
+    if (!canManageRoles) return;
     if (selectedPermissions.includes(key)) {
       setSelectedPermissions(selectedPermissions.filter(k => k !== key));
     } else {
@@ -111,6 +127,7 @@ export default function StaffFormModal({
   };
 
   const handleSelectAllCategory = (catId: string) => {
+    if (!canManageRoles) return;
     const catKeys = ALL_PERMISSIONS.filter(p => p.category === catId).map(p => p.key);
     const allPresent = catKeys.every(k => selectedPermissions.includes(k));
     if (allPresent) {
@@ -122,6 +139,7 @@ export default function StaffFormModal({
   };
 
   const handleResetToRoleDefaults = () => {
+    if (!canManageRoles) return;
     setSelectedPermissions(DEFAULT_ROLE_PERMISSIONS[role] || []);
   };
 
@@ -148,53 +166,53 @@ export default function StaffFormModal({
       email: email.trim(),
       phone: phone.trim(),
       department: department.trim(),
-      role,
+      role: isEditingOwner ? 'Business Owner' : role,
       avatar,
       pin,
-      status,
+      status: (isEditingOwner || isEditingSelf) ? (editingStaff?.status ? (isStaffSuspended(editingStaff) ? 'suspended' : 'active') : 'active') : status,
       notes: notes.trim(),
       lastActive: editingStaff?.lastActive || 'Just created',
-      permissionsOverride: enableCustomOverrides ? selectedPermissions : undefined
+      permissionsOverride: (enableCustomOverrides && canManageRoles) ? selectedPermissions : undefined
     };
 
     onSave(payload);
-    onClose();
   };
 
   if (!isOpen) return null;
 
-  const roleConfig = getRoleConfig(role);
-  const filteredPermissions = activeCategoryTab === 'all' 
-    ? ALL_PERMISSIONS 
-    : ALL_PERMISSIONS.filter(p => p.category === activeCategoryTab);
-
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 overflow-y-auto" id="staff-modal-overlay">
+    <div 
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-y-auto"
+      id="staff-form-modal-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="staff-modal-title"
+    >
       <div 
-        className="fixed inset-0 bg-slate-950/80 backdrop-blur-xs transition-opacity" 
+        className="fixed inset-0 bg-slate-950/70 backdrop-blur-xs transition-opacity" 
         onClick={onClose} 
       />
 
       <div 
-        className="relative bg-white rounded-3xl shadow-2xl border border-slate-200 w-full max-w-3xl max-h-[92vh] flex flex-col z-10 overflow-hidden animate-in fade-in zoom-in-95 duration-200"
-        id="staff-modal-container"
+        className="relative bg-white rounded-3xl shadow-2xl border border-slate-200 w-full max-w-4xl z-10 overflow-hidden flex flex-col max-h-[90vh] animate-in fade-in zoom-in-95 duration-200"
+        id="staff-form-modal-container"
       >
-        {/* Header */}
-        <div className="px-6 py-4.5 border-b border-slate-100 bg-slate-50/70 flex items-center justify-between shrink-0">
+        {/* Modal Header */}
+        <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50/60 shrink-0">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-indigo-600/10 text-indigo-600 flex items-center justify-center font-bold">
-              <User className="w-5 h-5" />
+            <div className="w-10 h-10 rounded-2xl bg-indigo-600 text-white flex items-center justify-center shadow-md shadow-indigo-600/30">
+              <Shield className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-base font-bold text-slate-900" id="staff-modal-title">
-                {editingStaff ? 'Edit Staff & Permission Profile' : 'Add New Staff Member'}
+              <h2 id="staff-modal-title" className="text-base font-bold text-slate-900">
+                {editingStaff ? 'Edit Staff Profile & Governance' : 'Register New Staff Member'}
               </h2>
               <p className="text-xs text-slate-500">
-                Configure employee role, authentication PIN, and granular access rights.
+                {editingStaff ? `Updating configuration for ${editingStaff.name}` : 'Provision access credentials, role, and operational capabilities.'}
               </p>
             </div>
           </div>
-          <button 
+          <button
             onClick={onClose}
             className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-xl transition-all"
             id="btn-close-staff-modal"
@@ -209,13 +227,21 @@ export default function StaffFormModal({
           {/* Top Section: Avatar & Primary Identity */}
           <div className="grid grid-cols-1 sm:grid-cols-12 gap-5 items-start">
             
-            {/* Avatar Selector */}
-            <div className="sm:col-span-4 flex flex-col items-center text-center space-y-3 bg-slate-50 p-4 rounded-2xl border border-slate-150">
-              <img 
-                src={avatar} 
-                alt="Avatar preview" 
-                className="w-20 h-20 rounded-2xl object-cover ring-4 ring-indigo-500/20 shadow-md"
-              />
+            {/* Avatar & Status Selector */}
+            <div className="sm:col-span-4 flex flex-col items-center text-center space-y-3 bg-slate-50 p-4 rounded-2xl border border-slate-200">
+              <div className="relative">
+                <img 
+                  src={avatar} 
+                  alt="Avatar preview" 
+                  className="w-20 h-20 rounded-2xl object-cover ring-4 ring-indigo-500/20 shadow-md"
+                />
+                {isEditingOwner && (
+                  <span className="absolute -top-2 -right-2 bg-amber-500 text-white p-1 rounded-full shadow-md">
+                    <Crown className="w-3.5 h-3.5" />
+                  </span>
+                )}
+              </div>
+
               <div className="w-full">
                 <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1.5">
                   Choose Photo Preset
@@ -236,27 +262,66 @@ export default function StaffFormModal({
                 </div>
               </div>
 
-              {/* Status Selector */}
-              <div className="w-full pt-2 border-t border-slate-200/60">
-                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1 text-left">
-                  Employment Status
-                </label>
-                <div className="grid grid-cols-3 gap-1 text-[11px] font-semibold">
-                  {(['Active', 'On Leave', 'Inactive'] as const).map(st => (
-                    <button
-                      key={st}
-                      type="button"
-                      onClick={() => setStatus(st)}
-                      className={`py-1.5 px-1 rounded-xl transition-all text-center ${
-                        status === st 
-                          ? st === 'Active' ? 'bg-emerald-600 text-white font-bold' : st === 'On Leave' ? 'bg-amber-500 text-white font-bold' : 'bg-rose-600 text-white font-bold'
-                          : 'bg-white text-slate-600 hover:bg-slate-200 border border-slate-200'
-                      }`}
-                    >
-                      {st}
-                    </button>
-                  ))}
+              {/* Authoritative Security Status Selector */}
+              <div className="w-full pt-3 border-t border-slate-200">
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block text-left">
+                    Security Status
+                  </label>
+                  {(isEditingOwner || isEditingSelf) && (
+                    <span className="text-[9px] font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">
+                      Protected
+                    </span>
+                  )}
                 </div>
+
+                <div className="grid grid-cols-2 gap-1.5 text-xs font-bold">
+                  <button
+                    type="button"
+                    disabled={isEditingOwner || isEditingSelf}
+                    onClick={() => setStatus('active')}
+                    className={`py-2 px-2 rounded-xl transition-all flex items-center justify-center gap-1.5 ${
+                      status === 'active'
+                        ? 'bg-emerald-600 text-white shadow-xs font-extrabold'
+                        : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+                    } disabled:opacity-60 disabled:cursor-not-allowed`}
+                    id="btn-status-active"
+                  >
+                    <ShieldCheck className="w-3.5 h-3.5" /> Active
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={isEditingOwner || isEditingSelf}
+                    onClick={() => setStatus('suspended')}
+                    className={`py-2 px-2 rounded-xl transition-all flex items-center justify-center gap-1.5 ${
+                      status === 'suspended'
+                        ? 'bg-rose-600 text-white shadow-xs font-extrabold'
+                        : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+                    } disabled:opacity-60 disabled:cursor-not-allowed`}
+                    id="btn-status-suspended"
+                    title={
+                      isEditingOwner
+                        ? 'Tenant Owner cannot be suspended'
+                        : isEditingSelf
+                        ? 'You cannot suspend your own account'
+                        : undefined
+                    }
+                  >
+                    <ShieldAlert className="w-3.5 h-3.5" /> Suspended
+                  </button>
+                </div>
+
+                {isEditingOwner && (
+                  <p className="text-[10px] text-amber-800 text-left mt-1.5 font-medium leading-tight">
+                    Tenant Owner account is protected and cannot be suspended.
+                  </p>
+                )}
+                {isEditingSelf && !isEditingOwner && (
+                  <p className="text-[10px] text-slate-500 text-left mt-1.5 font-medium leading-tight">
+                    You cannot suspend your own active account session.
+                  </p>
+                )}
               </div>
             </div>
 
@@ -298,12 +363,10 @@ export default function StaffFormModal({
                     />
                   </div>
                 </div>
-              </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Phone Contact
+                    Contact Phone
                   </label>
                   <div className="relative">
                     <Phone className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
@@ -388,6 +451,26 @@ export default function StaffFormModal({
               </span>
             </div>
 
+            {/* Role protection alerts */}
+            {isEditingSelf && (
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-800 flex items-center gap-2 font-medium">
+                <AlertCircle className="w-4 h-4 shrink-0 text-amber-600" />
+                <span>Self-role change protection is active: You cannot change your own functional role.</span>
+              </div>
+            )}
+            {isEditingOwner && !isEditingSelf && (
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-800 flex items-center gap-2 font-medium">
+                <Crown className="w-4 h-4 shrink-0 text-amber-600" />
+                <span>Tenant Owner protection: The Business Owner role is protected and cannot be changed or demoted.</span>
+              </div>
+            )}
+            {!canManageRoles && !isEditingSelf && !isEditingOwner && (
+              <div className="p-3 bg-slate-100 border border-slate-200 rounded-xl text-xs text-slate-700 flex items-center gap-2 font-medium">
+                <Lock className="w-4 h-4 shrink-0 text-slate-500" />
+                <span>Requires <code className="font-bold text-indigo-600">users.roles</code> permission to modify staff roles or grant permissions.</span>
+              </div>
+            )}
+
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2" id="role-selector-grid">
               {OFFICIAL_ROLES.map((r) => {
                 const conf = getRoleConfig(r);
@@ -396,12 +479,13 @@ export default function StaffFormModal({
                   <button
                     key={r}
                     type="button"
+                    disabled={roleChangeBlocked}
                     onClick={() => handleRoleChange(r)}
                     className={`p-3 rounded-2xl border text-left transition-all relative ${
                       isSelected
                         ? 'border-indigo-600 bg-indigo-50/50 ring-2 ring-indigo-500/20 shadow-xs'
                         : 'border-slate-200 bg-slate-50/40 hover:bg-slate-50 hover:border-slate-300'
-                    }`}
+                    } ${roleChangeBlocked ? 'opacity-70 cursor-not-allowed' : ''}`}
                   >
                     <div className="flex items-center justify-between mb-1">
                       <span className="font-bold text-xs text-slate-900">{r}</span>
@@ -438,36 +522,40 @@ export default function StaffFormModal({
               <label className="relative inline-flex items-center cursor-pointer select-none shrink-0">
                 <input
                   type="checkbox"
+                  disabled={!canManageRoles}
                   checked={enableCustomOverrides}
                   onChange={(e) => handleToggleCustomOverrides(e.target.checked)}
                   className="sr-only peer"
                 />
-                <div className="w-9 h-5 bg-slate-300 peer-focus:outline-hidden rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600"></div>
+                <div className="w-9 h-5 bg-slate-300 peer-focus:outline-hidden rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600 peer-disabled:opacity-50"></div>
                 <span className="ml-2 text-xs font-semibold text-slate-700">Override</span>
               </label>
             </div>
 
             {enableCustomOverrides ? (
               <div className="space-y-3">
-                {/* Actions bar for overrides */}
-                <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-                  <div className="flex gap-1 overflow-x-auto pb-1 no-scrollbar max-w-full">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-1 overflow-x-auto pb-1 max-w-full text-[11px]">
                     <button
                       type="button"
                       onClick={() => setActiveCategoryTab('all')}
-                      className={`px-2.5 py-1 rounded-xl text-[11px] font-bold transition-all ${
-                        activeCategoryTab === 'all' ? 'bg-indigo-600 text-white shadow-xs' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
+                      className={`px-2.5 py-1 rounded-lg font-bold transition-all ${
+                        activeCategoryTab === 'all'
+                          ? 'bg-indigo-600 text-white'
+                          : 'bg-white text-slate-600 hover:bg-slate-200 border border-slate-200'
                       }`}
                     >
-                      All ({ALL_PERMISSIONS.length})
+                      All Categories
                     </button>
                     {PERMISSION_CATEGORIES.map(cat => (
                       <button
                         key={cat.id}
                         type="button"
                         onClick={() => setActiveCategoryTab(cat.id)}
-                        className={`px-2.5 py-1 rounded-xl text-[11px] font-bold whitespace-nowrap transition-all ${
-                          activeCategoryTab === cat.id ? 'bg-indigo-600 text-white shadow-xs' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
+                        className={`px-2.5 py-1 rounded-lg font-medium transition-all whitespace-nowrap ${
+                          activeCategoryTab === cat.id
+                            ? 'bg-indigo-600 text-white font-bold'
+                            : 'bg-white text-slate-600 hover:bg-slate-200 border border-slate-200'
                         }`}
                       >
                         {cat.label}
@@ -475,66 +563,64 @@ export default function StaffFormModal({
                     ))}
                   </div>
 
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={handleResetToRoleDefaults}
-                      className="text-[11px] text-indigo-600 hover:text-indigo-800 font-semibold flex items-center gap-1"
-                    >
-                      <RefreshCw className="w-3 h-3" /> Reset to Role Defaults
-                    </button>
-                  </div>
+                  <button
+                    type="button"
+                    disabled={!canManageRoles}
+                    onClick={handleResetToRoleDefaults}
+                    className="text-[11px] text-indigo-600 hover:text-indigo-800 font-semibold"
+                  >
+                    Reset to {role} Defaults
+                  </button>
                 </div>
 
-                {/* Granular Permission Checklist */}
+                {/* Permissions Grid */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-60 overflow-y-auto pr-1">
-                  {filteredPermissions.map(perm => {
-                    const isChecked = selectedPermissions.includes(perm.key);
-                    return (
-                      <label
-                        key={perm.key}
-                        className={`p-2.5 rounded-xl border flex items-start gap-2.5 cursor-pointer transition-all ${
-                          isChecked 
-                            ? 'bg-white border-indigo-300 shadow-2xs' 
-                            : 'bg-white/60 border-slate-200 hover:bg-white opacity-70'
-                        }`}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={isChecked}
-                          onChange={() => handleTogglePermission(perm.key)}
-                          className="mt-0.5 rounded-md text-indigo-600 focus:ring-indigo-500"
-                        />
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-1.5">
-                            <span className="font-bold text-xs text-slate-900">{perm.label}</span>
-                            {perm.isDestructive && (
-                              <span className="px-1 py-0.2 text-[8px] font-bold bg-rose-100 text-rose-700 rounded-md">High Risk</span>
-                            )}
+                  {ALL_PERMISSIONS
+                    .filter(p => activeCategoryTab === 'all' || p.category === activeCategoryTab)
+                    .map((perm) => {
+                      const isChecked = selectedPermissions.includes(perm.key);
+                      return (
+                        <div
+                          key={perm.key}
+                          onClick={() => handleTogglePermission(perm.key)}
+                          className={`p-2.5 rounded-xl border text-xs cursor-pointer transition-all flex items-start gap-2.5 ${
+                            isChecked
+                              ? 'bg-indigo-50/60 border-indigo-300'
+                              : 'bg-white border-slate-200 hover:border-slate-300 opacity-75'
+                          } ${!canManageRoles ? 'pointer-events-none opacity-60' : ''}`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={() => {}}
+                            disabled={!canManageRoles}
+                            className="mt-0.5 rounded text-indigo-600 focus:ring-indigo-500"
+                          />
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center justify-between">
+                              <span className="font-bold text-slate-900">{perm.label}</span>
+                              {perm.isDestructive && (
+                                <span className="text-[9px] px-1 bg-rose-100 text-rose-700 rounded font-bold">
+                                  Destructive
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-[10px] text-slate-500 line-clamp-1">{perm.description}</p>
                           </div>
-                          <p className="text-[10px] text-slate-500 font-mono mt-0.5">{perm.key}</p>
-                          <p className="text-[10px] text-slate-500 mt-0.5 leading-tight">{perm.description}</p>
                         </div>
-                      </label>
-                    );
-                  })}
+                      );
+                    })}
                 </div>
               </div>
             ) : (
-              <div className="p-3 bg-white rounded-xl border border-slate-200 text-xs text-slate-600 flex items-center justify-between">
-                <span>Currently inheriting all default permissions configured for <strong>{role}</strong> ({DEFAULT_ROLE_PERMISSIONS[role]?.length || 0} permissions).</span>
-                <button
-                  type="button"
-                  onClick={() => handleToggleCustomOverrides(true)}
-                  className="text-indigo-600 hover:text-indigo-800 font-bold text-[11px]"
-                >
-                  Customize Permissions
-                </button>
+              <div className="text-center py-3 text-slate-500 text-xs flex items-center justify-center gap-1.5">
+                <Sparkles className="w-4 h-4 text-indigo-500" />
+                <span>Inheriting standard default permissions profile for <strong>{role}</strong>.</span>
               </div>
             )}
           </div>
 
-          {/* Staff Notes */}
+          {/* Optional Administrative Notes */}
           <div>
             <label className="block text-xs font-bold text-slate-700 mb-1">
               Internal Administrative Notes
@@ -543,36 +629,31 @@ export default function StaffFormModal({
               rows={2}
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              placeholder="e.g. Keyholder for Storefront location #1. Primary opener."
-              className="w-full p-2.5 text-xs bg-slate-50 border border-slate-200 rounded-xl font-medium focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:outline-hidden"
+              placeholder="e.g. Schedule preferences, security credentials, employee background notes..."
+              className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl font-medium focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:outline-hidden"
               id="input-staff-notes"
             />
           </div>
 
+          {/* Form Actions */}
+          <div className="pt-4 border-t border-slate-100 flex items-center justify-end gap-3">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 text-xs font-bold text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-xl transition-all"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="px-5 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-md shadow-indigo-600/30 transition-all flex items-center gap-2"
+              id="btn-save-staff"
+            >
+              <Check className="w-4 h-4" />
+              {editingStaff ? 'Save Changes' : 'Register Staff Member'}
+            </button>
+          </div>
         </form>
-
-        {/* Footer */}
-        <div className="px-6 py-4 border-t border-slate-100 bg-slate-50/70 flex items-center justify-between shrink-0">
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-4 py-2 text-xs font-bold text-slate-600 hover:text-slate-900 bg-white hover:bg-slate-100 border border-slate-200 rounded-xl transition-all"
-            id="btn-cancel-staff"
-          >
-            Cancel
-          </button>
-
-          <button
-            type="button"
-            onClick={handleSubmit}
-            className="px-6 py-2 bg-indigo-600 hover:bg-indigo-700 active:scale-98 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-indigo-600/30 flex items-center gap-1.5"
-            id="btn-save-staff-profile"
-          >
-            <Check className="w-4 h-4" />
-            {editingStaff ? 'Update Staff Member' : 'Create Staff Member'}
-          </button>
-        </div>
-
       </div>
     </div>
   );

@@ -101,6 +101,7 @@ export default function App() {
   const [eCommerceActiveTab, setECommerceActiveTab] = useState<EcommerceAdminTab>('Storefront');
   const [dbStatus, setDbStatus] = useState<'connected' | 'syncing' | 'offline' | 'error'>('connected');
   const [lastSynced, setLastSynced] = useState<string>('Just now');
+  const [tenantOwnerUid, setTenantOwnerUid] = useState<string>('staff-owner-1');
 
   // Mobile POS specific simulator state
   const [mobilePosActive, setMobilePosActive] = useState(false);
@@ -210,6 +211,15 @@ export default function App() {
         }
         const liveStaff = Array.isArray(json.staff) ? json.staff as StaffMember[] : [];
         if (liveStaff.length > 0) setStaffMembers(liveStaff);
+
+        // Fetch authoritative tenant metadata for owner tracking
+        const tenantRes = await fetch('/api/tenant').catch(() => null);
+        if (tenantRes && tenantRes.ok) {
+          const tenantJson = await tenantRes.json().catch(() => ({}));
+          if (tenantJson?.tenant?.ownerUid) {
+            setTenantOwnerUid(tenantJson.tenant.ownerUid);
+          }
+        }
       } catch (error) {
         handleSubscriptionError();
       }
@@ -875,6 +885,33 @@ export default function App() {
       saveToLocal(products, customers, orders, logs);
     } catch (error: any) {
       alert(error?.message || 'Unable to update staff member.');
+    }
+  };
+
+  const handleUpdateStaffStatus = async (staffId: string, status: 'active' | 'suspended') => {
+    try {
+      const res = await fetch(`/api/tenant/staff/${encodeURIComponent(staffId)}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status })
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json.success) {
+        throw new Error(json.error || `Unable to set staff status to ${status}.`);
+      }
+      const savedStaff = json.staff as StaffMember;
+      setStaffMembers(prev => prev.map(s => s.id === savedStaff.id ? savedStaff : s));
+      if (activeStaff.id === savedStaff.id) setActiveStaff(savedStaff);
+      const logs = createAuditRecord(
+        status === 'suspended' ? 'Staff Suspended' : 'Staff Reactivated',
+        'User Management',
+        `Staff member ${savedStaff.name} status updated to ${status}.`
+      );
+      saveToLocal(products, customers, orders, logs);
+      return { success: true };
+    } catch (error: any) {
+      alert(error?.message || `Unable to update staff status.`);
+      return { success: false, error: error?.message };
     }
   };
 
@@ -1595,6 +1632,8 @@ export default function App() {
                     onAddStaff={handleAddStaff}
                     onUpdateStaff={handleUpdateStaff}
                     onDeleteStaff={handleDeleteStaff}
+                    onUpdateStaffStatus={handleUpdateStaffStatus}
+                    tenantOwnerUid={tenantOwnerUid}
                   />
                 )}
 

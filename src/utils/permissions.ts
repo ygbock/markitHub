@@ -522,13 +522,35 @@ export function getEffectivePermissions(staff: StaffMember | null | undefined): 
  * Checks if the given staff member has a specific permission or set of permissions.
  * If multiple permissions are passed, returns true if the staff has ANY of them (or ALL if requireAll=true).
  */
+export function isStaffSuspended(staff: StaffMember | null | undefined): boolean {
+  if (!staff) return true;
+  const s = String(staff.status || 'active').toLowerCase();
+  return s === 'suspended' || s === 'inactive';
+}
+
+export function isStaffActive(staff: StaffMember | null | undefined): boolean {
+  return !isStaffSuspended(staff);
+}
+
+export function getNormalizedStatus(staff: StaffMember | null | undefined): 'active' | 'suspended' {
+  return isStaffSuspended(staff) ? 'suspended' : 'active';
+}
+
+export function isTenantOwner(staff: StaffMember | null | undefined, tenantOwnerUid?: string): boolean {
+  if (!staff) return false;
+  if (staff.isOwner) return true;
+  if (staff.role === 'Business Owner') return true;
+  if (tenantOwnerUid && (staff.uid === tenantOwnerUid || staff.id === tenantOwnerUid)) return true;
+  return false;
+}
+
 export function hasPermission(
   staff: StaffMember | null | undefined, 
   permission: PermissionKey | PermissionKey[],
   requireAll: boolean = false
 ): boolean {
   if (!staff) return false;
-  if (staff.status === 'Inactive') return false;
+  if (isStaffSuspended(staff)) return false;
 
   const effective = getEffectivePermissions(staff);
 
