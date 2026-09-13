@@ -208,38 +208,34 @@ export default function PaymentGatewaysSection({
     setTestingGatewayId(gateway.id);
     try {
       if (gateway.provider === 'monime') {
-        const spaceId = gateway.credentials.monimeSpaceId || gateway.credentials.merchantId || '';
-        const token = gateway.credentials.monimeAccessToken || gateway.credentials.secretKey || '';
+        // Credentials stay server-side. The endpoint resolves the current tenant's
+        // configured Monime credentials from durable configuration.
+        const res = await fetch('/api/monime/test-connection', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' }
+        });
 
+        let json: any = null;
         try {
-          const res = await fetch('/api/monime/test-connection', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ spaceId, token })
-          });
-          const json = await res.json();
-          setTestResults(prev => ({
-            ...prev,
-            [gateway.id]: {
-              success: json.success ?? true,
-              message: json.message || `Monime Handshake verified. Space ID '${spaceId}' active.`,
-              timestamp: new Date().toLocaleTimeString(),
-              latencyMs: json.latencyMs,
-              diagnostics: json.diagnostics
-            }
-          }));
-        } catch (e: any) {
-          setTestResults(prev => ({
-            ...prev,
-            [gateway.id]: {
-              success: true,
-              message: `Monime credentials loaded: Space ID '${spaceId}'. Ready for checkout orchestration.`,
-              timestamp: new Date().toLocaleTimeString(),
-              latencyMs: 14,
-              diagnostics: { statusCode: 200, apiVersion: 'caph.2025-08-23' }
-            }
-          }));
+          json = await res.json();
+        } catch {
+          // Preserve a useful error below when the server response is not JSON.
         }
+
+        if (!res.ok || json?.success !== true) {
+          throw new Error(String(json?.message || json?.error || `Monime connection failed (HTTP ${res.status}).`));
+        }
+
+        setTestResults(prev => ({
+          ...prev,
+          [gateway.id]: {
+            success: true,
+            message: json.message || 'Monime connection verified successfully.',
+            timestamp: new Date().toLocaleTimeString(),
+            latencyMs: json.latencyMs,
+            diagnostics: json.diagnostics
+          }
+        }));
       } else {
         await new Promise(r => setTimeout(r, 600));
         setTestResults(prev => ({
@@ -251,7 +247,7 @@ export default function PaymentGatewaysSection({
               : gateway.provider === 'afrimoney'
               ? `Africell Afrimoney USSD gateway active (${gateway.credentials.ussdCode || '*161#'}). Auth ready.`
               : gateway.provider === 'stripe'
-              ? `Stripe API ping successful (200 OK). 3DS 2.0 Webhook verified.`
+              ? 'Stripe API ping successful (200 OK). 3DS 2.0 Webhook verified.'
               : gateway.provider === 'bank_wire'
               ? `SLCB Bank Routing Verified (${gateway.credentials.bankName || 'SLCB'}). Swift format valid.`
               : 'Gateway configuration parameters verified successfully.',
@@ -265,7 +261,7 @@ export default function PaymentGatewaysSection({
         ...prev,
         [gateway.id]: {
           success: false,
-          message: `Connection check notice: ${err?.message || 'Handshake timeout'}`,
+          message: err?.message || 'Connection check failed.',
           timestamp: new Date().toLocaleTimeString()
         }
       }));
@@ -273,7 +269,6 @@ export default function PaymentGatewaysSection({
       setTestingGatewayId(null);
     }
   };
-
   const handleAddNewGateway = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newGwName.trim()) return;
