@@ -84,7 +84,7 @@ export default function SettingsNav({
   });
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       
       {/* ========================================================================= */}
       {/* MOBILE & TABLET NAVIGATION DOCK (< lg) */}
@@ -213,7 +213,7 @@ export default function SettingsNav({
         </div>
 
         {/* Section Navigation List */}
-        <div className="bg-white rounded-2xl border border-gray-200 p-2 shadow-2xs space-y-1 max-h-[calc(100vh-280px)] overflow-y-auto">
+        <div className="bg-white rounded-2xl border border-gray-200 p-2 shadow-2xs space-y-1 max-h-[calc(100vh-245px)] overflow-y-auto overscroll-contain">
           {filteredSections.length === 0 ? (
             <div className="p-4 text-center text-xs text-gray-400 font-medium">
               No matching settings sections found.
