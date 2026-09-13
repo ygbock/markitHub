@@ -283,7 +283,7 @@ export class MonimeAdapter implements IPaymentGatewayAdapter {
     let sessionData: any = null;
 
     try {
-      // Call the backend Monime checkout session API
+      // The server owns Monime credentials and creates the authoritative checkout session.
       const res = await fetch('/api/monime/create-checkout-session', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -292,23 +292,35 @@ export class MonimeAdapter implements IPaymentGatewayAdapter {
           items,
           customerName,
           currency: currency || 'SLE',
-          successUrl: typeof window !== 'undefined' ? `${window.location.origin}/?monime_success=true&order_id=${encodeURIComponent(orderId)}` : undefined,
-          cancelUrl: typeof window !== 'undefined' ? `${window.location.origin}/?monime_cancel=true&order_id=${encodeURIComponent(orderId)}` : undefined
+          successUrl: typeof window !== 'undefined' ? window.location.origin + '/?monime_success=true&order_id=' + encodeURIComponent(orderId) : undefined,
+          cancelUrl: typeof window !== 'undefined' ? window.location.origin + '/?monime_cancel=true&order_id=' + encodeURIComponent(orderId) : undefined
         })
       });
 
-      if (res.ok) {
-        sessionData = await res.json();
+      if (!res.ok) {
+        let errorMessage = 'Unable to create Monime checkout session.';
+        try {
+          const errorData = await res.json();
+          errorMessage = String(errorData.error || errorData.message || errorMessage);
+        } catch {
+          // Keep the generic error when the response is not JSON.
+        }
+        return { success: false, transactionId: '', status: 'Failed', receiptNumber: '', provider: 'monime', amountPaid: 0, currency, error: errorMessage };
       }
-    } catch (apiErr) {
-      console.warn('[MonimeAdapter] API call notice:', apiErr);
+
+      sessionData = await res.json();
+    } catch (apiErr: any) {
+      console.error('[MonimeAdapter] Checkout session request failed:', apiErr);
+      return { success: false, transactionId: '', status: 'Failed', receiptNumber: '', provider: 'monime', amountPaid: 0, currency, error: apiErr?.message || 'Unable to reach the Monime checkout service.' };
     }
 
-    const sessionId = sessionData?.sessionId || `cs_monime_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-    const orderNumber = sessionData?.orderNumber || `MNM-${Date.now().toString().slice(-6)}`;
-    const redirectUrl = sessionData?.redirectUrl || `https://checkout.monime.io/pay/${sessionId}?ref=${encodeURIComponent(orderId)}`;
-    const txnId = `monime_pm_${Date.now().toString().slice(-8)}_${Math.random().toString(36).substring(2, 7)}`;
-
+    const sessionId = String(sessionData?.sessionId || '');
+    const orderNumber = String(sessionData?.orderNumber || '');
+    const redirectUrl = String(sessionData?.redirectUrl || '');
+    if (!sessionId || !redirectUrl) {
+      return { success: false, transactionId: '', status: 'Failed', receiptNumber: '', provider: 'monime', amountPaid: 0, currency, error: 'Monime returned an incomplete checkout session.' };
+    }
+    const txnId = sessionId;
     // Save session in Firebase Firestore
     try {
       await saveMonimeSessionToDB({
@@ -340,11 +352,9 @@ export class MonimeAdapter implements IPaymentGatewayAdapter {
         monimeSessionId: sessionId,
         monimeOrderNumber: orderNumber,
         redirectUrl,
-        monimeSpaceId: spaceId,
         minorUnitAmount,
         channel: selectedChannel,
         carrierOrRail: phone ? (phone.includes('76') || phone.includes('75') ? 'Orange Money SL' : 'Afrimoney SL') : cardLast4 ? 'Visa/Mastercard 3DS' : 'Monime Hosted Checkout',
-        endpoint: config.environment === 'production' ? 'https://api.monime.io/v1/checkout-sessions' : 'https://api.monime.io/v1/test/checkout-sessions',
         timestamp: new Date().toISOString()
       }
     };
