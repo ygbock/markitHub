@@ -48,7 +48,11 @@ export default function UserManagementModule({
   const [searchTerm, setSearchTerm] = useState('');
   const [roleFilter, setRoleFilter] = useState<string>('All');
   const [statusFilter, setStatusFilter] = useState<string>('All');
-  const [revealedPins, setRevealedPins] = useState<{ [staffId: string]: boolean }>({});
+  const canViewUsers = hasPermission(activeStaff, 'users.view');
+  const canManageUsers = hasPermission(activeStaff, 'users.manage');
+  const canManageRoles = hasPermission(activeStaff, 'users.roles');
+  const canAuditUsers = hasPermission(activeStaff, 'users.audit');
+  const canUnlockUsers = hasPermission(activeStaff, 'users.unlock');
 
   // Matrix Filters
   const [matrixCategoryFilter, setMatrixCategoryFilter] = useState<string>('all');
@@ -68,16 +72,14 @@ export default function UserManagementModule({
   const [inspectRole, setInspectRole] = useState<StaffRole>('Cashier');
 
   // Helpers
-  const togglePinReveal = (staffId: string) => {
-    setRevealedPins(prev => ({ ...prev, [staffId]: !prev[staffId] }));
-  };
-
   const handleOpenAddStaff = () => {
+    if (!canManageUsers) return;
     setEditingStaff(null);
     setIsStaffModalOpen(true);
   };
 
   const handleOpenEditStaff = (staff: StaffMember) => {
+    if (!canManageUsers) return;
     setEditingStaff(staff);
     setIsStaffModalOpen(true);
   };
@@ -91,6 +93,7 @@ export default function UserManagementModule({
   };
 
   const handleDeleteStaffClick = (staff: StaffMember) => {
+    if (!canManageUsers) return;
     if (staff.id === activeStaff.id) {
       alert('Cannot delete the currently logged in operator session.');
       return;
@@ -176,13 +179,13 @@ export default function UserManagementModule({
         </div>
 
         <div className="flex items-center gap-2.5 w-full md:w-auto">
-          <button
+          {canManageUsers && <button
             onClick={handleOpenAddStaff}
             className="w-full md:w-auto px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white text-xs font-bold rounded-2xl shadow-md shadow-indigo-600/30 flex items-center justify-center gap-2 transition-all"
             id="btn-add-staff-top"
           >
             <Plus className="w-4 h-4" /> Add Staff Member
-          </button>
+          </button>}
         </div>
       </div>
 
@@ -241,7 +244,7 @@ export default function UserManagementModule({
           <Users className="w-4 h-4" /> Staff Directory & Roster ({staffMembers.length})
         </button>
 
-        <button
+        {canManageRoles && <button
           onClick={() => setActiveTab('matrix')}
           className={`px-4 py-2 rounded-xl text-xs font-bold whitespace-nowrap flex items-center gap-2 transition-all ${
             activeTab === 'matrix'
@@ -251,9 +254,9 @@ export default function UserManagementModule({
           id="tab-btn-matrix"
         >
           <Shield className="w-4 h-4" /> Granular Permissions Matrix
-        </button>
+        </button>}
 
-        <button
+        {canManageRoles && <button
           onClick={() => setActiveTab('roles')}
           className={`px-4 py-2 rounded-xl text-xs font-bold whitespace-nowrap flex items-center gap-2 transition-all ${
             activeTab === 'roles'
@@ -263,9 +266,9 @@ export default function UserManagementModule({
           id="tab-btn-roles"
         >
           <Key className="w-4 h-4" /> 10 Role Definitions & Presets
-        </button>
+        </button>}
 
-        <button
+        {canUnlockUsers && <button
           onClick={() => setActiveTab('terminal')}
           className={`px-4 py-2 rounded-xl text-xs font-bold whitespace-nowrap flex items-center gap-2 transition-all ${
             activeTab === 'terminal'
@@ -275,9 +278,9 @@ export default function UserManagementModule({
           id="tab-btn-terminal"
         >
           <Lock className="w-4 h-4" /> Terminal Operator Switcher
-        </button>
+        </button>}
 
-        <button
+        {canAuditUsers && <button
           onClick={() => setActiveTab('audit')}
           className={`px-4 py-2 rounded-xl text-xs font-bold whitespace-nowrap flex items-center gap-2 transition-all ${
             activeTab === 'audit'
@@ -287,7 +290,7 @@ export default function UserManagementModule({
           id="tab-btn-audit"
         >
           <Activity className="w-4 h-4" /> Security Audit Ledger
-        </button>
+        </button>}
       </div>
 
       {/* TAB 1: STAFF DIRECTORY & ROSTER */}
@@ -427,16 +430,8 @@ export default function UserManagementModule({
 
                       {/* Passcode preview */}
                       <div className="text-right">
-                        <span className="text-[10px] text-slate-400 uppercase tracking-wider font-bold block">
-                          Terminal PIN
-                        </span>
-                        <button
-                          onClick={() => togglePinReveal(staff.id)}
-                          className="font-mono text-xs font-bold text-indigo-600 hover:text-indigo-800 flex items-center gap-1 ml-auto"
-                        >
-                          {isPinRevealed ? staff.pin : '••••'}
-                          {isPinRevealed ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
-                        </button>
+                        <span className="text-[10px] text-slate-400 uppercase tracking-wider font-bold block">Terminal PIN</span>
+                        <span className="font-mono text-xs font-bold text-slate-400 ml-auto">Protected</span>
                       </div>
                     </div>
                   </div>
