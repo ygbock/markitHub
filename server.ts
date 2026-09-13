@@ -27,6 +27,7 @@ import { INITIAL_PRODUCTS } from './src/data/mockData';
 import { slugify } from './src/utils/seoUtils';
 import { DEFAULT_ROLE_PERMISSIONS, ALL_PERMISSION_KEYS } from './src/utils/permissions';
 import { transitionPaymentState, type PaymentState } from './src/server/paymentState';
+import { sanitizeMonimeConfigResponse } from './src/server/monimePaymentState';
 import {
   extractAuthenticatedTenantId,
   assertTenantStaffAccess,
@@ -1041,15 +1042,7 @@ async function startServer() {
       const snap = await db.collection('tenants').doc(tenantId).collection('payment_gateways').doc('monime').get();
       if (!snap.exists) return res.json({ configured: false, provider: 'monime' });
       const data = snap.data() || {};
-      return res.json({
-        configured: Boolean(data.monimeSpaceId && data.monimeAccessToken && data.webhookSecret),
-        provider: 'monime',
-        environment: data.monimeMode === 'live' ? 'production' : 'sandbox',
-        spaceId: data.monimeSpaceId || null,
-        webhookConfigured: Boolean(data.webhookSecret),
-        preferredChannel: data.monimePreferredChannel || 'all',
-        version: data.monimeVersion || 'caph.2025-08-23',
-      });
+      return res.json(sanitizeMonimeConfigResponse(data));
     } catch {
       return res.status(500).json({ error: 'Unable to load Monime configuration.' });
     }
@@ -1057,7 +1050,7 @@ async function startServer() {
 
   const ensureMonimeWebhook = async ({ apiUrl, accessToken, spaceId, tenantId, webhookSecret, existingWebhookId, rotateSecret }: { apiUrl: string; accessToken: string; spaceId: string; tenantId: string; webhookSecret: string; existingWebhookId?: string; rotateSecret?: boolean }) => {
     const webhookBaseUrl = String(process.env.MONIME_WEBHOOK_BASE_URL || process.env.APP_URL || '').trim().replace(/\/+$/, '');
-    if (!webhookBaseUrl) throw new Error('MONIME_WEBHOOK_BASE_URL is not configured on the server.');
+    if (!webhookBaseUrl) throw new Error('MONIME_WEBHOOK_BASE_URL (or APP_URL) is not configured on the server.');
     const webhookUrl = webhookBaseUrl + '/api/monime/webhook/' + encodeURIComponent(tenantId);
     const headers = { 'Content-Type': 'application/json', Authorization: 'Bearer ' + accessToken, 'Monime-Space-Id': spaceId, 'Monime-Version': 'caph.2025-08-23' };
     const events = ['payment.completed', 'payment.failed', 'checkout_session.completed'];
