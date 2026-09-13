@@ -888,12 +888,12 @@ export default function App() {
     }
   };
 
-  const handleUpdateStaffStatus = async (staffId: string, status: 'active' | 'suspended') => {
+  const handleUpdateStaffStatus = async (staffId: string, status: 'active' | 'suspended', reason?: string) => {
     try {
       const res = await fetch(`/api/tenant/staff/${encodeURIComponent(staffId)}/status`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status })
+        body: JSON.stringify({ status, reason })
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok || !json.success) {
@@ -902,13 +902,21 @@ export default function App() {
       const savedStaff = json.staff as StaffMember;
       setStaffMembers(prev => prev.map(s => s.id === savedStaff.id ? savedStaff : s));
       if (activeStaff.id === savedStaff.id) setActiveStaff(savedStaff);
-      const logs = createAuditRecord(
-        status === 'suspended' ? 'Staff Suspended' : 'Staff Reactivated',
-        'User Management',
-        `Staff member ${savedStaff.name} status updated to ${status}.`
-      );
-      saveToLocal(products, customers, orders, logs);
-      return { success: true };
+
+      let finalLogs: AuditLog[];
+      if (json.audit) {
+        finalLogs = [json.audit as AuditLog, ...auditLogs];
+        setAuditLogs(finalLogs);
+      } else {
+        const reasonText = reason ? `. Reason: ${reason}` : '';
+        finalLogs = createAuditRecord(
+          status === 'suspended' ? 'Staff Suspended' : 'Staff Reactivated',
+          'User Management',
+          `Staff member ${savedStaff.name} (${savedStaff.id}) status updated to ${status}${reasonText}.`
+        );
+      }
+      saveToLocal(products, customers, orders, finalLogs);
+      return { success: true, audit: json.audit };
     } catch (error: any) {
       alert(error?.message || `Unable to update staff status.`);
       return { success: false, error: error?.message };

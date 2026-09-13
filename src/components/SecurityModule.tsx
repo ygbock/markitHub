@@ -10,7 +10,7 @@ interface SecurityModuleProps {
   onAddStaff?: (staff: StaffMember) => void;
   onUpdateStaff?: (staff: StaffMember) => void;
   onDeleteStaff?: (staffId: string) => void;
-  onUpdateStaffStatus?: (staffId: string, status: StaffStatus) => Promise<{ success: boolean; error?: string }>;
+  onUpdateStaffStatus?: (staffId: string, status: StaffStatus, reason?: string) => Promise<{ success: boolean; error?: string; audit?: AuditLog }>;
   tenantOwnerUid?: string;
   tenantOwnerId?: string;
 }

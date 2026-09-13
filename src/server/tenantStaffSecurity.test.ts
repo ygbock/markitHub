@@ -272,8 +272,8 @@ test('Security Test 13: Suspended staff members are denied permissions regardles
   assert.equal(isStaffSuspended(suspendedAdmin), true);
   assert.equal(isStaffActive(suspendedAdmin), false);
   assert.equal(hasPermission(suspendedAdmin, 'users.manage'), false);
-  assert.equal(hasPermission(suspendedAdmin, 'pos.access'), false);
-  assert.equal(hasPermission(suspendedAdmin, 'inventory.manage'), false);
+  assert.equal(hasPermission(suspendedAdmin, 'sales.create'), false);
+  assert.equal(hasPermission(suspendedAdmin, 'inventory.edit'), false);
 
   assert.equal(isStaffSuspended(activeAdmin), false);
   assert.equal(isStaffActive(activeAdmin), true);

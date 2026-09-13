@@ -35,6 +35,7 @@ import {
   assertNotSelfRoleChange,
   normalizeStaffPayload,
   isSelfStaffOperation,
+  createStaffStatusAuditRecord,
 } from './src/server/tenantStaffAuth';
 import {
   establishTenantSecurityContext,
@@ -365,26 +366,67 @@ async function startServer() {
     const db = getAdminDb();
     if (!tenantId || !db) return res.status(503).json({ error: 'Tenant staff service is not configured.' });
     try {
-      const ref = db.collection('staff').doc(req.params.staffId);
-      const snap = await ref.get();
-      if (!snap.exists) return res.status(404).json({ error: 'Staff member not found.' });
-      assertTenantStaffAccess(snap.data(), tenantId);
-
       const status = String(req.body?.status || '').toLowerCase();
       if (status !== 'active' && status !== 'suspended') {
         return res.status(400).json({ error: 'Status must be active or suspended.' });
       }
 
-      const tenantSnap = await db.collection('tenants').doc(tenantId).get();
-      if (tenantSnap.exists) {
-        assertNotTenantOwnerSuspension(snap.data(), { id: tenantSnap.id, ...tenantSnap.data() } as any, status);
-      }
+      let updatedStaff: any = null;
+      let auditRecord: any = null;
 
-      if (isSelfStaffOperation(req.user, req.params.staffId, snap.data())) {
-        return res.status(400).json({ error: 'You cannot change your own account status.' });
-      }
-      await ref.set({ status, updatedAt: new Date().toISOString() }, { merge: true });
-      return res.json({ success: true, staff: { ...snap.data(), id: snap.id, status } });
+      await db.runTransaction(async (transaction) => {
+        const ref = db.collection('staff').doc(req.params.staffId);
+        const snap = await transaction.get(ref);
+        if (!snap.exists) {
+          const err: any = new Error('Staff member not found.');
+          err.statusCode = 404;
+          throw err;
+        }
+        const staffData = snap.data();
+        assertTenantStaffAccess(staffData, tenantId);
+
+        const tenantRef = db.collection('tenants').doc(tenantId);
+        const tenantSnap = await transaction.get(tenantRef);
+        if (tenantSnap.exists) {
+          assertNotTenantOwnerSuspension(staffData, { id: tenantSnap.id, ...tenantSnap.data() } as any, status);
+        }
+
+        if (isSelfStaffOperation(req.user, req.params.staffId, staffData)) {
+          const err: any = new Error('You cannot change your own account status.');
+          err.statusCode = 400;
+          throw err;
+        }
+
+        const previousStatus = String(staffData?.status || 'active').toLowerCase();
+        const rawReason = typeof req.body?.reason === 'string' ? req.body.reason.trim() : '';
+        const now = new Date().toISOString();
+
+        auditRecord = createStaffStatusAuditRecord({
+          tenantId,
+          actorUid: req.user.uid,
+          actorName: (req.user as any)?.name || req.user.email || req.user.uid,
+          actorRole: String(req.user.claims?.role || (req.user as any)?.role || 'Staff Manager'),
+          targetStaffId: req.params.staffId,
+          targetStaffName: staffData?.name || staffData?.email || req.params.staffId,
+          previousStatus,
+          newStatus: status as 'active' | 'suspended',
+          reason: rawReason,
+          metadata: {
+            actorEmail: req.user.email || null,
+          },
+        });
+
+        const auditRef = db.collection('audit_logs').doc(auditRecord.id);
+
+        transaction.set(ref, { status, updatedAt: now }, { merge: true });
+        transaction.set(auditRef, auditRecord);
+
+        const safeStaffData = { ...staffData };
+        delete (safeStaffData as any).pin;
+        updatedStaff = { ...safeStaffData, id: snap.id, status, updatedAt: now };
+      });
+
+      return res.json({ success: true, staff: updatedStaff, audit: auditRecord });
     } catch (err: any) {
       const status = err?.statusCode || 500;
       return res.status(status).json({ error: err?.message || 'Unable to update staff status.' });

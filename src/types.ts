@@ -1109,6 +1109,14 @@ export interface AuditLog {
   action: string;
   module: 'Inventory' | 'POS' | 'CRM' | 'User Management' | 'Billing' | 'Storefront' | string;
   details: string;
+  tenantId?: string;
+  actorUid?: string;
+  targetStaffId?: string;
+  targetStaffName?: string;
+  previousStatus?: string;
+  newStatus?: string;
+  reason?: string;
+  metadata?: Record<string, unknown>;
 }
 
 export type StaffStatus = 'active' | 'suspended';

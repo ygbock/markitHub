@@ -28,7 +28,7 @@ export interface UserManagementModuleProps {
   onAddStaff?: (staff: StaffMember) => void;
   onUpdateStaff?: (staff: StaffMember) => void;
   onDeleteStaff?: (staffId: string) => void;
-  onUpdateStaffStatus?: (staffId: string, status: StaffStatus) => Promise<{ success: boolean; error?: string }>;
+  onUpdateStaffStatus?: (staffId: string, status: StaffStatus, reason?: string) => Promise<{ success: boolean; error?: string; audit?: AuditLog }>;
   tenantOwnerUid?: string;
   tenantOwnerId?: string;
 }
@@ -152,11 +152,12 @@ export default function UserManagementModule({
     if (!statusTargetStaff) return;
     const target = statusTargetStaff;
     const nextStatus: StaffStatus = statusAction === 'suspend' ? 'suspended' : 'active';
+    const trimmedReason = reason?.trim();
 
     setIsStatusChanging(true);
     try {
       if (onUpdateStaffStatus) {
-        const res = await onUpdateStaffStatus(target.id, nextStatus);
+        const res = await onUpdateStaffStatus(target.id, nextStatus, trimmedReason);
         if (res && !res.success) {
           throw new Error(res.error || `Unable to set staff account status to ${nextStatus}.`);
         }
@@ -165,7 +166,7 @@ export default function UserManagementModule({
         const res = await fetch(`/api/tenant/staff/${encodeURIComponent(target.id)}/status`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ status: nextStatus, reason })
+          body: JSON.stringify({ status: nextStatus, reason: trimmedReason })
         });
         const json = await res.json().catch(() => ({}));
         if (!res.ok || !json.success) {

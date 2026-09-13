@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { ALL_PERMISSION_KEYS, DEFAULT_ROLE_PERMISSIONS } from '../utils/permissions';
+import type { AuditLog } from '../types';
 
 export interface AuthenticatedUserContext {
   uid?: string;
@@ -177,5 +178,75 @@ export function normalizeStaffPayload(
     status: String(body?.status ?? existing?.status ?? 'active'),
     ...(customPermissions ? { customPermissions } : {}),
     updatedAt: new Date().toISOString(),
+  };
+}
+
+export interface StaffStatusAuditRecordParams {
+  tenantId: string;
+  actorUid: string;
+  actorName?: string;
+  actorRole?: string;
+  targetStaffId: string;
+  targetStaffName?: string;
+  previousStatus: string;
+  newStatus: 'active' | 'suspended';
+  reason?: string;
+  metadata?: Record<string, unknown>;
+}
+
+/**
+ * Creates an immutable audit record for staff suspension or reactivation.
+ * Strictly excludes any secrets (PINs, passwords, tokens).
+ */
+export function createStaffStatusAuditRecord(params: StaffStatusAuditRecordParams): AuditLog {
+  const isSuspension = params.newStatus === 'suspended';
+  const action = isSuspension ? 'Staff Suspended' : 'Staff Reactivated';
+  const targetStaffName = params.targetStaffName || params.targetStaffId;
+  const rawReason = typeof params.reason === 'string' ? params.reason.trim() : '';
+  const reason = rawReason || (isSuspension ? 'Administrative suspension' : 'Administrative reactivation');
+  const now = new Date().toISOString();
+
+  // Sanitize metadata to guarantee no secrets/credentials/PINs are leaked
+  const sanitizedMetadata: Record<string, unknown> = {};
+  if (params.metadata) {
+    for (const [key, value] of Object.entries(params.metadata)) {
+      const lowerKey = key.toLowerCase();
+      if (
+        !lowerKey.includes('pin') &&
+        !lowerKey.includes('password') &&
+        !lowerKey.includes('token') &&
+        !lowerKey.includes('secret') &&
+        !lowerKey.includes('credential')
+      ) {
+        sanitizedMetadata[key] = value;
+      }
+    }
+  }
+
+  return {
+    id: `audit_staff_${crypto.randomUUID()}`,
+    timestamp: now,
+    staffName: params.actorName || params.actorUid,
+    role: params.actorRole || 'Staff Manager',
+    action,
+    module: 'User Management',
+    details: `Staff member ${targetStaffName} (${params.targetStaffId}) status changed from ${params.previousStatus} to ${params.newStatus}. Reason: ${reason}`,
+    tenantId: params.tenantId,
+    actorUid: params.actorUid,
+    targetStaffId: params.targetStaffId,
+    targetStaffName,
+    previousStatus: params.previousStatus,
+    newStatus: params.newStatus,
+    reason,
+    metadata: {
+      tenantId: params.tenantId,
+      actorUid: params.actorUid,
+      targetStaffId: params.targetStaffId,
+      targetStaffName,
+      previousStatus: params.previousStatus,
+      newStatus: params.newStatus,
+      reason,
+      ...sanitizedMetadata,
+    },
   };
 }
