@@ -165,10 +165,10 @@ export default function SettingsModule({
       </div>
 
       {/* 2. Main 12-Column Responsive Layout */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-6 items-start">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 xl:gap-7 items-start">
         
         {/* Left Sidebar (Static & Sticky for Desktop view: col-span-4 / Mobile & Tablet: full width horizontal dock) */}
-        <aside className="lg:col-span-4 lg:sticky lg:top-[92px] lg:self-start lg:max-h-[calc(100vh-110px)] flex flex-col space-y-4 z-10" id="settings-static-sidebar">
+        <aside className="lg:col-span-4 xl:col-span-3 lg:sticky lg:top-[92px] lg:self-start lg:max-h-[calc(100vh-110px)] flex flex-col space-y-4 z-10 min-w-0" id="settings-static-sidebar">
           <SettingsNav
             activeSection={activeSection}
             onSelectSection={setActiveSection}
@@ -178,7 +178,7 @@ export default function SettingsModule({
         </aside>
 
         {/* Right Content Area (Desktop: col-span-8 / Mobile & Tablet: full width active form) */}
-        <div className="lg:col-span-8 space-y-4 sm:space-y-6">
+        <div className="lg:col-span-8 xl:col-span-9 space-y-4 sm:space-y-6 min-w-0">
           
           {/* General & Finance Domains (1-5) */}
           <GeneralAndFinanceSections
