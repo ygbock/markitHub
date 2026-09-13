@@ -736,7 +736,7 @@ async function startServer() {
       if (accessToken && accessToken.length < 20) {
         return res.status(400).json({ error: 'Monime API access token appears invalid.' });
       }
-      if (webhookSecret && (webhookSecret.length < 32 || webhookSecret.length > 1000)) {
+      if (webhookSecret && (webhookSecret.length < 32 || webhookSecret.length > 256)) {
         return res.status(400).json({ error: 'Webhook verification secret must be between 32 and 1000 characters.' });
       }
       if (accessToken.length > 1000 || spaceId.length > 64) {
