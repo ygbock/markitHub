@@ -333,8 +333,8 @@ export class MonimeAdapter implements IPaymentGatewayAdapter {
     return {
       success: true,
       transactionId: txnId,
-      status: 'Captured',
-      receiptNumber: `MONIME-REC-${Date.now().toString().slice(-6)}`,
+      status: 'Pending Settlement',
+      receiptNumber: `MONIME-PENDING-${Date.now().toString().slice(-6)}`,
       provider: 'monime',
       amountPaid: amount,
       currency,
