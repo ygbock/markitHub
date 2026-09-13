@@ -26,7 +26,7 @@ export default function SettingsHeader({
   return (
     <div className="space-y-4">
       {/* Top Header Card */}
-      <div className="bg-white rounded-2xl border border-gray-200 p-4 sm:p-6 shadow-xs">
+      <div className="bg-white rounded-2xl border border-gray-200 p-4 sm:p-6 xl:px-7 shadow-xs">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           
           {/* Title & Info */}
@@ -50,7 +50,7 @@ export default function SettingsHeader({
           </div>
 
           {/* Action Toolbar */}
-          <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap sm:flex-nowrap justify-between sm:justify-end shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-gray-100">
+          <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap sm:flex-nowrap justify-between sm:justify-end shrink-0 pt-3 sm:pt-0 border-t sm:border-t-0 border-gray-100">
             <div className="flex items-center gap-1.5">
               <button
                 type="button"
@@ -60,7 +60,7 @@ export default function SettingsHeader({
                 id="settings-export-btn"
               >
                 <Download className="w-3.5 h-3.5 text-slate-600 shrink-0" />
-                <span className="inline text-xs">Export</span>
+                <span className="hidden xl:inline text-xs">Export</span>
               </button>
 
               <label 
@@ -69,7 +69,7 @@ export default function SettingsHeader({
                 id="settings-import-label"
               >
                 <Upload className="w-3.5 h-3.5 text-slate-600 shrink-0" />
-                <span className="inline text-xs">Import</span>
+                <span className="hidden xl:inline text-xs">Import</span>
                 <input type="file" accept=".json" onChange={onImport} className="hidden" />
               </label>
 
