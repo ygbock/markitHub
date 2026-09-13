@@ -348,7 +348,6 @@ export default function UserManagementModule({
               const roleConfig = getRoleConfig(staff.role);
               const effectivePerms = getEffectivePermissions(staff);
               const isCurrent = activeStaff.id === staff.id;
-              const isPinRevealed = revealedPins[staff.id];
 
               return (
                 <div
@@ -451,7 +450,7 @@ export default function UserManagementModule({
                       {isCurrent ? 'Current Operator' : 'Switch Terminal'}
                     </button>
 
-                    <div className="flex items-center gap-1">
+                    {canManageUsers && <div className="flex items-center gap-1">
                       <button
                         onClick={() => handleOpenEditStaff(staff)}
                         className="p-2 text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded-xl transition-all"
@@ -474,7 +473,7 @@ export default function UserManagementModule({
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
-                    </div>
+                    </div>}
                   </div>
                 </div>
               );
