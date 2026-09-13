@@ -17,8 +17,7 @@ import {
   subscribeAuditLogs, saveAuditLogToDB,
   subscribeSettings, saveSettingsToDB, DEFAULT_SETTINGS,
   subscribeCategories, saveCategoryToDB, deleteCategoryFromDB,
-  subscribeReviews, saveReviewToDB, moderateReviewInDB, respondToReviewInDB, deleteReviewFromDB,
-  saveMonimeSessionToDB
+  subscribeReviews, saveReviewToDB, moderateReviewInDB, respondToReviewInDB, deleteReviewFromDB
 } from './services/dbService';
 import { PaymentService } from './services/paymentService';
 import { DEFAULT_HOMEPAGE_CONFIG } from './data/homepageConfig';
@@ -668,27 +667,9 @@ export default function App() {
       const updatedOrders = [pendingOrder, ...orders.filter(o => o.id !== orderId)];
       setOrders(updatedOrders);
 
-      // Persist to Firestore
+      // Persist order to Firestore (the server persists the Monime checkout session via Admin SDK)
       try {
         await saveOrderToDB(pendingOrder);
-        await saveMonimeSessionToDB({
-          id: resolvedSessionId,
-          order_id: orderId,
-          monime_session_id: resolvedSessionId,
-          monime_order_number: orderNumber,
-          redirect_url: redirectUrl,
-          status: 'pending',
-          amount: newOrder.total,
-          currency: primaryCurrency,
-          line_items: newOrder.items.map(it => ({
-            name: it.productName,
-            quantity: it.quantity,
-            price: it.price,
-            sku: it.variantSku || it.productId
-          })),
-          customer_name: newOrder.customerName,
-          created_at: new Date().toISOString()
-        });
       } catch (dbErr) {
         console.error('Failed to persist Monime pending order to Firestore:', dbErr);
       }

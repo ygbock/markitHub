@@ -4,7 +4,6 @@ import {
   PaymentGatewayProvider, 
   PaymentSessionProcessRequest 
 } from '../types';
-import { saveMonimeSessionToDB } from './dbService';
 
 export interface GatewayProcessResponse {
   success: boolean;
@@ -321,24 +320,6 @@ export class MonimeAdapter implements IPaymentGatewayAdapter {
       return { success: false, transactionId: '', status: 'Failed', receiptNumber: '', provider: 'monime', amountPaid: 0, currency, error: 'Monime returned an incomplete checkout session.' };
     }
     const txnId = sessionId;
-    // Save session in Firebase Firestore
-    try {
-      await saveMonimeSessionToDB({
-        id: sessionId,
-        order_id: orderId,
-        monime_session_id: sessionId,
-        monime_order_number: orderNumber,
-        redirect_url: redirectUrl,
-        status: 'pending',
-        amount,
-        currency: currency || 'SLE',
-        line_items: items,
-        customer_name: customerName,
-        created_at: new Date().toISOString()
-      });
-    } catch (fbErr) {
-      console.warn('[MonimeAdapter] Firebase session save note:', fbErr);
-    }
 
     return {
       success: true,

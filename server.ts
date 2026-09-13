@@ -1056,7 +1056,7 @@ async function startServer() {
   });
 
   const ensureMonimeWebhook = async ({ apiUrl, accessToken, spaceId, tenantId, webhookSecret, existingWebhookId, rotateSecret }: { apiUrl: string; accessToken: string; spaceId: string; tenantId: string; webhookSecret: string; existingWebhookId?: string; rotateSecret?: boolean }) => {
-    const webhookBaseUrl = String(process.env.MONIME_WEBHOOK_BASE_URL || '').trim().replace(/\/+$/, '');
+    const webhookBaseUrl = String(process.env.MONIME_WEBHOOK_BASE_URL || process.env.APP_URL || '').trim().replace(/\/+$/, '');
     if (!webhookBaseUrl) throw new Error('MONIME_WEBHOOK_BASE_URL is not configured on the server.');
     const webhookUrl = webhookBaseUrl + '/api/monime/webhook/' + encodeURIComponent(tenantId);
     const headers = { 'Content-Type': 'application/json', Authorization: 'Bearer ' + accessToken, 'Monime-Space-Id': spaceId, 'Monime-Version': 'caph.2025-08-23' };
@@ -1159,10 +1159,28 @@ async function startServer() {
       if (!appUrl) {
         return res.status(503).json({ error: 'APP_URL is not configured on the server.' });
       }
-      const successUrl = new URL('/checkout/success', appUrl);
-      successUrl.searchParams.set('orderId', String(orderId));
-      const cancelUrl = new URL('/checkout/cancel', appUrl);
-      cancelUrl.searchParams.set('orderId', String(orderId));
+      const clientSuccess = req.body?.success_url || req.body?.successUrl;
+      const clientCancel = req.body?.cancel_url || req.body?.cancelUrl;
+      let successUrl: URL;
+      let cancelUrl: URL;
+      try {
+        successUrl = clientSuccess ? new URL(String(clientSuccess), appUrl) : new URL('/checkout/success', appUrl);
+        if (!clientSuccess) {
+          successUrl.searchParams.set('orderId', String(orderId));
+        }
+      } catch {
+        successUrl = new URL('/checkout/success', appUrl);
+        successUrl.searchParams.set('orderId', String(orderId));
+      }
+      try {
+        cancelUrl = clientCancel ? new URL(String(clientCancel), appUrl) : new URL('/checkout/cancel', appUrl);
+        if (!clientCancel) {
+          cancelUrl.searchParams.set('orderId', String(orderId));
+        }
+      } catch {
+        cancelUrl = new URL('/checkout/cancel', appUrl);
+        cancelUrl.searchParams.set('orderId', String(orderId));
+      }
 
       const db = getFirestoreDb();
       if (!db) return res.status(503).json({ error: 'Durable configuration storage is not configured.' });
@@ -1240,8 +1258,10 @@ async function startServer() {
             name: `NEXUS Order ${orderId}`,
             description: customerName ? `Payment for ${customerName}` : 'Payment for order',
             reference: orderId,
-            successUrl: successUrl || undefined,
-            cancelUrl: cancelUrl || undefined,
+            success_url: successUrl.toString(),
+            cancel_url: cancelUrl.toString(),
+            successUrl: successUrl.toString(),
+            cancelUrl: cancelUrl.toString(),
             lineItems,
           }),
         });
