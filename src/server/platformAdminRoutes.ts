@@ -256,7 +256,6 @@ export function registerPlatformAdminRoutes({
       const staffId = `staff_${crypto.randomUUID().replace(/-/g, '').slice(0, 20)}`;
       const tenantRef = db.collection('tenants').doc(tenantId);
       const staffRef = db.collection('staff').doc(staffId);
-      const metricsRef = db.collection('tenant_security_metrics').doc(tenantId);
       const billingRef = db.collection('platform_billing_events').doc();
       let createdTenant: any = null;
 
@@ -331,16 +330,6 @@ export function registerPlatformAdminRoutes({
           createdAt: now,
           updatedAt: now,
         });
-        transaction.set(metricsRef, {
-          tenantId,
-          staffSuspensions: 0,
-          rolePermissionChanges: 0,
-          ownershipEvents: 0,
-          failedDeniedOperations: 0,
-          dailyBuckets: {},
-          updatedAt: now,
-        });
-
         transaction.set(db.collection('audit_logs').doc(audit.id), audit);
 
         transaction.set(billingRef, {
