@@ -8,6 +8,7 @@ import {
   calculateUsagePercent,
   usageLimitState,
   buildUsageMeterPatch,
+  evaluateUsageLimit,
 } from './platformUsageMeter';
 
 test('Platform usage metering: periods are UTC calendar months', () => {
@@ -52,4 +53,13 @@ test('Platform usage metering: plan utilization is bounded and has 80% warning t
 test('Platform usage metering: zero quantity cannot create a meter patch', () => {
   assert.equal(buildUsageMeterPatch('ordersMonthly', 0), null);
   assert.equal(buildUsageMeterPatch('ordersMonthly', -1), null);
+});
+
+test('Platform usage metering: hard order limit denies at the limit unless override is explicit', () => {
+  assert.equal(evaluateUsageLimit(9999, 10000).allowed, true);
+  assert.equal(evaluateUsageLimit(10000, 10000).allowed, false);
+  assert.equal(evaluateUsageLimit(12000, 10000).allowed, false);
+  assert.equal(evaluateUsageLimit(12000, 10000, true).allowed, true);
+  assert.equal(evaluateUsageLimit(8000, 10000).state, 'warning');
+  assert.equal(evaluateUsageLimit(10000, 10000).remaining, 0);
 });
