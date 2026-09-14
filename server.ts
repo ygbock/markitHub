@@ -47,6 +47,7 @@ import {
   sanitizeTenantUpdatePayload,
   createOwnershipTransferAuditRecord,
 } from './src/server/tenantOwnershipAuth';
+import { assertPlatformAdmin } from './src/server/platformAdminAuth';
 import {
   createAuthoritativeAuditRecord,
   recordAuditEvent,
@@ -619,6 +620,76 @@ async function startServer() {
     } catch (err: any) {
       const status = err?.statusCode || 400;
       return res.status(status).json({ error: err?.message || 'Unable to update tenant settings.' });
+    }
+  });
+
+  // =========================================================================
+  // PLATFORM SUPER ADMIN CONTROL PLANE
+  // =========================================================================
+  const requirePlatformAdmin = async (req: any, res: any, next: any) => {
+    try {
+      assertPlatformAdmin(req.user?.claims);
+      return next();
+    } catch (err: any) {
+      return res.status(err?.statusCode || 403).json({ error: err?.message || 'Platform Super Admin access is required.' });
+    }
+  };
+
+  app.get('/api/platform/dashboard', requireServerAuth, requirePlatformAdmin, async (req, res) => {
+    const db = getAdminDb();
+    if (!db) return res.status(503).json({ error: 'Platform service is not configured.' });
+
+    try {
+      const tenantsRef = db.collection('tenants');
+      const staffRef = db.collection('staff');
+
+      const [tenantCountSnap, staffCountSnap, tenantsSnap, auditSnap] = await Promise.all([
+        tenantsRef.count().get(),
+        staffRef.count().get(),
+        tenantsRef.limit(100).get(),
+        db.collection('audit_logs').orderBy('timestamp', 'desc').limit(25).get(),
+      ]);
+
+      const tenants = tenantsSnap.docs.map(doc => {
+        const data = doc.data() as any;
+        return {
+          id: doc.id,
+          name: String(data.name || data.businessName || data.storeName || doc.id),
+          status: String(data.status || 'active'),
+          ownerUid: data.ownerUid ? String(data.ownerUid) : undefined,
+          updatedAt: data.updatedAt ? String(data.updatedAt) : undefined,
+        };
+      });
+
+      const activeTenantCount = tenants.filter(t => t.status.toLowerCase() === 'active').length;
+      const suspendedTenantCount = tenants.filter(t => t.status.toLowerCase() === 'suspended').length;
+
+      const recentAuditEvents = auditSnap.docs.map(doc => {
+        const data = doc.data() as any;
+        return {
+          id: doc.id,
+          action: String(data.action || ''),
+          tenantId: String(data.tenantId || ''),
+          result: String(data.result || ''),
+          severity: String(data.severity || ''),
+          timestamp: String(data.timestamp || ''),
+        };
+      });
+
+      return res.json({
+        success: true,
+        metrics: {
+          tenantCount: tenantCountSnap.data().count,
+          activeTenantCount,
+          suspendedTenantCount,
+          staffCount: staffCountSnap.data().count,
+          recentAuditCount: recentAuditEvents.length,
+        },
+        tenants,
+        recentAuditEvents,
+      });
+    } catch (err: any) {
+      return res.status(500).json({ error: err?.message || 'Unable to load platform dashboard.' });
     }
   });
 
