@@ -641,6 +641,7 @@ async function startServer() {
     requireServerAuth,
     requirePlatformAdmin,
     getAdminDb,
+    getAdminAuth: getFirebaseAdminAuth,
   });
 
   // =========================================================================
