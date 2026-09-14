@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import type { Express, RequestHandler } from 'express';
 import { createAuthoritativeAuditRecord, updateAuthoritativeSecurityMetrics } from './auditService';
 import { DEFAULT_ROLE_PERMISSIONS } from '../utils/permissions';
+import { calculateUsagePercent, usageLimitState, usagePeriod, USAGE_METER_COLLECTION } from './platformUsageMeter';
 import {
   DEFAULT_PLATFORM_PLANS,
   assertLifecycleTransition,
@@ -293,6 +294,39 @@ export function registerPlatformAdminRoutes({
       });
     } catch (err: any) {
       return res.status(500).json({ error: err?.message || 'Unable to load platform usage.' });
+    }
+  });
+
+  app.get('/api/platform/usage/metered', ...platformAuth, async (req, res) => {
+    const db = getAdminDb();
+    if (!db) return res.status(503).json({ error: 'Platform service is not configured.' });
+    try {
+      const period = String(req.query.period || usagePeriod()).trim();
+      if (!/^\\d{4}-\\d{2}$/.test(period)) return res.status(400).json({ error: 'Invalid usage period. Expected YYYY-MM.' });
+
+      const tenantSnap = await db.collection('tenants').orderBy('updatedAt', 'desc').limit(100).get();
+      const rows = await Promise.all(tenantSnap.docs.map(async (doc: any) => {
+        const data = doc.data() as any;
+        const subscription = data.subscription || {};
+        const planId = String(subscription.planId || 'starter');
+        const resolvedPlan = await loadPlan(db, planId);
+        const meterSnap = await db.collection(USAGE_METER_COLLECTION).doc(\`\${doc.id}__\${period}\`).get();
+        const meter = meterSnap.exists ? meterSnap.data() as any : {};
+        const used = Math.max(0, Math.floor(Number(meter.ordersMonthly || 0)));
+        const limit = Math.max(1, Math.floor(Number(resolvedPlan.plan.limits.ordersMonthly || 1)));
+        return {
+          id: doc.id,
+          name: String(data.name || data.businessName || data.storeName || doc.id),
+          planId,
+          planName: resolvedPlan.plan.name,
+          period,
+          ordersMonthly: { used, limit, percent: calculateUsagePercent(used, limit), state: usageLimitState(used, limit) },
+          measuredAt: String(meter.updatedAt || new Date().toISOString()),
+        };
+      }));
+      return res.json({ success: true, period, usage: rows });
+    } catch (err: any) {
+      return res.status(500).json({ error: err?.message || 'Unable to load metered platform usage.' });
     }
   });
 
