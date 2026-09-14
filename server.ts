@@ -1565,6 +1565,28 @@ async function startServer() {
       if (!db) return res.status(503).json({ error: 'Durable configuration storage is not configured.' });
       const tenantId = String(req.user?.claims?.tenantId || req.user?.claims?.tenant_id || '').trim();
       if (!tenantId) return res.status(400).json({ error: 'Tenant identity is required.' });
+
+      // Enforce tenant subscription lifecycle
+      const tenantSnap = await db.collection('tenants').doc(tenantId).get();
+      if (tenantSnap.exists) {
+        const tenantData = tenantSnap.data() || {};
+        const lifecycleStatus = String(tenantData.lifecycleStatus || tenantData.status || '').toLowerCase();
+        const subStatus = String(tenantData.subscription?.status || '').toLowerCase();
+
+        if (lifecycleStatus === 'suspended' || subStatus === 'suspended') {
+          return res.status(403).json({
+            error: 'SUBSCRIPTION_SUSPENDED',
+            message: 'Tenant account is currently suspended. Monime checkout is disabled.',
+          });
+        }
+
+        if (lifecycleStatus === 'cancelled' || subStatus === 'cancelled') {
+          return res.status(403).json({
+            error: 'SUBSCRIPTION_CANCELLED',
+            message: 'Tenant subscription has been cancelled. Monime checkout is disabled.',
+          });
+        }
+      }
       if (reservationId) {
         const reservationSnap = await db.collection('inventory_reservations').doc(String(reservationId)).get();
         if (!reservationSnap.exists) {
