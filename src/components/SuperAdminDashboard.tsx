@@ -61,6 +61,7 @@ interface Tenant {
 
 interface UsageRow extends Tenant {
   staff: number;
+  products: number;
   orders: number;
   auditEvents: number;
   measuredAt: string;
@@ -529,14 +530,14 @@ export default function SuperAdminDashboard() {
           {tab === 'usage' && (
             <div className="space-y-6">
               <div className="rounded-3xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-900">
-                <strong>Usage basis:</strong> current Firestore record counts for staff, orders, and audit events. This is an operational usage view; true billable usage metering should later consume immutable usage events.
+                <strong>Usage basis:</strong> current Firestore record counts for staff, products, orders, and audit events. This is an operational usage view; true billable usage metering should later consume immutable usage events.
               </div>
               <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
                 <div className="border-b border-slate-100 p-5"><h2 className="font-black text-slate-900">Tenant usage</h2><p className="mt-1 text-xs text-slate-500">Bounded to the first 100 platform tenants.</p></div>
                 <div className="overflow-x-auto">
-                  <table className="w-full min-w-[820px] text-sm">
-                    <thead className="bg-slate-50 text-left text-[10px] font-black uppercase tracking-wider text-slate-500"><tr><th className="px-5 py-3">Tenant</th><th className="px-5 py-3">Plan</th><th className="px-5 py-3">Staff</th><th className="px-5 py-3">Orders</th><th className="px-5 py-3">Audit events</th><th className="px-5 py-3">Measured</th></tr></thead>
-                    <tbody>{usage.map(row => <tr key={row.id} className="border-t border-slate-100"><td className="px-5 py-4 font-black text-slate-800">{row.name}</td><td className="px-5 py-4 text-xs text-slate-500">{row.planName}</td><td className="px-5 py-4 font-bold">{row.staff}</td><td className="px-5 py-4 font-bold">{row.orders.toLocaleString()}</td><td className="px-5 py-4 font-bold">{row.auditEvents.toLocaleString()}</td><td className="px-5 py-4 text-xs text-slate-500">{dateLabel(row.measuredAt)}</td></tr>)}</tbody>
+                  <table className="w-full min-w-[920px] text-sm">
+                    <thead className="bg-slate-50 text-left text-[10px] font-black uppercase tracking-wider text-slate-500"><tr><th className="px-5 py-3">Tenant</th><th className="px-5 py-3">Plan</th><th className="px-5 py-3">Staff</th><th className="px-5 py-3">Products</th><th className="px-5 py-3">Orders</th><th className="px-5 py-3">Audit events</th><th className="px-5 py-3">Measured</th></tr></thead>
+                    <tbody>{usage.map(row => <tr key={row.id} className="border-t border-slate-100"><td className="px-5 py-4 font-black text-slate-800">{row.name}</td><td className="px-5 py-4 text-xs text-slate-500">{row.planName}</td><td className="px-5 py-4 font-bold">{row.staff}</td><td className="px-5 py-4 font-bold">{row.products.toLocaleString()}</td><td className="px-5 py-4 font-bold">{row.orders.toLocaleString()}</td><td className="px-5 py-4 font-bold">{row.auditEvents.toLocaleString()}</td><td className="px-5 py-4 text-xs text-slate-500">{dateLabel(row.measuredAt)}</td></tr>)}</tbody>
                   </table>
                   {!usage.length && <div className="p-10 text-center text-sm text-slate-500">No usage records available.</div>}
                 </div>
