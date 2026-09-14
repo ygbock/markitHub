@@ -4,6 +4,7 @@ import UserManagementModule from './UserManagementModule';
 import AuditSecurityOverview from './security/AuditSecurityOverview';
 import AuditEventTable from './security/AuditEventTable';
 import AuditEventDetailsDrawer from './security/AuditEventDetailsDrawer';
+import SuperAdminDashboard from './SuperAdminDashboard';
 import { fetchTenantAuditLogs } from '../services/auditApiService';
 import { hasPermission, isTenantOwner } from '../utils/permissions';
 import { 
@@ -232,6 +233,16 @@ export default function SecurityModule(props: SecurityModuleProps) {
 
   return (
     <div className="space-y-6 pb-12" id="security-admin-module">
+      {activeStaff.role === 'Super Admin' && (
+        <div id="super-admin-entry" className="space-y-4">
+          <SuperAdminDashboard />
+          <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-slate-400">
+            <span className="h-px flex-1 bg-slate-200" />
+            Tenant-level security governance
+            <span className="h-px flex-1 bg-slate-200" />
+          </div>
+        </div>
+      )}
       {/* Top Banner & Tab Navigation */}
       <div className="bg-white rounded-3xl p-5 sm:p-6 border border-slate-200/80 shadow-xs">
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-5">
