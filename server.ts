@@ -51,6 +51,7 @@ import {
 import {
   createAuthoritativeAuditRecord,
   recordAuditEvent,
+  updateAuthoritativeSecurityMetrics,
   queryTenantAuditLogs,
 } from './src/server/auditService';
 
@@ -291,8 +292,6 @@ async function startServer() {
         assertTenantStaffAccess(existing.data(), tenantId);
         return res.status(409).json({ error: 'A staff record with this ID already exists.' });
       }
-      await ref.set(staff, { merge: true });
-
       // Authoritative audit event
       const auditRecord = createAuthoritativeAuditRecord({
         tenantId,
@@ -310,7 +309,17 @@ async function startServer() {
         severity: 'info',
         details: `Created new staff member ${staff.name} (${staff.id}) with role ${staff.role}.`,
       });
-      await recordAuditEvent(db, auditRecord);
+
+      if (typeof db.batch === 'function') {
+        const batch = db.batch();
+        batch.set(ref, staff, { merge: true });
+        batch.set(db.collection('audit_logs').doc(auditRecord.id), auditRecord);
+        await updateAuthoritativeSecurityMetrics(db, auditRecord, batch);
+        await batch.commit();
+      } else {
+        await ref.set(staff, { merge: true });
+        await recordAuditEvent(db, auditRecord);
+      }
 
       return res.status(201).json({ success: true, staff });
     } catch (err: any) {
@@ -354,8 +363,6 @@ async function startServer() {
       const isRoleChange = req.body?.role && req.body.role !== previousStaffData?.role;
       const isCustomPermsChange = req.body?.permissionsOverride !== undefined;
       const staff = normalizeStaffPayload(req.body, tenantId, snap.data());
-      await ref.set(staff, { merge: true });
-
       // Authoritative audit event
       const action = isRoleChange
         ? 'STAFF_ROLE_CHANGED'
@@ -384,7 +391,17 @@ async function startServer() {
             ? `Staff member ${staff.name} custom permissions updated.`
             : `Updated staff profile for ${staff.name} (${req.params.staffId}).`,
       });
-      await recordAuditEvent(db, auditRecord);
+
+      if (typeof db.batch === 'function') {
+        const batch = db.batch();
+        batch.set(ref, staff, { merge: true });
+        batch.set(db.collection('audit_logs').doc(auditRecord.id), auditRecord);
+        await updateAuthoritativeSecurityMetrics(db, auditRecord, batch);
+        await batch.commit();
+      } else {
+        await ref.set(staff, { merge: true });
+        await recordAuditEvent(db, auditRecord);
+      }
 
       return res.json({ success: true, staff });
     } catch (err: any) {
@@ -413,7 +430,6 @@ async function startServer() {
         return res.status(400).json({ error: 'You cannot delete your own staff account.' });
       }
       const staffData = snap.data();
-      await ref.delete();
 
       // Authoritative audit event
       const auditRecord = createAuthoritativeAuditRecord({
@@ -432,7 +448,17 @@ async function startServer() {
         severity: 'warning',
         details: `Deleted staff member ${staffData?.name || req.params.staffId} (${req.params.staffId}).`,
       });
-      await recordAuditEvent(db, auditRecord);
+
+      if (typeof db.batch === 'function') {
+        const batch = db.batch();
+        batch.delete(ref);
+        batch.set(db.collection('audit_logs').doc(auditRecord.id), auditRecord);
+        await updateAuthoritativeSecurityMetrics(db, auditRecord, batch);
+        await batch.commit();
+      } else {
+        await ref.delete();
+        await recordAuditEvent(db, auditRecord);
+      }
 
       return res.json({ success: true });
     } catch (err: any) {
@@ -500,6 +526,7 @@ async function startServer() {
 
         transaction.set(ref, { status, updatedAt: now }, { merge: true });
         transaction.set(auditRef, auditRecord);
+        await updateAuthoritativeSecurityMetrics(db, auditRecord, transaction);
 
         const safeStaffData = { ...staffData };
         delete (safeStaffData as any).pin;
@@ -553,8 +580,6 @@ async function startServer() {
       }
       // sanitizeTenantUpdatePayload rejects any attempt to modify ownerUid or tenantId
       const cleanUpdate = sanitizeTenantUpdatePayload(req.body, tenantId);
-      await tenantRef.set(cleanUpdate, { merge: true });
-
       // Authoritative audit event
       const auditRecord = createAuthoritativeAuditRecord({
         tenantId,
@@ -578,7 +603,17 @@ async function startServer() {
         severity: 'warning',
         details: `Tenant organization settings updated: ${Object.keys(cleanUpdate).filter(k => k !== 'updatedAt').join(', ')}.`,
       });
-      await recordAuditEvent(db, auditRecord);
+
+      if (typeof db.batch === 'function') {
+        const batch = db.batch();
+        batch.set(tenantRef, cleanUpdate, { merge: true });
+        batch.set(db.collection('audit_logs').doc(auditRecord.id), auditRecord);
+        await updateAuthoritativeSecurityMetrics(db, auditRecord, batch);
+        await batch.commit();
+      } else {
+        await tenantRef.set(cleanUpdate, { merge: true });
+        await recordAuditEvent(db, auditRecord);
+      }
 
       const updatedSnap = await tenantRef.get();
       return res.json({ success: true, tenant: { id: updatedSnap.id, ...updatedSnap.data() } });
@@ -722,6 +757,7 @@ async function startServer() {
         auditRecord.staffName = req.user.email || req.user.uid;
 
         transaction.set(auditRef, auditRecord);
+        await updateAuthoritativeSecurityMetrics(db, auditRecord, transaction);
       });
 
       return res.json({
@@ -1304,7 +1340,20 @@ async function startServer() {
       const effectiveWebhookSecret = webhookSecret ? webhookSecret : decryptMonimeSecret(existing.webhookSecret).trim();
       const apiUrl = (process.env.MONIME_API_URL || 'https://api.monime.io').replace(/\/+$/, '');
       const webhookResult = await ensureMonimeWebhook({ apiUrl, accessToken: effectiveToken, spaceId, tenantId, webhookSecret: effectiveWebhookSecret, existingWebhookId: existing.monimeWebhookId ? String(existing.monimeWebhookId) : undefined, rotateSecret: Boolean(webhookSecret) });
-      await existingRef.set({ provider: 'monime', monimeSpaceId: spaceId, ...(accessToken ? { monimeAccessToken: encryptMonimeSecret(accessToken) } : {}), ...(webhookSecret ? { webhookSecret: encryptMonimeSecret(webhookSecret) } : {}), monimeMode: mode, monimePreferredChannel: ['all', 'mobile_money', 'card', 'bank_transfer', 'payment_code'].includes(body.monimePreferredChannel) ? body.monimePreferredChannel : 'all', monimeVersion: 'caph.2025-08-23', monimeWebhookId: webhookResult.id, monimeWebhookUrl: webhookResult.url, webhookManaged: true, updatedAt: new Date().toISOString(), updatedBy: req.user.uid }, { merge: true });
+      const monimeUpdatePayload = {
+        provider: 'monime',
+        monimeSpaceId: spaceId,
+        ...(accessToken ? { monimeAccessToken: encryptMonimeSecret(accessToken) } : {}),
+        ...(webhookSecret ? { webhookSecret: encryptMonimeSecret(webhookSecret) } : {}),
+        monimeMode: mode,
+        monimePreferredChannel: ['all', 'mobile_money', 'card', 'bank_transfer', 'payment_code'].includes(body.monimePreferredChannel) ? body.monimePreferredChannel : 'all',
+        monimeVersion: 'caph.2025-08-23',
+        monimeWebhookId: webhookResult.id,
+        monimeWebhookUrl: webhookResult.url,
+        webhookManaged: true,
+        updatedAt: new Date().toISOString(),
+        updatedBy: req.user.uid
+      };
 
       // Authoritative audit event
       const auditRecord = createAuthoritativeAuditRecord({
@@ -1323,7 +1372,17 @@ async function startServer() {
         details: `Monime payment gateway configuration and credentials updated for space '${spaceId}'.`,
         metadata: { spaceId, mode },
       });
-      await recordAuditEvent(db, auditRecord);
+
+      if (typeof db.batch === 'function') {
+        const batch = db.batch();
+        batch.set(existingRef, monimeUpdatePayload, { merge: true });
+        batch.set(db.collection('audit_logs').doc(auditRecord.id), auditRecord);
+        await updateAuthoritativeSecurityMetrics(db, auditRecord, batch);
+        await batch.commit();
+      } else {
+        await existingRef.set(monimeUpdatePayload, { merge: true });
+        await recordAuditEvent(db, auditRecord);
+      }
 
       return res.json({ success: true, configured: true, environment: mode === 'live' ? 'production' : 'sandbox', spaceId, webhookConfigured: true });
     } catch {

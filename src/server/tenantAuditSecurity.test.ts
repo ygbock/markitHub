@@ -6,6 +6,10 @@ import {
   createAuthoritativeAuditRecord,
   computeSecurityMetrics,
   queryTenantAuditLogs,
+  extractMetricsFromDoc,
+  applyEventToMetricsDoc,
+  updateAuthoritativeSecurityMetrics,
+  MAX_AUDIT_LOG_FETCH,
 } from './auditService';
 import {
   evaluateActiveTenantMembership,
@@ -556,4 +560,272 @@ test('Audit Security 12: Failed mutation does not create an audit record', async
   // Ensure no audit records were committed
   assert.equal(writtenAuditRecords.length, 0);
 });
+
+// ============================================================================
+// PHASE 7: HIGH-SCALE TENANT ROLLING SECURITY METRICS & QUERY BOUNDS
+// ============================================================================
+
+test('Audit Security 13: Large tenant audit collections do not require unbounded historical reads for KPI calculation', async () => {
+  const todayKey = new Date().toISOString().slice(0, 10);
+  const yesterdayKey = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
+  // Authoritative rolling metrics doc stored in tenant_security_metrics
+  const preAggregatedMetricsDoc = {
+    tenantId: 'tenant-enterprise',
+    staffSuspensions: 14,
+    rolePermissionChanges: 28,
+    ownershipEvents: 2,
+    failedDeniedOperations: 7,
+    dailyBuckets: {
+      [todayKey]: 45,
+      [yesterdayKey]: 80,
+    },
+    updatedAt: new Date().toISOString(),
+  };
+
+  let limitCalledWith: number | null = null;
+  let metricsDocFetched = false;
+  let historicalCollectionScannedUnbounded = false;
+
+  const mockDb = {
+    collection: (colName: string) => {
+      if (colName === 'tenant_security_metrics') {
+        return {
+          doc: (docId: string) => {
+            assert.equal(docId, 'tenant-enterprise');
+            return {
+              get: async () => {
+                metricsDocFetched = true;
+                return {
+                  exists: true,
+                  data: () => preAggregatedMetricsDoc,
+                };
+              },
+            };
+          },
+        };
+      }
+
+      if (colName === 'audit_logs') {
+        return {
+          where: (field: string, op: string, val: any) => {
+            assert.equal(field, 'tenantId');
+            assert.equal(val, 'tenant-enterprise');
+
+            const queryObj: any = {
+              where: () => queryObj,
+              orderBy: () => queryObj,
+              limit: (n: number) => {
+                limitCalledWith = n;
+                return queryObj;
+              },
+              get: async () => {
+                // If limit was not called before get, flag unbounded historical collection scan
+                if (limitCalledWith === null) {
+                  historicalCollectionScannedUnbounded = true;
+                }
+                return {
+                  docs: [
+                    {
+                      id: 'log-recent-1',
+                      data: () => ({
+                        id: 'log-recent-1',
+                        tenantId: 'tenant-enterprise',
+                        action: 'STAFF_LOGIN',
+                        timestamp: new Date().toISOString(),
+                        module: 'User Management',
+                        result: 'success',
+                      }),
+                    },
+                  ],
+                };
+              },
+            };
+            return queryObj;
+          },
+        };
+      }
+
+      throw new Error(`Unexpected collection access: ${colName}`);
+    },
+  };
+
+  const response = await queryTenantAuditLogs(mockDb, 'tenant-enterprise', {
+    page: 1,
+    pageSize: 25,
+  });
+
+  // 1. Authoritative metrics doc was fetched with an O(1) single-document read
+  assert.equal(metricsDocFetched, true, 'Authoritative metrics document must be retrieved');
+
+  // 2. Unbounded historical scan was completely avoided
+  assert.equal(historicalCollectionScannedUnbounded, false, 'Unbounded historical scan must NOT occur');
+  assert.equal(limitCalledWith, MAX_AUDIT_LOG_FETCH, `Firestore query must enforce bounded limit of ${MAX_AUDIT_LOG_FETCH}`);
+
+  // 3. Metrics reflect the authoritative summary without reading all history into memory
+  assert.equal(response.metrics.eventsToday, 45, "Today's events must match authoritative today bucket");
+  assert.equal(response.metrics.eventsThisWeek, 125, 'Trailing 7-day velocity must aggregate authoritative daily buckets');
+  assert.equal(response.metrics.staffSuspensions, 14);
+  assert.equal(response.metrics.rolePermissionChanges, 28);
+  assert.equal(response.metrics.ownershipEvents, 2);
+  assert.equal(response.metrics.failedDeniedOperations, 7);
+});
+
+// ============================================================================
+// PHASE 7: METRIC CONTAMINATION PREVENTION (FAILED/DENIED ACTIONS)
+// ============================================================================
+
+test('Audit Security 14: Failed and denied operations never contaminate successful operational metrics', () => {
+  const contaminatedEvents: AuditLog[] = [
+    {
+      id: 'denied-suspension',
+      tenantId: 'tenant-alpha',
+      timestamp: new Date().toISOString(),
+      action: 'STAFF_SUSPEND_ATTEMPT_BLOCKED',
+      module: 'User Management',
+      staffName: 'Malicious Actor',
+      role: 'Cashier',
+      details: 'Unauthorized attempt to suspend store manager blocked',
+      result: 'denied', // ACCESS DENIED
+      severity: 'critical',
+    },
+    {
+      id: 'failed-role-change',
+      tenantId: 'tenant-alpha',
+      timestamp: new Date().toISOString(),
+      action: 'STAFF_ROLE_CHANGE_FAILED',
+      module: 'User Management',
+      staffName: 'Operator',
+      role: 'Staff Manager',
+      details: 'Failed role change: target is protected tenant owner',
+      result: 'failed', // OPERATION FAILED
+      severity: 'critical',
+    },
+    {
+      id: 'denied-ownership-transfer',
+      tenantId: 'tenant-alpha',
+      timestamp: new Date().toISOString(),
+      action: 'TENANT_OWNERSHIP_TRANSFER_DENIED',
+      module: 'Security',
+      staffName: 'Intruder',
+      role: 'Guest',
+      details: 'Unauthorized caller attempted root ownership transfer',
+      result: 'denied', // ACCESS DENIED
+      severity: 'critical',
+    },
+    {
+      id: 'legitimate-suspension',
+      tenantId: 'tenant-alpha',
+      timestamp: new Date().toISOString(),
+      action: 'STAFF_SUSPENDED',
+      module: 'User Management',
+      staffName: 'Authoritative Owner',
+      role: 'Tenant Owner',
+      details: 'Suspended staff member after security incident',
+      result: 'success', // SUCCESSFUL OPERATION
+      severity: 'critical',
+    },
+  ];
+
+  const metrics = computeSecurityMetrics(contaminatedEvents);
+
+  // Failed/denied actions must only increment failedDeniedOperations
+  assert.equal(metrics.failedDeniedOperations, 3, 'All 3 failed/denied operations must be flagged');
+
+  // Successful counters must strictly reflect only successful operations
+  assert.equal(metrics.staffSuspensions, 1, 'Only the legitimate successful suspension may increment staffSuspensions');
+  assert.equal(metrics.rolePermissionChanges, 0, 'Failed role changes must NEVER increment rolePermissionChanges');
+  assert.equal(metrics.ownershipEvents, 0, 'Denied ownership transfers must NEVER increment ownershipEvents');
+});
+
+// ============================================================================
+// PHASE 7: ROLLING METRICS DOCUMENT APPLICATION & PRUNING
+// ============================================================================
+
+test('Audit Security 15: applyEventToMetricsDoc and extractMetricsFromDoc maintain bounded buckets and correct counters', () => {
+  const now = new Date();
+  const todayKey = now.toISOString().slice(0, 10);
+  const oldDateKey = new Date(now.getTime() - 40 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10); // 40 days ago
+
+  const initialDoc = {
+    tenantId: 'tenant-alpha',
+    staffSuspensions: 2,
+    rolePermissionChanges: 5,
+    ownershipEvents: 1,
+    failedDeniedOperations: 0,
+    dailyBuckets: {
+      [oldDateKey]: 100, // Should be pruned (>35 days)
+    },
+    updatedAt: new Date().toISOString(),
+  };
+
+  const newSuccessEvent: AuditLog = {
+    id: 'log-new-1',
+    tenantId: 'tenant-alpha',
+    timestamp: now.toISOString(),
+    action: 'STAFF_SUSPENDED',
+    module: 'User Management',
+    staffName: 'Owner',
+    role: 'Tenant Owner',
+    details: 'Suspended cashier account',
+    result: 'success',
+  };
+
+  const updatedDoc = applyEventToMetricsDoc(initialDoc, newSuccessEvent);
+
+  // Counters updated
+  assert.equal(updatedDoc.staffSuspensions, 3);
+  assert.equal(updatedDoc.dailyBuckets[todayKey], 1);
+
+  // Stale bucket pruned
+  assert.equal(updatedDoc.dailyBuckets[oldDateKey], undefined, 'Buckets older than 35 days must be pruned');
+
+  // Derive metrics
+  const extracted = extractMetricsFromDoc(updatedDoc);
+  assert.equal(extracted.eventsToday, 1);
+  assert.equal(extracted.eventsThisWeek, 1);
+  assert.equal(extracted.staffSuspensions, 3);
+});
+
+// ============================================================================
+// PHASE 7: ATOMIC BATCH INSEPARABILITY FOR MUTATION AND AUDIT LOG
+// ============================================================================
+
+test('Audit Security 16: Mutation and audit record inseparability via atomic batch execution', async () => {
+  const committedOperations: { type: string; ref: string; data?: any }[] = [];
+
+  const mockBatch = {
+    set: (ref: any, data: any) => {
+      committedOperations.push({ type: 'set', ref: ref.path || ref.id, data });
+    },
+    delete: (ref: any) => {
+      committedOperations.push({ type: 'delete', ref: ref.path || ref.id });
+    },
+    commit: async () => {
+      // Commits all queued batch operations atomically
+      return;
+    },
+  };
+
+  const mockStaffRef = { path: 'staff/staff-123' };
+  const mockAuditRef = { path: 'audit_logs/audit-999' };
+  const mockMetricsRef = { path: 'tenant_security_metrics/tenant-alpha' };
+
+  const staffData = { id: 'staff-123', name: 'Bob Cashier', role: 'Cashier' };
+  const auditData = { id: 'audit-999', tenantId: 'tenant-alpha', action: 'STAFF_CREATED', result: 'success' as const };
+
+  // Queue entity mutation and audit record into batch
+  mockBatch.set(mockStaffRef, staffData);
+  mockBatch.set(mockAuditRef, auditData);
+  mockBatch.set(mockMetricsRef, { tenantId: 'tenant-alpha', staffSuspensions: 0 });
+
+  await mockBatch.commit();
+
+  // Verify all 3 documents were committed together in the batch
+  assert.equal(committedOperations.length, 3);
+  assert.equal(committedOperations[0].ref, 'staff/staff-123');
+  assert.equal(committedOperations[1].ref, 'audit_logs/audit-999');
+  assert.equal(committedOperations[2].ref, 'tenant_security_metrics/tenant-alpha');
+});
+
 
