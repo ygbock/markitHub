@@ -47,18 +47,14 @@ function cleanLifecycleStatus(value: unknown): TenantLifecycleStatus {
     : 'active';
 }
 
-async function ensurePlan(db: any, planId: string, transaction?: any): Promise<PlatformPlan> {
+async function loadPlan(db: any, planId: string): Promise<{ plan: PlatformPlan; exists: boolean }> {
   const ref = db.collection('platform_plans').doc(planId);
-  const snap = transaction ? await transaction.get(ref) : await ref.get();
-  if (snap.exists) return { id: snap.id, ...(snap.data() as any) } as PlatformPlan;
-
+  const snap = await ref.get();
+  if (snap.exists) return { plan: { id: snap.id, ...(snap.data() as any) } as PlatformPlan, exists: true };
   const seed = DEFAULT_PLATFORM_PLANS.find(plan => plan.id === planId);
   if (!seed) throw new Error(`Plan '${planId}' not found.`);
   const now = new Date().toISOString();
-  const plan = { ...seed, createdAt: now, updatedAt: now };
-  if (transaction) transaction.set(ref, plan);
-  else await ref.set(plan);
-  return plan as PlatformPlan;
+  return { plan: { ...seed, createdAt: now, updatedAt: now } as PlatformPlan, exists: false };
 }
 
 export function registerPlatformAdminRoutes({
@@ -264,8 +260,9 @@ export function registerPlatformAdminRoutes({
       const billingRef = db.collection('platform_billing_events').doc();
       let createdTenant: any = null;
 
+      const resolvedPlan = await loadPlan(db, planId);
       await db.runTransaction(async (transaction: any) => {
-        const plan = await ensurePlan(db, planId, transaction);
+        const plan = resolvedPlan.plan;
         const now = new Date().toISOString();
         const lifecycleStatus: TenantLifecycleStatus = trialDays > 0 ? 'trialing' : 'active';
         const subscriptionStatus: SubscriptionStatus = trialDays > 0 ? 'trialing' : 'active';
@@ -299,6 +296,28 @@ export function registerPlatformAdminRoutes({
           subscription,
         };
 
+        const audit = createAuthoritativeAuditRecord({
+          tenantId,
+          actorUid: req.user!.uid,
+          actorName: req.user!.email || req.user!.uid,
+          actorEmail: req.user!.email || null,
+          actorRole: 'Super Admin',
+          action: 'TENANT_PROVISIONED',
+          module: 'Platform Administration',
+          targetType: 'tenant',
+          targetId: tenantId,
+          targetName: name,
+          newState: { lifecycleStatus, planId: plan.id, billingInterval: interval, ownerUid },
+          result: 'success',
+          severity: 'critical',
+          details: `Provisioned tenant '${name}' on ${plan.name} plan.`,
+          metadata: { platformAdmin: true, trialDays, currency, timezone },
+        });
+        await updateAuthoritativeSecurityMetrics(db, audit, transaction);
+
+        if (!resolvedPlan.exists) {
+          transaction.set(db.collection('platform_plans').doc(plan.id), plan);
+        }
         transaction.set(tenantRef, createdTenant);
         transaction.set(staffRef, {
           id: staffId,
@@ -322,25 +341,7 @@ export function registerPlatformAdminRoutes({
           updatedAt: now,
         });
 
-        const audit = createAuthoritativeAuditRecord({
-          tenantId,
-          actorUid: req.user!.uid,
-          actorName: req.user!.email || req.user!.uid,
-          actorEmail: req.user!.email || null,
-          actorRole: 'Super Admin',
-          action: 'TENANT_PROVISIONED',
-          module: 'Platform Administration',
-          targetType: 'tenant',
-          targetId: tenantId,
-          targetName: name,
-          newState: { lifecycleStatus, planId: plan.id, billingInterval: interval, ownerUid },
-          result: 'success',
-          severity: 'critical',
-          details: `Provisioned tenant '${name}' on ${plan.name} plan.`,
-          metadata: { platformAdmin: true, trialDays, currency, timezone },
-        });
         transaction.set(db.collection('audit_logs').doc(audit.id), audit);
-        await updateAuthoritativeSecurityMetrics(db, audit, transaction);
 
         transaction.set(billingRef, {
           tenantId,
@@ -370,17 +371,19 @@ export function registerPlatformAdminRoutes({
 
     try {
       const result: any = {};
+      const tenantPlanId = String(req.body?.planId || 'starter').trim().toLowerCase();
+      const resolvedPlan = await loadPlan(db, tenantPlanId);
+      if (resolvedPlan.plan.status !== 'active') throw Object.assign(new Error('Archived plans cannot be assigned to tenants.'), { statusCode: 409 });
       await db.runTransaction(async (transaction: any) => {
         const tenantRef = db.collection('tenants').doc(tenantId);
         const tenantSnap = await transaction.get(tenantRef);
         if (!tenantSnap.exists) throw Object.assign(new Error(`Tenant '${tenantId}' not found.`), { statusCode: 404 });
         const data = tenantSnap.data() as any;
         const current = data.subscription || {};
-        const planId = String(req.body?.planId || current.planId || 'starter').trim().toLowerCase();
+        const planId = tenantPlanId || String(current.planId || 'starter');
         const interval = cleanInterval(req.body?.billingInterval || current.interval);
         const status = cleanSubscriptionStatus(req.body?.status || current.status || 'active');
-        const plan = await ensurePlan(db, planId, transaction);
-        if (plan.status !== 'active') throw Object.assign(new Error('Archived plans cannot be assigned to tenants.'), { statusCode: 409 });
+        const plan = resolvedPlan.plan;
         const now = new Date().toISOString();
         const subscription: PlatformSubscription = {
           planId: plan.id,
@@ -414,9 +417,10 @@ export function registerPlatformAdminRoutes({
         });
         const auditRef = db.collection('audit_logs').doc(audit.id);
         const billingRef = db.collection('platform_billing_events').doc();
+        await updateAuthoritativeSecurityMetrics(db, audit, transaction);
+        if (!resolvedPlan.exists) transaction.set(db.collection('platform_plans').doc(plan.id), plan);
         transaction.set(tenantRef, { subscription, updatedAt: now }, { merge: true });
         transaction.set(auditRef, audit);
-        await updateAuthoritativeSecurityMetrics(db, audit, transaction);
         transaction.set(billingRef, {
           tenantId,
           type: 'subscription_changed',
@@ -481,9 +485,9 @@ export function registerPlatformAdminRoutes({
           details: reason,
           metadata: { platformAdmin: true },
         });
+        await updateAuthoritativeSecurityMetrics(db, audit, transaction);
         transaction.set(tenantRef, { lifecycleStatus: nextLifecycle, status: operationalStatus, subscription, updatedAt: now }, { merge: true });
         transaction.set(db.collection('audit_logs').doc(audit.id), audit);
-        await updateAuthoritativeSecurityMetrics(db, audit, transaction);
         transaction.set(db.collection('platform_billing_events').doc(), {
           tenantId,
           type: `lifecycle_${nextLifecycle}`,
