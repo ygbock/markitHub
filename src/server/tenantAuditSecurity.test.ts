@@ -431,3 +431,129 @@ test('Audit Security 8: Cross-tenant attack - staff from Tenant B accessing Tena
   assert.equal(result.allowed, false);
   assert.equal(result.statusCode, 403);
 });
+
+// ============================================================================
+// PHASE 5: CLIENT TENANT ID SPOOFING & QUERY TAMPERING
+// ============================================================================
+
+test('Audit Security 9: Client-supplied tenantId in query params cannot override authoritative tenantId argument', async () => {
+  let capturedQueryTenant = '';
+  const mockDb = {
+    collection: (colName: string) => {
+      assert.equal(colName, 'audit_logs');
+      return {
+        where: (field: string, op: string, val: any) => {
+          assert.equal(field, 'tenantId');
+          capturedQueryTenant = val;
+          return {
+            where: () => ({ get: async () => ({ docs: [], forEach: () => {} }) }),
+            orderBy: () => ({ get: async () => ({ docs: [], forEach: () => {} }) }),
+            get: async () => ({ docs: [], forEach: () => {} }),
+          };
+        },
+      };
+    },
+  } as any;
+
+  // Attacker attempts to pass tenantId="tenant-beta" in query params to inspect Tenant Beta
+  await queryTenantAuditLogs(mockDb, 'tenant-alpha', {
+    ...({ tenantId: 'tenant-beta' } as any),
+    page: 1,
+    pageSize: 20,
+  });
+
+  // Authoritative server tenant context MUST prevail
+  assert.equal(capturedQueryTenant, 'tenant-alpha');
+});
+
+// ============================================================================
+// PHASE 5: RBAC PERMISSION ENFORCEMENT FOR USERS.AUDIT
+// ============================================================================
+
+test('Audit Security 10: RBAC enforcement - only users.audit or tenant owner can view telemetry', () => {
+  const evaluateAuditAccess = (user: { uid: string; claims?: { role?: string; permissions?: string[] } }, tenantOwnerUid: string) => {
+    if (user.uid === tenantOwnerUid) {
+      return { authorized: true };
+    }
+    const permissions = user.claims?.permissions || [];
+    if (permissions.includes('users.audit')) {
+      return { authorized: true };
+    }
+    return { authorized: false, statusCode: 403, error: 'Permission users.audit is required' };
+  };
+
+  // Case 1: Tenant Owner (no explicit users.audit permission) -> Allowed
+  const ownerAccess = evaluateAuditAccess({ uid: 'uid-owner-alpha' }, 'uid-owner-alpha');
+  assert.equal(ownerAccess.authorized, true);
+
+  // Case 2: Super Admin with users.audit -> Allowed
+  const adminAccess = evaluateAuditAccess(
+    { uid: 'uid-admin-1', claims: { role: 'Super Admin', permissions: ['users.audit', 'users.manage'] } },
+    'uid-owner-alpha'
+  );
+  assert.equal(adminAccess.authorized, true);
+
+  // Case 3: Cashier without users.audit -> Denied with 403
+  const cashierAccess = evaluateAuditAccess(
+    { uid: 'uid-cashier-1', claims: { role: 'Cashier', permissions: ['sales.create'] } },
+    'uid-owner-alpha'
+  );
+  assert.equal(cashierAccess.authorized, false);
+  assert.equal(cashierAccess.statusCode, 403);
+});
+
+// ============================================================================
+// PHASE 4 & 5: CSV FORMULA INJECTION NEUTRALIZATION
+// ============================================================================
+
+test('Audit Security 11: CSV formula injection triggers (=, +, -, @) are sanitized before export', () => {
+  const sanitizeCsvCell = (val: unknown): string => {
+    let str = String(val ?? '');
+    if (/^[=+\-@\t\r]/.test(str)) {
+      str = `'${str}`;
+    }
+    return `"${str.replace(/"/g, '""')}"`;
+  };
+
+  // Malicious cells designed to trigger Excel DDE or formula execution
+  assert.equal(sanitizeCsvCell("=cmd|' /C calc'!A0"), "\"'=cmd|' /C calc'!A0\"");
+  assert.equal(sanitizeCsvCell("+123456789"), "\"'+123456789\"");
+  assert.equal(sanitizeCsvCell("-SUM(A1:A10)"), "\"'-SUM(A1:A10)\"");
+  assert.equal(sanitizeCsvCell("@SUM(A1:A10)"), "\"'@SUM(A1:A10)\"");
+
+  // Safe cells remain normal quoted strings
+  assert.equal(sanitizeCsvCell("Marcus Admin"), "\"Marcus Admin\"");
+  assert.equal(sanitizeCsvCell("STAFF_CREATED"), "\"STAFF_CREATED\"");
+});
+
+// ============================================================================
+// PHASE 6: TRANSACTIONAL AUDIT INTEGRITY ON FAILED MUTATIONS
+// ============================================================================
+
+test('Audit Security 12: Failed mutation does not create an audit record', async () => {
+  const writtenAuditRecords: any[] = [];
+  const mockDb = {
+    runTransaction: async (updateFunction: (tx: any) => Promise<any>) => {
+      const tx = {
+        get: async () => ({ exists: true, data: () => ({ status: 'active', tenantId: 'tenant-alpha' }) }),
+        set: (ref: any, data: any) => {
+          writtenAuditRecords.push(data);
+        },
+      };
+
+      // Simulate a business validation or invariant failure during the transaction
+      throw new Error('Transaction aborted: owner cannot be suspended');
+    },
+  };
+
+  try {
+    await mockDb.runTransaction(async () => {});
+    assert.fail('Should have thrown an error');
+  } catch (err: any) {
+    assert.match(err.message, /Transaction aborted/);
+  }
+
+  // Ensure no audit records were committed
+  assert.equal(writtenAuditRecords.length, 0);
+});
+

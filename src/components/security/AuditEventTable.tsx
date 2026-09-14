@@ -110,19 +110,28 @@ export default function AuditEventTable({
     });
   };
 
+  const sanitizeCsvCell = (val: unknown): string => {
+    let str = String(val ?? '');
+    // Neutralize formula injection triggers (=, +, -, @, tabs)
+    if (/^[=+\-@\t\r]/.test(str)) {
+      str = `'${str}`;
+    }
+    return `"${str.replace(/"/g, '""')}"`;
+  };
+
   const handleExportCSV = () => {
     if (events.length === 0) return;
     const headers = ['Timestamp', 'Severity', 'Action', 'Module', 'Actor', 'Role', 'Target', 'Result', 'Details'];
     const rows = events.map(e => [
-      e.timestamp,
-      e.severity || 'info',
-      `"${String(e.action || '').replace(/"/g, '""')}"`,
-      `"${String(e.module || '').replace(/"/g, '""')}"`,
-      `"${String(e.actorName || e.staffName || '').replace(/"/g, '""')}"`,
-      `"${String(e.actorRole || e.role || '').replace(/"/g, '""')}"`,
-      `"${String(e.targetName || e.targetStaffName || e.targetId || '').replace(/"/g, '""')}"`,
-      e.result || 'success',
-      `"${String(e.details || '').replace(/"/g, '""')}"`
+      sanitizeCsvCell(e.timestamp),
+      sanitizeCsvCell(e.severity || 'info'),
+      sanitizeCsvCell(e.action),
+      sanitizeCsvCell(e.module),
+      sanitizeCsvCell(e.actorName || e.staffName),
+      sanitizeCsvCell(e.actorRole || e.role),
+      sanitizeCsvCell(e.targetName || e.targetStaffName || e.targetId),
+      sanitizeCsvCell(e.result || 'success'),
+      sanitizeCsvCell(e.details)
     ]);
 
     const csvContent = "data:text/csv;charset=utf-8," + [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
