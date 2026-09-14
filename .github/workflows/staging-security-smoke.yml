@@ -1,0 +1,28 @@
+name: Staging Security Smoke Test
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Run live staging security smoke test
+        env:
+          STAGING_URL: ${{ secrets.STAGING_URL }}
+          STAGING_AUDIT_TOKEN: ${{ secrets.STAGING_AUDIT_TOKEN }}
+          STAGING_SUSPENDED_TOKEN: ${{ secrets.STAGING_SUSPENDED_TOKEN }}
+          STAGING_NON_AUDIT_TOKEN: ${{ secrets.STAGING_NON_AUDIT_TOKEN }}
+        run: node scripts/staging-security-smoke.mjs
