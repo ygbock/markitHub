@@ -66,6 +66,11 @@ interface UsageRow extends Tenant {
   auditEvents: number;
   measuredAt: string;
 }
+interface MeteredUsageRow {
+  id: string; name: string; planId: string; planName: string; period: string;
+  ordersMonthly: { used: number; limit: number; percent: number; state: 'healthy' | 'warning' | 'exceeded' };
+  measuredAt: string;
+}
 
 interface DashboardData {
   metrics: {
@@ -135,6 +140,7 @@ export default function SuperAdminDashboard() {
   const [plans, setPlans] = useState<Plan[]>([]);
   const [tenants, setTenants] = useState<Tenant[]>([]);
   const [usage, setUsage] = useState<UsageRow[]>([]);
+  const [meteredUsage, setMeteredUsage] = useState<MeteredUsageRow[]>([]);
   const [billing, setBilling] = useState<BillingData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -174,12 +180,14 @@ export default function SuperAdminDashboard() {
         apiFetch<{ plans: Plan[] }>('/api/platform/plans'),
         apiFetch<{ tenants: Tenant[] }>('/api/platform/tenants?limit=100'),
         apiFetch<{ usage: UsageRow[] }>('/api/platform/usage'),
+        apiFetch<{ usage: MeteredUsageRow[] }>('/api/platform/usage/metered'),
         apiFetch<BillingData>('/api/platform/billing'),
       ]);
       setDashboard(dashboardRes);
       setPlans(plansRes.plans || []);
       setTenants(tenantsRes.tenants || []);
       setUsage(usageRes.usage || []);
+      setMeteredUsage(meteredRes.usage || []);
       setBilling(billingRes);
       if (!provisionForm.planId && plansRes.plans?.[0]) {
         setProvisionForm(prev => ({ ...prev, planId: plansRes.plans[0].id }));
@@ -530,10 +538,18 @@ export default function SuperAdminDashboard() {
           {tab === 'usage' && (
             <div className="space-y-6">
               <div className="rounded-3xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-900">
-                <strong>Usage basis:</strong> current Firestore record counts for staff, products, orders, and audit events. This is an operational usage view; true billable usage metering should later consume immutable usage events.
+                <strong>Billable usage:</strong> monthly completed orders are recorded as immutable usage events and increment tenant meters atomically with payment settlement. Operational counts remain available for capacity planning.
               </div>
               <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
-                <div className="border-b border-slate-100 p-5"><h2 className="font-black text-slate-900">Tenant usage</h2><p className="mt-1 text-xs text-slate-500">Bounded to the first 100 platform tenants.</p></div>
+                <div className="border-b border-slate-100 p-5"><h2 className="font-black text-slate-900">Monthly billable order usage</h2><p className="mt-1 text-xs text-slate-500">Current UTC billing month · authoritative tenant meters.</p></div>
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[760px] text-sm">
+                    <thead className="bg-slate-50 text-left text-[10px] font-black uppercase tracking-wider text-slate-500"><tr><th className="px-5 py-3">Tenant</th><th className="px-5 py-3">Plan</th><th className="px-5 py-3">Orders</th><th className="px-5 py-3">Limit</th><th className="px-5 py-3">Utilization</th><th className="px-5 py-3">Status</th></tr></thead>
+                    <tbody>{meteredUsage.map(row => <tr key={row.id} className="border-t border-slate-100"><td className="px-5 py-4 font-black text-slate-800">{row.name}</td><td className="px-5 py-4 text-xs text-slate-500">{row.planName}</td><td className="px-5 py-4 font-bold">{row.ordersMonthly.used.toLocaleString()}</td><td className="px-5 py-4 font-bold">{row.ordersMonthly.limit.toLocaleString()}</td><td className="px-5 py-4 min-w-44"><div className="flex items-center gap-2"><div className="h-2 flex-1 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-indigo-500" style={{ width: String(Math.min(100, row.ordersMonthly.percent)) + '%' }} /></div><span className="w-10 text-right text-xs font-bold">{Math.round(row.ordersMonthly.percent)}%</span></div></td><td className="px-5 py-4"><span className={row.ordersMonthly.state === 'exceeded' ? 'rounded-full bg-rose-100 px-2 py-1 text-[10px] font-black uppercase text-rose-700' : row.ordersMonthly.state === 'warning' ? 'rounded-full bg-amber-100 px-2 py-1 text-[10px] font-black uppercase text-amber-700' : 'rounded-full bg-emerald-100 px-2 py-1 text-[10px] font-black uppercase text-emerald-700'}>{row.ordersMonthly.state}</span></td></tr>)}</tbody>
+                  </table>
+                  {!meteredUsage.length && <div className="p-10 text-center text-sm text-slate-500">No metered usage records available.</div>}
+                </div>
+                <div className="border-t border-slate-100 p-5"><h2 className="font-black text-slate-900">Operational usage</h2><p className="mt-1 text-xs text-slate-500">Bounded to the first 100 platform tenants.</p></div>
                 <div className="overflow-x-auto">
                   <table className="w-full min-w-[920px] text-sm">
                     <thead className="bg-slate-50 text-left text-[10px] font-black uppercase tracking-wider text-slate-500"><tr><th className="px-5 py-3">Tenant</th><th className="px-5 py-3">Plan</th><th className="px-5 py-3">Staff</th><th className="px-5 py-3">Products</th><th className="px-5 py-3">Orders</th><th className="px-5 py-3">Audit events</th><th className="px-5 py-3">Measured</th></tr></thead>
