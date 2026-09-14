@@ -314,6 +314,9 @@ export function registerPlatformAdminRoutes({
       let createdTenant: any = null;
 
       const resolvedPlan = await loadPlan(db, planId);
+      if (resolvedPlan.plan.status !== 'active') {
+        return res.status(409).json({ error: 'Archived plans cannot be assigned during provisioning.' });
+      }
       await db.runTransaction(async (transaction: any) => {
         const plan = resolvedPlan.plan;
         const now = new Date().toISOString();
