@@ -67,6 +67,48 @@ export function registerPlatformAdminRoutes({
 }: PlatformRouteDeps): void {
   const platformAuth = [requireServerAuth, requirePlatformAdmin];
 
+  app.get('/api/platform/dashboard', ...platformAuth, async (_req, res) => {
+    const db = getAdminDb();
+    if (!db) return res.status(503).json({ error: 'Platform service is not configured.' });
+    try {
+      const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      const [tenantCountSnap, activeTenantCountSnap, suspendedTenantCountSnap, staffCountSnap, recentAuditCountSnap, recentAuditSnap] = await Promise.all([
+        db.collection('tenants').count().get(),
+        db.collection('tenants').where('lifecycleStatus', '==', 'active').count().get(),
+        db.collection('tenants').where('lifecycleStatus', '==', 'suspended').count().get(),
+        db.collection('staff').count().get(),
+        db.collection('audit_logs').where('timestamp', '>=', since).count().get(),
+        db.collection('audit_logs').orderBy('timestamp', 'desc').limit(20).get(),
+      ]);
+
+      const recentAuditEvents = recentAuditSnap.docs.map((doc: any) => {
+        const data = doc.data() as any;
+        return {
+          id: doc.id,
+          action: String(data.action || ''),
+          tenantId: String(data.tenantId || ''),
+          result: String(data.result || ''),
+          severity: String(data.severity || ''),
+          timestamp: String(data.timestamp || ''),
+        };
+      });
+
+      return res.json({
+        success: true,
+        metrics: {
+          tenantCount: tenantCountSnap.data().count,
+          activeTenantCount: activeTenantCountSnap.data().count,
+          suspendedTenantCount: suspendedTenantCountSnap.data().count,
+          staffCount: staffCountSnap.data().count,
+          recentAuditCount: recentAuditCountSnap.data().count,
+        },
+        recentAuditEvents,
+      });
+    } catch (err: any) {
+      return res.status(500).json({ error: err?.message || 'Unable to load platform dashboard.' });
+    }
+  });
+
   app.get('/api/platform/plans', ...platformAuth, async (_req, res) => {
     const db = getAdminDb();
     if (!db) return res.status(503).json({ error: 'Platform service is not configured.' });
