@@ -32,6 +32,7 @@ import CRMModule from './components/CRMModule';
 import InvoiceModule from './components/InvoiceModule';
 import ReportsModule from './components/ReportsModule';
 import SecurityModule from './components/SecurityModule';
+import SuperAdminDashboard from './components/SuperAdminDashboard';
 import SettingsModule from './components/SettingsModule';
 import ECommerceAdminPortal, { EcommerceAdminTab } from './components/ecommerce/admin/ECommerceAdminPortal';
 import { ReviewModerationModule } from './components/reviews/ReviewModerationModule';
@@ -1629,6 +1630,10 @@ export default function App() {
                     onUpdateOrderStatus={handleUpdateOrderStatus}
                     onReorderProduct={handleQuickReorder}
                   />
+                )}
+
+                {adminSubTab === 'Platform' && activeStaff.role === 'Super Admin' && (
+                  <SuperAdminDashboard />
                 )}
 
                 {adminSubTab === 'Security' && (
