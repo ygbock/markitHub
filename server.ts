@@ -49,6 +49,7 @@ import {
 } from './src/server/tenantOwnershipAuth';
 import { assertPlatformAdmin } from './src/server/platformAdminAuth';
 import { registerPlatformAdminRoutes } from './src/server/platformAdminRoutes';
+import { addUsageEventToTransaction } from './src/server/platformUsageMeter';
 import {
   createAuthoritativeAuditRecord,
   recordAuditEvent,
@@ -1940,6 +1941,15 @@ async function startServer() {
                   if (orderTenant && orderTenant !== tenantId) throw new Error('Order belongs to another tenant.');
                   const currentStatus = String(order.paymentStatus || order.payment_status || '').toLowerCase();
                   if (!['paid', 'completed', 'settled'].includes(currentStatus)) {
+                    addUsageEventToTransaction(db, tx, {
+                      tenantId,
+                      metric: 'ordersMonthly',
+                      quantity: 1,
+                      source: 'monime_payment_settlement',
+                      sourceId: String(sessionId),
+                      occurredAt: new Date().toISOString(),
+                      metadata: { orderId },
+                    });
                     tx.set(orderRef, {
                       paymentStatus: 'paid',
                       payment_status: 'paid',
