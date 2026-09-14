@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Activity, Building2, ShieldCheck, Users, AlertTriangle, RefreshCw } from 'lucide-react';
+import { Activity, Building2, ShieldCheck, Users, AlertTriangle, RefreshCw, Ban, CheckCircle2 } from 'lucide-react';
 import { getAuth } from 'firebase/auth';
 
 interface PlatformTenant {
@@ -48,6 +48,8 @@ export default function SuperAdminDashboard() {
   const [data, setData] = useState<PlatformDashboardResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [actionTenant, setActionTenant] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -62,6 +64,30 @@ export default function SuperAdminDashboard() {
   };
 
   useEffect(() => { load(); }, []);
+
+  const changeTenantStatus = async (tenant: PlatformTenant) => {
+    const nextStatus = tenant.status.toLowerCase() === 'suspended' ? 'active' : 'suspended';
+    const reason = window.prompt(`Reason for ${nextStatus === 'suspended' ? 'suspending' : 'reactivating'} tenant ${tenant.name || tenant.id}:`);
+    if (!reason?.trim()) return;
+    setActionTenant(tenant.id);
+    setActionError(null);
+    try {
+      const auth = getAuth();
+      const token = auth.currentUser ? await auth.currentUser.getIdToken() : null;
+      const response = await fetch(`/api/platform/tenants/${encodeURIComponent(tenant.id)}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ status: nextStatus, reason: reason.trim() }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body?.error || 'Tenant status change failed.');
+      await load();
+    } catch (err: any) {
+      setActionError(err?.message || 'Tenant status change failed.');
+    } finally {
+      setActionTenant(null);
+    }
+  };
 
   const cards = data ? [
     { label: 'Total Tenants', value: data.metrics.tenantCount, icon: Building2 },
@@ -87,6 +113,12 @@ export default function SuperAdminDashboard() {
           </button>
         </div>
       </div>
+
+      {actionError && (
+        <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">
+          <strong>Tenant action failed:</strong> {actionError}
+        </div>
+      )}
 
       {error && (
         <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">
@@ -114,7 +146,7 @@ export default function SuperAdminDashboard() {
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
-                  <tr><th className="text-left px-5 py-3">Tenant</th><th className="text-left px-5 py-3">Status</th><th className="text-left px-5 py-3">Owner</th><th className="text-left px-5 py-3">Updated</th></tr>
+                  <tr><th className="text-left px-5 py-3">Tenant</th><th className="text-left px-5 py-3">Status</th><th className="text-left px-5 py-3">Owner</th><th className="text-left px-5 py-3">Updated</th><th className="text-right px-5 py-3">Action</th></tr>
                 </thead>
                 <tbody>
                   {data.tenants.map(tenant => (
@@ -123,6 +155,13 @@ export default function SuperAdminDashboard() {
                       <td className="px-5 py-3"><span className="px-2 py-1 rounded-full bg-slate-100 text-xs font-bold">{tenant.status || 'active'}</span></td>
                       <td className="px-5 py-3 font-mono text-xs text-slate-500">{tenant.ownerUid || '—'}</td>
                       <td className="px-5 py-3 text-xs text-slate-500">{tenant.updatedAt ? new Date(tenant.updatedAt).toLocaleString() : '—'}</td>
+                      <td className="px-5 py-3 text-right">
+                        <button onClick={() => changeTenantStatus(tenant)} disabled={actionTenant === tenant.id}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-bold hover:bg-slate-50 disabled:opacity-50">
+                          {tenant.status.toLowerCase() === 'suspended' ? <CheckCircle2 className="w-3.5 h-3.5" /> : <Ban className="w-3.5 h-3.5" />}
+                          {actionTenant === tenant.id ? 'Saving…' : tenant.status.toLowerCase() === 'suspended' ? 'Reactivate' : 'Suspend'}
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
