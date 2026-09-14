@@ -382,6 +382,7 @@ export function registerPlatformAdminRoutes({
     const planId = String(req.body?.planId || 'starter').trim().toLowerCase();
     const interval = cleanInterval(req.body?.billingInterval);
     const trialDays = Math.min(30, Math.max(0, Math.floor(Number(req.body?.trialDays || 0))));
+    const idempotencyKey = String(req.headers['idempotency-key'] || '').trim().slice(0, 128);
 
     if (!name) return res.status(400).json({ error: 'Tenant name is required.' });
     if (!ownerUid) return res.status(400).json({ error: 'An existing Firebase owner UID is required for provisioning.' });
@@ -402,12 +403,29 @@ export function registerPlatformAdminRoutes({
       const staffRef = db.collection('staff').doc(staffId);
       const billingRef = db.collection('platform_billing_events').doc();
       let createdTenant: any = null;
+      let replayedProvisioning = false;
 
       const resolvedPlan = await loadPlan(db, planId);
       if (resolvedPlan.plan.status !== 'active') {
         return res.status(409).json({ error: 'Archived plans cannot be assigned during provisioning.' });
       }
       await db.runTransaction(async (transaction: any) => {
+        const requestRef = idempotencyKey
+          ? db.collection('platform_provisioning_requests').doc(crypto.createHash('sha256').update(idempotencyKey).digest('hex'))
+          : null;
+        if (requestRef) {
+          const requestSnap = await transaction.get(requestRef);
+          if (requestSnap.exists) {
+            const priorTenantId = String(requestSnap.data()?.tenantId || '');
+            if (!priorTenantId) throw Object.assign(new Error('Invalid provisioning idempotency record.'), { statusCode: 409 });
+            const priorTenantSnap = await transaction.get(db.collection('tenants').doc(priorTenantId));
+            if (!priorTenantSnap.exists) throw Object.assign(new Error('Provisioning record references a missing tenant.'), { statusCode: 409 });
+            createdTenant = { id: priorTenantSnap.id, ...priorTenantSnap.data() };
+            replayedProvisioning = true;
+            return;
+          }
+        }
+
         const plan = resolvedPlan.plan;
         const now = new Date().toISOString();
         const lifecycleStatus: TenantLifecycleStatus = trialDays > 0 ? 'trialing' : 'active';
@@ -491,9 +509,20 @@ export function registerPlatformAdminRoutes({
           occurredAt: now,
           description: trialDays > 0 ? `Trial started on ${plan.name}.` : `Subscription started on ${plan.name}.`,
         });
+        if (requestRef) {
+          transaction.create(requestRef, {
+            tenantId,
+            idempotencyKeyHash: requestRef.id,
+            createdAt: now,
+          });
+        }
       });
 
-      return res.status(201).json({ success: true, tenant: createdTenant });
+      return res.status(replayedProvisioning ? 200 : 201).json({
+        success: true,
+        tenant: createdTenant,
+        ...(replayedProvisioning ? { replayed: true } : {}),
+      });
     } catch (err: any) {
       return res.status(400).json({ error: err?.message || 'Tenant provisioning failed.' });
     }
