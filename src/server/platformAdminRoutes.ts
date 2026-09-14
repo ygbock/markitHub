@@ -265,14 +265,16 @@ export function registerPlatformAdminRoutes({
       });
 
       const usage = await Promise.all(tenants.map(async (tenant: any) => {
-        const [staff, orders, auditEvents] = await Promise.all([
+        const [staff, products, orders, auditEvents] = await Promise.all([
           db.collection('staff').where('tenantId', '==', tenant.id).count().get(),
+          db.collection('products').where('tenantId', '==', tenant.id).count().get(),
           db.collection('orders').where('tenantId', '==', tenant.id).count().get(),
           db.collection('audit_logs').where('tenantId', '==', tenant.id).count().get(),
         ]);
         return {
           ...tenant,
           staff: staff.data().count,
+          products: products.data().count,
           orders: orders.data().count,
           auditEvents: auditEvents.data().count,
           measuredAt: new Date().toISOString(),
