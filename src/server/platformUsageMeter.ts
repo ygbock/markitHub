@@ -112,3 +112,30 @@ export function addUsageEventToTransaction(
 
   return { eventId, period };
 }
+
+export interface UsageLimitDecision {
+  allowed: boolean;
+  state: 'healthy' | 'warning' | 'exceeded';
+  used: number;
+  limit: number;
+  remaining: number;
+  override: boolean;
+}
+
+export function evaluateUsageLimit(
+  used: unknown,
+  limit: unknown,
+  override = false,
+): UsageLimitDecision {
+  const safeUsed = Math.max(0, Math.floor(Number(used) || 0));
+  const safeLimit = Math.max(0, Math.floor(Number(limit) || 0));
+  const state = usageLimitState(safeUsed, safeLimit);
+  return {
+    allowed: override || safeLimit <= 0 || safeUsed < safeLimit,
+    state,
+    used: safeUsed,
+    limit: safeLimit,
+    remaining: Math.max(0, safeLimit - safeUsed),
+    override,
+  };
+}
