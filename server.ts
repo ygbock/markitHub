@@ -696,6 +696,57 @@ async function startServer() {
   });
 
 
+  app.get('/api/platform/tenants/:tenantId', requireServerAuth, requirePlatformAdmin, async (req, res) => {
+    const db = getAdminDb();
+    const tenantId = String(req.params.tenantId || '').trim();
+    if (!db) return res.status(503).json({ error: 'Platform service is not configured.' });
+    if (!tenantId) return res.status(400).json({ error: 'Tenant ID is required.' });
+
+    try {
+      const tenantRef = db.collection('tenants').doc(tenantId);
+      const [tenantSnap, staffCountSnap, auditSnap] = await Promise.all([
+        tenantRef.get(),
+        db.collection('staff').where('tenantId', '==', tenantId).count().get(),
+        db.collection('audit_logs').where('tenantId', '==', tenantId).orderBy('timestamp', 'desc').limit(20).get(),
+      ]);
+      if (!tenantSnap.exists) return res.status(404).json({ error: `Tenant '${tenantId}' not found.` });
+
+      const data = tenantSnap.data() as any;
+      const tenant = {
+        id: tenantId,
+        name: String(data.name || data.businessName || data.storeName || tenantId),
+        status: String(data.status || 'active'),
+        ownerUid: data.ownerUid ? String(data.ownerUid) : undefined,
+        slug: data.slug ? String(data.slug) : undefined,
+        currency: data.currency ? String(data.currency) : undefined,
+        timezone: data.timezone ? String(data.timezone) : undefined,
+        createdAt: data.createdAt ? String(data.createdAt) : undefined,
+        updatedAt: data.updatedAt ? String(data.updatedAt) : undefined,
+        staffCount: staffCountSnap.data().count,
+        payment: {
+          configured: Boolean(data.monime || data.monimeConfig || data.paymentConfig),
+          mode: data.monime?.mode || data.monimeConfig?.mode || data.paymentConfig?.mode || undefined,
+        },
+      };
+      const recentAuditEvents = auditSnap.docs.map(doc => {
+        const event = doc.data() as any;
+        return {
+          id: doc.id,
+          action: String(event.action || ''),
+          result: String(event.result || ''),
+          severity: String(event.severity || ''),
+          actorEmail: event.actorEmail ? String(event.actorEmail) : undefined,
+          timestamp: String(event.timestamp || ''),
+          details: String(event.details || ''),
+        };
+      });
+
+      return res.json({ success: true, tenant, recentAuditEvents });
+    } catch (err: any) {
+      return res.status(500).json({ error: err?.message || 'Unable to load tenant details.' });
+    }
+  });
+
   app.patch('/api/platform/tenants/:tenantId/status', requireServerAuth, requirePlatformAdmin, async (req, res) => {
     const db = getAdminDb();
     const tenantId = String(req.params.tenantId || '').trim();
