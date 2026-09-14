@@ -76,10 +76,10 @@ test('usage snapshot sanitizes negative and fractional counts', () => {
 });
 
 test('plan update preserves immutable creation timestamp', () => {
-  const existing = normalizePlanInput({ id: 'growth', name: 'Growth', monthlyPrice: 79 });
+  const existing = normalizePlanInput({ id: 'growth', name: 'Growth', monthlyPrice: 79, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' });
   const updated = normalizePlanInput({ name: 'Growth Pro', monthlyPrice: 99 }, existing);
   assert.equal(updated.id, 'growth');
-  assert.equal(updated.createdAt, existing.createdAt);
+  assert.equal(updated.createdAt, '2026-01-01T00:00:00.000Z');
   assert.notEqual(updated.updatedAt, existing.updatedAt);
 });
 

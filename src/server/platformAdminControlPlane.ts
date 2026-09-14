@@ -120,8 +120,8 @@ export function normalizePlanInput(input: any, existing?: PlatformPlan): Platfor
     limits,
     features: Array.isArray(input?.features) ? input.features.map((v: unknown) => String(v).trim()).filter(Boolean).slice(0, 20) : (existing?.features ?? []),
     status: input?.status === 'archived' ? 'archived' : 'active',
-    createdAt: existing?.createdAt ?? now,
-    updatedAt: now,
+    createdAt: existing?.createdAt ?? (input?.createdAt ? String(input.createdAt) : now),
+    updatedAt: existing ? now : (input?.updatedAt ? String(input.updatedAt) : now),
   };
 }
 

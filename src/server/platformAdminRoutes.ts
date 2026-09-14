@@ -310,7 +310,7 @@ export function registerPlatformAdminRoutes({
         const subscription = data.subscription || {};
         const planId = String(subscription.planId || 'starter');
         const resolvedPlan = await loadPlan(db, planId);
-        const meterSnap = await db.collection(USAGE_METER_COLLECTION).doc(\`\${doc.id}__\${period}\`).get();
+        const meterSnap = await db.collection(USAGE_METER_COLLECTION).doc(`${doc.id}__${period}`).get();
         const meter = meterSnap.exists ? meterSnap.data() as any : {};
         const used = Math.max(0, Math.floor(Number(meter.ordersMonthly || 0)));
         const limit = Math.max(1, Math.floor(Number(resolvedPlan.plan.limits.ordersMonthly || 1)));

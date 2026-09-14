@@ -175,7 +175,7 @@ export default function SuperAdminDashboard() {
     setLoading(true);
     setError(null);
     try {
-      const [dashboardRes, plansRes, tenantsRes, usageRes, billingRes] = await Promise.all([
+      const [dashboardRes, plansRes, tenantsRes, usageRes, meteredRes, billingRes] = await Promise.all([
         apiFetch<DashboardData>('/api/platform/dashboard'),
         apiFetch<{ plans: Plan[] }>('/api/platform/plans'),
         apiFetch<{ tenants: Tenant[] }>('/api/platform/tenants?limit=100'),
