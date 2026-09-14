@@ -20,6 +20,7 @@ interface PlatformRouteDeps {
   requireServerAuth: RequestHandler;
   requirePlatformAdmin: RequestHandler;
   getAdminDb: () => any;
+  getAdminAuth: () => any;
 }
 
 function isoPlusDays(days: number): string {
@@ -89,7 +90,28 @@ export function registerPlatformAdminRoutes({
       const plan = normalizePlanInput(req.body);
       const ref = db.collection('platform_plans').doc(plan.id);
       if ((await ref.get()).exists) return res.status(409).json({ error: `Plan '${plan.id}' already exists.` });
-      await ref.set(plan);
+      const audit = createAuthoritativeAuditRecord({
+        tenantId: 'platform',
+        actorUid: req.user!.uid,
+        actorName: req.user!.email || req.user!.uid,
+        actorEmail: req.user!.email || null,
+        actorRole: 'Super Admin',
+        action: 'PLATFORM_PLAN_CREATED',
+        module: 'Platform Billing',
+        targetType: 'platform_plan',
+        targetId: plan.id,
+        targetName: plan.name,
+        newState: { name: plan.name, monthlyPrice: plan.monthlyPrice, annualPrice: plan.annualPrice, includedSeats: plan.includedSeats, status: plan.status },
+        result: 'success',
+        severity: 'warning',
+        details: `Created platform plan '${plan.name}'.`,
+        metadata: { platformAdmin: true },
+      });
+      const batch = db.batch();
+      batch.set(ref, plan);
+      batch.set(db.collection('audit_logs').doc(audit.id), audit);
+      await updateAuthoritativeSecurityMetrics(db, audit, batch);
+      await batch.commit();
       return res.status(201).json({ success: true, plan });
     } catch (err: any) {
       return res.status(400).json({ error: err?.message || 'Unable to create plan.' });
@@ -105,7 +127,30 @@ export function registerPlatformAdminRoutes({
       const snap = await ref.get();
       if (!snap.exists) return res.status(404).json({ error: `Plan '${planId}' not found.` });
       const plan = normalizePlanInput({ ...req.body, id: planId }, { id: planId, ...(snap.data() as any) } as PlatformPlan);
-      await ref.set(plan, { merge: true });
+      const previous = snap.data() as any;
+      const audit = createAuthoritativeAuditRecord({
+        tenantId: 'platform',
+        actorUid: req.user!.uid,
+        actorName: req.user!.email || req.user!.uid,
+        actorEmail: req.user!.email || null,
+        actorRole: 'Super Admin',
+        action: 'PLATFORM_PLAN_UPDATED',
+        module: 'Platform Billing',
+        targetType: 'platform_plan',
+        targetId: plan.id,
+        targetName: plan.name,
+        previousState: { name: previous.name, monthlyPrice: previous.monthlyPrice, annualPrice: previous.annualPrice, includedSeats: previous.includedSeats, status: previous.status },
+        newState: { name: plan.name, monthlyPrice: plan.monthlyPrice, annualPrice: plan.annualPrice, includedSeats: plan.includedSeats, status: plan.status },
+        result: 'success',
+        severity: 'warning',
+        details: `Updated platform plan '${plan.name}'.`,
+        metadata: { platformAdmin: true },
+      });
+      const batch = db.batch();
+      batch.set(ref, plan, { merge: true });
+      batch.set(db.collection('audit_logs').doc(audit.id), audit);
+      await updateAuthoritativeSecurityMetrics(db, audit, batch);
+      await batch.commit();
       return res.json({ success: true, plan });
     } catch (err: any) {
       return res.status(400).json({ error: err?.message || 'Unable to update plan.' });
@@ -252,6 +297,15 @@ export function registerPlatformAdminRoutes({
     if (!ownerUid) return res.status(400).json({ error: 'An existing Firebase owner UID is required for provisioning.' });
 
     try {
+      const auth = getAdminAuth();
+      if (!auth) return res.status(503).json({ error: 'Platform authentication service is not configured.' });
+      let ownerUser: any;
+      try {
+        ownerUser = await auth.getUser(ownerUid);
+      } catch {
+        return res.status(400).json({ error: 'The supplied owner Firebase UID does not exist.' });
+      }
+
       const tenantId = `tenant_${crypto.randomUUID().replace(/-/g, '').slice(0, 20)}`;
       const staffId = `staff_${crypto.randomUUID().replace(/-/g, '').slice(0, 20)}`;
       const tenantRef = db.collection('tenants').doc(tenantId);
@@ -287,7 +341,7 @@ export function registerPlatformAdminRoutes({
           status: 'active',
           lifecycleStatus,
           ownerUid,
-          ownerEmail: ownerEmail || undefined,
+          ownerEmail: ownerEmail || ownerUser.email || undefined,
           currency,
           timezone,
           createdAt: now,
@@ -322,8 +376,8 @@ export function registerPlatformAdminRoutes({
           id: staffId,
           uid: ownerUid,
           tenantId,
-          name: ownerEmail ? ownerEmail.split('@')[0] : 'Business Owner',
-          email: ownerEmail,
+          name: (ownerEmail || ownerUser.email) ? String(ownerEmail || ownerUser.email).split('@')[0] : 'Business Owner',
+          email: ownerEmail || ownerUser.email || '',
           role: 'Business Owner',
           status: 'active',
           permissionsOverride: DEFAULT_ROLE_PERMISSIONS['Business Owner'],
@@ -433,10 +487,14 @@ export function registerPlatformAdminRoutes({
   app.patch('/api/platform/tenants/:tenantId/lifecycle', ...platformAuth, async (req, res) => {
     const db = getAdminDb();
     const tenantId = String(req.params.tenantId || '').trim();
-    const nextLifecycle = cleanLifecycleStatus(req.body?.lifecycleStatus);
+    const rawLifecycle = String(req.body?.lifecycleStatus || '').trim();
+    const nextLifecycle = cleanLifecycleStatus(rawLifecycle);
     const reason = String(req.body?.reason || '').trim();
     if (!db) return res.status(503).json({ error: 'Platform service is not configured.' });
     if (!tenantId) return res.status(400).json({ error: 'Tenant ID is required.' });
+    if (!['provisioning', 'trialing', 'active', 'suspended', 'cancelled'].includes(rawLifecycle)) {
+      return res.status(400).json({ error: 'Invalid tenant lifecycle status.' });
+    }
     if (!reason) return res.status(400).json({ error: 'A reason is required for tenant lifecycle changes.' });
 
     try {
