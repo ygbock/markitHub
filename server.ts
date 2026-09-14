@@ -7,7 +7,6 @@ import { getApps, cert, initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 import { getFirestore } from 'firebase-admin/firestore';
 import { GoogleGenAI } from '@google/genai';
-import { createServer as createViteServer } from 'vite';
 import { validateCartBackend, validateCouponAuthoritative, SERVER_PROMOTIONS_REGISTRY } from './src/server/cartValidator';
 import { 
   reserveInventoryServer, 
@@ -3163,6 +3162,7 @@ ${urls}</urlset>`;
   // Vite middleware for development vs static build in production
   let vite: any;
   if (process.env.NODE_ENV !== 'production') {
+    const { createServer: createViteServer } = await import('vite');
     vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'custom',
