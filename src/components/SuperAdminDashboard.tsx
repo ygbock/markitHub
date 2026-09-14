@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Activity, Building2, ShieldCheck, Users, AlertTriangle, RefreshCw, Ban, CheckCircle2 } from 'lucide-react';
+import { Activity, Building2, ShieldCheck, Users, AlertTriangle, RefreshCw, Ban, CheckCircle2, X, ExternalLink } from 'lucide-react';
 import { getAuth } from 'firebase/auth';
 
 interface PlatformTenant {
@@ -8,6 +8,14 @@ interface PlatformTenant {
   status: string;
   ownerUid?: string;
   updatedAt?: string;
+}
+
+interface TenantDetails {
+  id: string; name: string; status: string; ownerUid?: string; slug?: string; currency?: string; timezone?: string;
+  createdAt?: string; updatedAt?: string; staffCount: number; payment: { configured: boolean; mode?: string };
+}
+interface TenantAuditEvent {
+  id: string; action: string; result: string; severity: string; actorEmail?: string; timestamp: string; details: string;
 }
 
 interface PlatformDashboardResponse {
@@ -50,6 +58,9 @@ export default function SuperAdminDashboard() {
   const [loading, setLoading] = useState(true);
   const [actionTenant, setActionTenant] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [selectedTenant, setSelectedTenant] = useState<TenantDetails | null>(null);
+  const [tenantEvents, setTenantEvents] = useState<TenantAuditEvent[]>([]);
+  const [detailsLoading, setDetailsLoading] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -64,6 +75,26 @@ export default function SuperAdminDashboard() {
   };
 
   useEffect(() => { load(); }, []);
+
+  const openTenantDetails = async (tenant: PlatformTenant) => {
+    setDetailsLoading(true);
+    setActionError(null);
+    try {
+      const auth = getAuth();
+      const token = auth.currentUser ? await auth.currentUser.getIdToken() : null;
+      const response = await fetch(`/api/platform/tenants/${encodeURIComponent(tenant.id)}`, {
+        headers: { Accept: 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body?.error || 'Unable to load tenant details.');
+      setSelectedTenant(body.tenant);
+      setTenantEvents(body.recentAuditEvents || []);
+    } catch (err: any) {
+      setActionError(err?.message || 'Unable to load tenant details.');
+    } finally {
+      setDetailsLoading(false);
+    }
+  };
 
   const changeTenantStatus = async (tenant: PlatformTenant) => {
     const nextStatus = tenant.status.toLowerCase() === 'suspended' ? 'active' : 'suspended';
@@ -126,6 +157,40 @@ export default function SuperAdminDashboard() {
         </div>
       )}
 
+      {selectedTenant && (
+        <div className="fixed inset-0 z-50 bg-slate-950/50 p-4 sm:p-8 flex items-center justify-center" role="dialog" aria-modal="true" aria-label="Tenant details">
+          <div className="w-full max-w-4xl max-h-[90vh] overflow-y-auto rounded-3xl bg-white shadow-2xl">
+            <div className="sticky top-0 z-10 p-6 border-b border-slate-100 bg-white flex items-start justify-between gap-4">
+              <div>
+                <div className="text-[10px] font-black uppercase tracking-widest text-indigo-600">Tenant 360</div>
+                <h2 className="mt-1 text-2xl font-black text-slate-900">{selectedTenant.name}</h2>
+                <p className="text-xs text-slate-500 font-mono mt-1">{selectedTenant.id}</p>
+              </div>
+              <button onClick={() => setSelectedTenant(null)} className="p-2 rounded-xl hover:bg-slate-100" aria-label="Close tenant details"><X className="w-5 h-5" /></button>
+            </div>
+            <div className="p-6 space-y-6">
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                {[
+                  ['Status', selectedTenant.status], ['Staff', selectedTenant.staffCount.toLocaleString()],
+                  ['Currency', selectedTenant.currency || '—'], ['Payments', selectedTenant.payment.configured ? (selectedTenant.payment.mode || 'Configured') : 'Not configured']
+                ].map(([label,value]) => <div key={label} className="rounded-2xl border border-slate-200 p-4"><div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">{label}</div><div className="mt-2 font-black text-slate-900">{value}</div></div>)}
+              </div>
+              <div className="grid sm:grid-cols-2 gap-4 text-sm">
+                <div className="rounded-2xl bg-slate-50 p-4"><div className="text-xs font-bold text-slate-500">Owner UID</div><div className="mt-1 font-mono text-xs break-all">{selectedTenant.ownerUid || '—'}</div></div>
+                <div className="rounded-2xl bg-slate-50 p-4"><div className="text-xs font-bold text-slate-500">Slug / Timezone</div><div className="mt-1">{selectedTenant.slug || '—'} · {selectedTenant.timezone || '—'}</div></div>
+              </div>
+              <div>
+                <h3 className="font-black text-slate-900">Recent Tenant Audit</h3>
+                <div className="mt-3 divide-y divide-slate-100 border border-slate-200 rounded-2xl overflow-hidden">
+                  {tenantEvents.map(event => <div key={event.id} className="p-4"><div className="flex flex-col sm:flex-row sm:justify-between gap-2"><div className="font-bold text-sm">{event.action}</div><div className="text-xs text-slate-500">{event.result} · {event.severity}</div></div><div className="text-xs text-slate-500 mt-1">{event.actorEmail || 'Unknown actor'} · {event.timestamp ? new Date(event.timestamp).toLocaleString() : '—'}</div>{event.details && <div className="text-sm text-slate-700 mt-2">{event.details}</div>}</div>)}
+                  {!tenantEvents.length && <div className="p-6 text-center text-sm text-slate-500">No recent audit events.</div>}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {data && (
         <>
           <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
@@ -151,7 +216,9 @@ export default function SuperAdminDashboard() {
                 <tbody>
                   {data.tenants.map(tenant => (
                     <tr key={tenant.id} className="border-t border-slate-100">
-                      <td className="px-5 py-3 font-bold text-slate-800">{tenant.name || tenant.id}</td>
+                      <td className="px-5 py-3 font-bold text-slate-800">
+                        <button onClick={() => openTenantDetails(tenant)} className="text-left hover:underline">{tenant.name || tenant.id}</button>
+                      </td>
                       <td className="px-5 py-3"><span className="px-2 py-1 rounded-full bg-slate-100 text-xs font-bold">{tenant.status || 'active'}</span></td>
                       <td className="px-5 py-3 font-mono text-xs text-slate-500">{tenant.ownerUid || '—'}</td>
                       <td className="px-5 py-3 text-xs text-slate-500">{tenant.updatedAt ? new Date(tenant.updatedAt).toLocaleString() : '—'}</td>
