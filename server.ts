@@ -49,7 +49,8 @@ import {
 } from './src/server/tenantOwnershipAuth';
 import { assertPlatformAdmin } from './src/server/platformAdminAuth';
 import { registerPlatformAdminRoutes } from './src/server/platformAdminRoutes';
-import { addUsageEventToTransaction } from './src/server/platformUsageMeter';
+import { addUsageEventToTransaction, evaluateUsageLimit, usagePeriod, usageMeterId, USAGE_METER_COLLECTION } from './src/server/platformUsageMeter';
+import { DEFAULT_PLATFORM_PLANS } from './src/server/platformAdminControlPlane';
 import {
   createAuthoritativeAuditRecord,
   recordAuditEvent,
@@ -1070,11 +1071,80 @@ async function startServer() {
   });
 
   // 7. Tenant-scoped Order Creation Endpoint
-  app.post('/api/storefront/:tenantSlug/orders', (req, res) => {
+  app.post('/api/storefront/:tenantSlug/orders', async (req, res) => {
     try {
       const tenantConfig = resolveTenant(req, req.params.tenantSlug);
       if (!tenantConfig) {
         return res.status(404).json({ success: false, error: 'TENANT_NOT_FOUND' });
+      }
+
+      const tenantId = tenantConfig.tenant.id;
+      const db = getFirestoreDb();
+
+      // Enforce Tenant Subscription Lifecycle & Usage Limits
+      if (db) {
+        const tenantSnap = await db.collection('tenants').doc(tenantId).get();
+        if (tenantSnap.exists) {
+          const tenantData = tenantSnap.data() || {};
+          const lifecycleStatus = String(tenantData.lifecycleStatus || tenantData.status || '').toLowerCase();
+          const subStatus = String(tenantData.subscription?.status || '').toLowerCase();
+
+          if (lifecycleStatus === 'suspended' || subStatus === 'suspended') {
+            return res.status(403).json({
+              success: false,
+              error: 'SUBSCRIPTION_SUSPENDED',
+              message: 'Tenant account is currently suspended. Order creation is disabled.',
+            });
+          }
+
+          if (lifecycleStatus === 'cancelled' || subStatus === 'cancelled') {
+            return res.status(403).json({
+              success: false,
+              error: 'SUBSCRIPTION_CANCELLED',
+              message: 'Tenant subscription has been cancelled. Order creation is disabled.',
+            });
+          }
+
+          // Evaluate Monthly Order Usage Limit
+          const planId = String(tenantData.subscription?.planId || 'starter').toLowerCase();
+          const planSnap = await db.collection('platform_plans').doc(planId).get();
+          const planData = planSnap.exists ? planSnap.data() : DEFAULT_PLATFORM_PLANS.find(p => p.id === planId) || DEFAULT_PLATFORM_PLANS[0];
+          const monthlyLimit = Math.max(0, Math.floor(Number(planData?.limits?.ordersMonthly || 0)));
+
+          const period = usagePeriod();
+          const meterSnap = await db.collection(USAGE_METER_COLLECTION).doc(usageMeterId(tenantId, period)).get();
+          const meterData = meterSnap.exists ? meterSnap.data() : {};
+          const usedOrders = Math.max(0, Math.floor(Number(meterData?.ordersMonthly || 0)));
+          const override = Boolean(meterData?.overrideMonthlyOrders || tenantData.subscription?.overrideMonthlyOrders || tenantData.overrideMonthlyOrders);
+
+          const decision = evaluateUsageLimit(usedOrders, monthlyLimit, override);
+          if (!decision.allowed) {
+            const auditRecord = createAuthoritativeAuditRecord({
+              tenantId,
+              actorUid: 'system',
+              actorName: 'Storefront Checkout System',
+              actorEmail: null,
+              actorRole: 'System',
+              action: 'PLAN_LIMIT_REACHED',
+              module: 'Platform Billing',
+              targetType: 'subscription_limit',
+              targetId: tenantId,
+              targetName: tenantConfig.tenant.name,
+              result: 'denied',
+              severity: 'warning',
+              details: `Monthly order limit reached (${usedOrders}/${monthlyLimit}) for tenant '${tenantConfig.tenant.name}'.`,
+              metadata: { period, planId, usedOrders, monthlyLimit, decision },
+            });
+            await recordAuditEvent(db, auditRecord);
+
+            return res.status(429).json({
+              success: false,
+              error: 'PLAN_LIMIT_REACHED',
+              message: `Monthly order limit reached (${usedOrders}/${monthlyLimit}) for your subscription plan.`,
+              decision,
+            });
+          }
+        }
       }
 
       const {
@@ -1212,6 +1282,31 @@ async function startServer() {
       };
 
       serverStorefrontOrders.set(orderId, orderRecord);
+
+      if (db) {
+        try {
+          await db.runTransaction(async (transaction: any) => {
+            transaction.set(db.collection('orders').doc(orderId), {
+              ...orderRecord,
+              updatedAt: new Date().toISOString(),
+            });
+
+            addUsageEventToTransaction(db, transaction, {
+              tenantId,
+              metric: 'ordersMonthly',
+              quantity: 1,
+              source: 'storefront_order',
+              sourceId: orderId,
+              metadata: {
+                totalAmount: orderRecord.totalAmount,
+                currency: orderRecord.currency,
+              },
+            });
+          });
+        } catch (dbErr) {
+          console.warn('[Storefront Order] Firestore transaction error:', dbErr);
+        }
+      }
 
       return res.status(201).json({
         success: true,

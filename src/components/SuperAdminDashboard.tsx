@@ -67,8 +67,22 @@ interface UsageRow extends Tenant {
   measuredAt: string;
 }
 interface MeteredUsageRow {
-  id: string; name: string; planId: string; planName: string; period: string;
-  ordersMonthly: { used: number; limit: number; percent: number; state: 'healthy' | 'warning' | 'exceeded' };
+  id: string;
+  name: string;
+  lifecycleStatus?: 'provisioning' | 'trialing' | 'active' | 'suspended' | 'cancelled';
+  subscriptionStatus?: 'trialing' | 'active' | 'past_due' | 'suspended' | 'cancelled';
+  planId: string;
+  planName: string;
+  period: string;
+  ordersMonthly: {
+    used: number;
+    limit: number;
+    percent: number;
+    state: 'healthy' | 'warning' | 'exceeded';
+    allowed?: boolean;
+    remaining?: number;
+    overrideActive?: boolean;
+  };
   measuredAt: string;
 }
 
@@ -147,6 +161,54 @@ export default function SuperAdminDashboard() {
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [selectedTenant, setSelectedTenant] = useState<Tenant | null>(null);
+
+  const [usageSearch, setUsageSearch] = useState('');
+  const [usageStateFilter, setUsageStateFilter] = useState<'all' | 'healthy' | 'warning' | 'exceeded'>('all');
+  const [usageOverrideFilter, setUsageOverrideFilter] = useState<'all' | 'override_only' | 'standard'>('all');
+
+  const filteredMeteredUsage = useMemo(() => {
+    return meteredUsage.filter(row => {
+      if (usageSearch) {
+        const q = usageSearch.toLowerCase();
+        const match = row.name.toLowerCase().includes(q) || row.id.toLowerCase().includes(q) || row.planName.toLowerCase().includes(q);
+        if (!match) return false;
+      }
+      if (usageStateFilter !== 'all' && row.ordersMonthly.state !== usageStateFilter) return false;
+      if (usageOverrideFilter === 'override_only' && !row.ordersMonthly.overrideActive) return false;
+      if (usageOverrideFilter === 'standard' && row.ordersMonthly.overrideActive) return false;
+      return true;
+    });
+  }, [meteredUsage, usageSearch, usageStateFilter, usageOverrideFilter]);
+
+  const toggleUsageOverride = async (row: MeteredUsageRow) => {
+    const nextState = !row.ordersMonthly.overrideActive;
+    const defaultReason = nextState
+      ? `Super Admin temporary order limit override enabled for ${row.name}`
+      : `Super Admin order limit override removed for ${row.name}`;
+    const reason = window.prompt(
+      `Reason for ${nextState ? 'ENABLING' : 'DISABLING'} usage limit override for ${row.name}:`,
+      defaultReason,
+    );
+    if (!reason || !reason.trim()) return;
+
+    try {
+      setBusy(`override:${row.id}`);
+      setError(null);
+      await apiFetch<{ success: boolean }>(`/api/platform/tenants/${row.id}/usage-override`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          overrideMonthlyOrders: nextState,
+          reason: reason.trim(),
+        }),
+      });
+      setNotice(`Usage limit override ${nextState ? 'enabled' : 'disabled'} for ${row.name}.`);
+      await loadAll();
+    } catch (err: any) {
+      setError(err?.message || 'Failed to update usage limit override.');
+    } finally {
+      setBusy(null);
+    }
+  };
 
   const [provisionForm, setProvisionForm] = useState({
     name: '',
@@ -541,13 +603,138 @@ export default function SuperAdminDashboard() {
                 <strong>Billable usage:</strong> monthly completed orders are recorded as immutable usage events and increment tenant meters atomically with payment settlement. Operational counts remain available for capacity planning.
               </div>
               <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
-                <div className="border-b border-slate-100 p-5"><h2 className="font-black text-slate-900">Monthly billable order usage</h2><p className="mt-1 text-xs text-slate-500">Current UTC billing month · authoritative tenant meters.</p></div>
+                <div className="flex flex-col gap-3 border-b border-slate-100 p-5 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <h2 className="font-black text-slate-900">Monthly billable order usage</h2>
+                    <p className="mt-1 text-xs text-slate-500">Current UTC billing month · authoritative tenant meters.</p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <input
+                      type="text"
+                      placeholder="Search tenant or plan…"
+                      value={usageSearch}
+                      onChange={e => setUsageSearch(e.target.value)}
+                      className="rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-semibold outline-none focus:border-indigo-500"
+                    />
+                    <select
+                      value={usageStateFilter}
+                      onChange={e => setUsageStateFilter(e.target.value as any)}
+                      className="rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-bold text-slate-700"
+                    >
+                      <option value="all">All Usage States</option>
+                      <option value="healthy">Healthy (&lt;80%)</option>
+                      <option value="warning">Warning (80-99%)</option>
+                      <option value="exceeded">Exceeded (100%+)</option>
+                    </select>
+                    <select
+                      value={usageOverrideFilter}
+                      onChange={e => setUsageOverrideFilter(e.target.value as any)}
+                      className="rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-bold text-slate-700"
+                    >
+                      <option value="all">All Overrides</option>
+                      <option value="override_only">Override Active Only</option>
+                      <option value="standard">Standard (No Override)</option>
+                    </select>
+                  </div>
+                </div>
+
                 <div className="overflow-x-auto">
-                  <table className="w-full min-w-[760px] text-sm">
-                    <thead className="bg-slate-50 text-left text-[10px] font-black uppercase tracking-wider text-slate-500"><tr><th className="px-5 py-3">Tenant</th><th className="px-5 py-3">Plan</th><th className="px-5 py-3">Orders</th><th className="px-5 py-3">Limit</th><th className="px-5 py-3">Utilization</th><th className="px-5 py-3">Status</th></tr></thead>
-                    <tbody>{meteredUsage.map(row => <tr key={row.id} className="border-t border-slate-100"><td className="px-5 py-4 font-black text-slate-800">{row.name}</td><td className="px-5 py-4 text-xs text-slate-500">{row.planName}</td><td className="px-5 py-4 font-bold">{row.ordersMonthly.used.toLocaleString()}</td><td className="px-5 py-4 font-bold">{row.ordersMonthly.limit.toLocaleString()}</td><td className="px-5 py-4 min-w-44"><div className="flex items-center gap-2"><div className="h-2 flex-1 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-indigo-500" style={{ width: String(Math.min(100, row.ordersMonthly.percent)) + '%' }} /></div><span className="w-10 text-right text-xs font-bold">{Math.round(row.ordersMonthly.percent)}%</span></div></td><td className="px-5 py-4"><span className={row.ordersMonthly.state === 'exceeded' ? 'rounded-full bg-rose-100 px-2 py-1 text-[10px] font-black uppercase text-rose-700' : row.ordersMonthly.state === 'warning' ? 'rounded-full bg-amber-100 px-2 py-1 text-[10px] font-black uppercase text-amber-700' : 'rounded-full bg-emerald-100 px-2 py-1 text-[10px] font-black uppercase text-emerald-700'}>{row.ordersMonthly.state}</span></td></tr>)}</tbody>
+                  <table className="w-full min-w-[920px] text-sm">
+                    <thead className="bg-slate-50 text-left text-[10px] font-black uppercase tracking-wider text-slate-500">
+                      <tr>
+                        <th className="px-5 py-3">Tenant</th>
+                        <th className="px-5 py-3">Plan</th>
+                        <th className="px-5 py-3">Status</th>
+                        <th className="px-5 py-3">Orders</th>
+                        <th className="px-5 py-3">Limit</th>
+                        <th className="px-5 py-3">Utilization</th>
+                        <th className="px-5 py-3">Meter State</th>
+                        <th className="px-5 py-3 text-right">Super Admin Override</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredMeteredUsage.map(row => (
+                        <tr key={row.id} className="border-t border-slate-100">
+                          <td className="px-5 py-4">
+                            <div className="font-black text-slate-800">{row.name}</div>
+                            <div className="mt-0.5 font-mono text-[10px] text-slate-400">{row.id}</div>
+                          </td>
+                          <td className="px-5 py-4 text-xs font-bold text-slate-600">{row.planName}</td>
+                          <td className="px-5 py-4">
+                            <div className="flex flex-wrap items-center gap-1">
+                              {row.lifecycleStatus && <StatusPill value={row.lifecycleStatus} />}
+                              {row.subscriptionStatus && row.subscriptionStatus !== row.lifecycleStatus && (
+                                <StatusPill value={row.subscriptionStatus} />
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-5 py-4 font-bold">{row.ordersMonthly.used.toLocaleString()}</td>
+                          <td className="px-5 py-4 font-bold">{row.ordersMonthly.limit ? row.ordersMonthly.limit.toLocaleString() : 'Unlimited'}</td>
+                          <td className="px-5 py-4 min-w-44">
+                            <div className="flex items-center gap-2">
+                              <div className="h-2 flex-1 overflow-hidden rounded-full bg-slate-100">
+                                <div
+                                  className={`h-full rounded-full ${
+                                    row.ordersMonthly.state === 'exceeded'
+                                      ? 'bg-rose-500'
+                                      : row.ordersMonthly.state === 'warning'
+                                      ? 'bg-amber-500'
+                                      : 'bg-emerald-500'
+                                  }`}
+                                  style={{ width: `${Math.min(100, row.ordersMonthly.percent)}%` }}
+                                />
+                              </div>
+                              <span className="w-10 text-right text-xs font-bold">{Math.round(row.ordersMonthly.percent)}%</span>
+                            </div>
+                          </td>
+                          <td className="px-5 py-4">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span
+                                className={
+                                  row.ordersMonthly.state === 'exceeded'
+                                    ? 'rounded-full bg-rose-100 px-2.5 py-1 text-[10px] font-black uppercase text-rose-700'
+                                    : row.ordersMonthly.state === 'warning'
+                                    ? 'rounded-full bg-amber-100 px-2.5 py-1 text-[10px] font-black uppercase text-amber-700'
+                                    : 'rounded-full bg-emerald-100 px-2.5 py-1 text-[10px] font-black uppercase text-emerald-700'
+                                }
+                              >
+                                {row.ordersMonthly.state}
+                              </span>
+                              {row.ordersMonthly.overrideActive && (
+                                <span className="rounded-full bg-indigo-100 px-2.5 py-1 text-[10px] font-black uppercase tracking-wider text-indigo-700">
+                                  Override Active
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-5 py-4 text-right">
+                            <button
+                              disabled={busy === `override:${row.id}`}
+                              onClick={() => toggleUsageOverride(row)}
+                              className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-black transition-colors ${
+                                row.ordersMonthly.overrideActive
+                                  ? 'bg-rose-50 text-rose-700 hover:bg-rose-100'
+                                  : 'bg-indigo-50 text-indigo-700 hover:bg-indigo-100'
+                              } disabled:opacity-50`}
+                            >
+                              {busy === `override:${row.id}` ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              ) : row.ordersMonthly.overrideActive ? (
+                                'Disable Override'
+                              ) : (
+                                'Enable Override'
+                              )}
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
                   </table>
-                  {!meteredUsage.length && <div className="p-10 text-center text-sm text-slate-500">No metered usage records available.</div>}
+                  {!filteredMeteredUsage.length && (
+                    <div className="p-10 text-center text-sm text-slate-500">
+                      No metered usage records matching filters.
+                    </div>
+                  )}
                 </div>
                 <div className="border-t border-slate-100 p-5"><h2 className="font-black text-slate-900">Operational usage</h2><p className="mt-1 text-xs text-slate-500">Bounded to the first 100 platform tenants.</p></div>
                 <div className="overflow-x-auto">

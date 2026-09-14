@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import type { Express, RequestHandler } from 'express';
 import { createAuthoritativeAuditRecord, updateAuthoritativeSecurityMetrics } from './auditService';
 import { DEFAULT_ROLE_PERMISSIONS } from '../utils/permissions';
-import { calculateUsagePercent, usageLimitState, usagePeriod, USAGE_METER_COLLECTION } from './platformUsageMeter';
+import { calculateUsagePercent, evaluateUsageLimit, usageLimitState, usageMeterId, usagePeriod, USAGE_METER_COLLECTION } from './platformUsageMeter';
 import {
   DEFAULT_PLATFORM_PLANS,
   assertLifecycleTransition,
@@ -310,17 +310,29 @@ export function registerPlatformAdminRoutes({
         const subscription = data.subscription || {};
         const planId = String(subscription.planId || 'starter');
         const resolvedPlan = await loadPlan(db, planId);
-        const meterSnap = await db.collection(USAGE_METER_COLLECTION).doc(`${doc.id}__${period}`).get();
+        const meterSnap = await db.collection(USAGE_METER_COLLECTION).doc(usageMeterId(doc.id, period)).get();
         const meter = meterSnap.exists ? meterSnap.data() as any : {};
         const used = Math.max(0, Math.floor(Number(meter.ordersMonthly || 0)));
-        const limit = Math.max(1, Math.floor(Number(resolvedPlan.plan.limits.ordersMonthly || 1)));
+        const limit = Math.max(0, Math.floor(Number(resolvedPlan.plan.limits.ordersMonthly || 0)));
+        const override = Boolean(meter.overrideMonthlyOrders || subscription.overrideMonthlyOrders || data.overrideMonthlyOrders);
+        const decision = evaluateUsageLimit(used, limit, override);
         return {
           id: doc.id,
           name: String(data.name || data.businessName || data.storeName || doc.id),
+          lifecycleStatus: cleanLifecycleStatus(data.lifecycleStatus || data.status),
+          subscriptionStatus: cleanSubscriptionStatus(subscription.status),
           planId,
           planName: resolvedPlan.plan.name,
           period,
-          ordersMonthly: { used, limit, percent: calculateUsagePercent(used, limit), state: usageLimitState(used, limit) },
+          ordersMonthly: {
+            used,
+            limit,
+            percent: calculateUsagePercent(used, limit),
+            state: decision.state,
+            allowed: decision.allowed,
+            remaining: decision.remaining,
+            overrideActive: override,
+          },
           measuredAt: String(meter.updatedAt || new Date().toISOString()),
         };
       }));
@@ -633,6 +645,68 @@ export function registerPlatformAdminRoutes({
       return res.json({ success: true, tenant: resultTenant });
     } catch (err: any) {
       return res.status(err?.statusCode || 400).json({ error: err?.message || 'Tenant lifecycle update failed.' });
+    }
+  });
+
+  app.patch('/api/platform/tenants/:tenantId/usage-override', ...platformAuth, async (req, res) => {
+    const db = getAdminDb();
+    const tenantId = String(req.params.tenantId || '').trim();
+    const overrideMonthlyOrders = Boolean(req.body?.overrideMonthlyOrders);
+    const reason = String(req.body?.reason || '').trim();
+    if (!db) return res.status(503).json({ error: 'Platform service is not configured.' });
+    if (!tenantId) return res.status(400).json({ error: 'Tenant ID is required.' });
+    if (!reason) return res.status(400).json({ error: 'A reason is required for setting usage limit overrides.' });
+
+    try {
+      let updatedTenant: any = null;
+      await db.runTransaction(async (transaction: any) => {
+        const tenantRef = db.collection('tenants').doc(tenantId);
+        const tenantSnap = await transaction.get(tenantRef);
+        if (!tenantSnap.exists) throw Object.assign(new Error(`Tenant '${tenantId}' not found.`), { statusCode: 404 });
+
+        const data = tenantSnap.data() as any;
+        const previousOverride = Boolean(data.subscription?.overrideMonthlyOrders || data.overrideMonthlyOrders);
+        const now = new Date().toISOString();
+        const period = usagePeriod();
+
+        const subscription = {
+          ...(data.subscription || {}),
+          overrideMonthlyOrders,
+        };
+
+        const meterRef = db.collection(USAGE_METER_COLLECTION).doc(usageMeterId(tenantId, period));
+
+        const audit = createAuthoritativeAuditRecord({
+          tenantId,
+          actorUid: req.user!.uid,
+          actorName: req.user!.email || req.user!.uid,
+          actorEmail: req.user!.email || null,
+          actorRole: 'Super Admin',
+          action: 'TENANT_USAGE_OVERRIDE_CHANGED',
+          module: 'Platform Usage',
+          targetType: 'tenant',
+          targetId: tenantId,
+          targetName: String(data.name || data.businessName || tenantId),
+          previousState: { overrideMonthlyOrders: previousOverride },
+          newState: { overrideMonthlyOrders },
+          reason,
+          result: 'success',
+          severity: 'warning',
+          details: `Usage limit override set to ${overrideMonthlyOrders} for tenant '${data.name || tenantId}'. Reason: ${reason}`,
+          metadata: { platformAdmin: true, period },
+        });
+
+        await updateAuthoritativeSecurityMetrics(db, audit, transaction);
+        transaction.set(tenantRef, { subscription, overrideMonthlyOrders, updatedAt: now }, { merge: true });
+        transaction.set(meterRef, { tenantId, period, overrideMonthlyOrders, updatedAt: now }, { merge: true });
+        transaction.set(db.collection('audit_logs').doc(audit.id), audit);
+
+        updatedTenant = { id: tenantId, ...data, subscription, overrideMonthlyOrders, updatedAt: now };
+      });
+
+      return res.json({ success: true, tenant: updatedTenant, overrideMonthlyOrders });
+    } catch (err: any) {
+      return res.status(err?.statusCode || 400).json({ error: err?.message || 'Usage override update failed.' });
     }
   });
 }
