@@ -48,6 +48,11 @@ import {
   sanitizeTenantUpdatePayload,
   createOwnershipTransferAuditRecord,
 } from './src/server/tenantOwnershipAuth';
+import {
+  createAuthoritativeAuditRecord,
+  recordAuditEvent,
+  queryTenantAuditLogs,
+} from './src/server/auditService';
 
 dotenv.config();
 
@@ -287,6 +292,26 @@ async function startServer() {
         return res.status(409).json({ error: 'A staff record with this ID already exists.' });
       }
       await ref.set(staff, { merge: true });
+
+      // Authoritative audit event
+      const auditRecord = createAuthoritativeAuditRecord({
+        tenantId,
+        actorUid: req.user.uid,
+        actorName: (req.user as any)?.name || req.user.email || req.user.uid,
+        actorEmail: req.user.email || null,
+        actorRole: String(req.user.claims?.role || (req.user as any)?.role || 'Staff Manager'),
+        action: 'STAFF_CREATED',
+        module: 'User Management',
+        targetType: 'staff',
+        targetId: staff.id,
+        targetName: staff.name,
+        newState: { role: staff.role, status: staff.status, email: staff.email },
+        result: 'success',
+        severity: 'info',
+        details: `Created new staff member ${staff.name} (${staff.id}) with role ${staff.role}.`,
+      });
+      await recordAuditEvent(db, auditRecord);
+
       return res.status(201).json({ success: true, staff });
     } catch (err: any) {
       const status = err?.statusCode || 400;
@@ -325,8 +350,42 @@ async function startServer() {
 
       assertStaffRoleManagementAllowed(req.user?.permissions, req.body, snap.data());
       assertNotSelfRoleChange(req.user, req.params.staffId, req.body?.role, snap.data());
+      const previousStaffData = snap.data();
+      const isRoleChange = req.body?.role && req.body.role !== previousStaffData?.role;
+      const isCustomPermsChange = req.body?.permissionsOverride !== undefined;
       const staff = normalizeStaffPayload(req.body, tenantId, snap.data());
       await ref.set(staff, { merge: true });
+
+      // Authoritative audit event
+      const action = isRoleChange
+        ? 'STAFF_ROLE_CHANGED'
+        : isCustomPermsChange
+          ? 'STAFF_PERMISSIONS_UPDATED'
+          : 'STAFF_UPDATED';
+      const severity = isRoleChange || isCustomPermsChange ? 'warning' : 'info';
+      const auditRecord = createAuthoritativeAuditRecord({
+        tenantId,
+        actorUid: req.user.uid,
+        actorName: (req.user as any)?.name || req.user.email || req.user.uid,
+        actorEmail: req.user.email || null,
+        actorRole: String(req.user.claims?.role || (req.user as any)?.role || 'Staff Manager'),
+        action,
+        module: 'User Management',
+        targetType: 'staff',
+        targetId: req.params.staffId,
+        targetName: staff.name || previousStaffData?.name,
+        previousState: { role: previousStaffData?.role, name: previousStaffData?.name },
+        newState: { role: staff.role, name: staff.name },
+        result: 'success',
+        severity,
+        details: isRoleChange
+          ? `Staff member ${staff.name} role changed from ${previousStaffData?.role} to ${staff.role}.`
+          : isCustomPermsChange
+            ? `Staff member ${staff.name} custom permissions updated.`
+            : `Updated staff profile for ${staff.name} (${req.params.staffId}).`,
+      });
+      await recordAuditEvent(db, auditRecord);
+
       return res.json({ success: true, staff });
     } catch (err: any) {
       const status = err?.statusCode || 400;
@@ -353,7 +412,28 @@ async function startServer() {
       if (isSelfStaffOperation(req.user, req.params.staffId, snap.data())) {
         return res.status(400).json({ error: 'You cannot delete your own staff account.' });
       }
+      const staffData = snap.data();
       await ref.delete();
+
+      // Authoritative audit event
+      const auditRecord = createAuthoritativeAuditRecord({
+        tenantId,
+        actorUid: req.user.uid,
+        actorName: (req.user as any)?.name || req.user.email || req.user.uid,
+        actorEmail: req.user.email || null,
+        actorRole: String(req.user.claims?.role || (req.user as any)?.role || 'Staff Manager'),
+        action: 'STAFF_DELETED',
+        module: 'User Management',
+        targetType: 'staff',
+        targetId: req.params.staffId,
+        targetName: staffData?.name || req.params.staffId,
+        previousState: { role: staffData?.role, email: staffData?.email },
+        result: 'success',
+        severity: 'warning',
+        details: `Deleted staff member ${staffData?.name || req.params.staffId} (${req.params.staffId}).`,
+      });
+      await recordAuditEvent(db, auditRecord);
+
       return res.json({ success: true });
     } catch (err: any) {
       const status = err?.statusCode || 500;
@@ -474,11 +554,79 @@ async function startServer() {
       // sanitizeTenantUpdatePayload rejects any attempt to modify ownerUid or tenantId
       const cleanUpdate = sanitizeTenantUpdatePayload(req.body, tenantId);
       await tenantRef.set(cleanUpdate, { merge: true });
+
+      // Authoritative audit event
+      const auditRecord = createAuthoritativeAuditRecord({
+        tenantId,
+        actorUid: req.user.uid,
+        actorName: (req.user as any)?.name || req.user.email || req.user.uid,
+        actorEmail: req.user.email || null,
+        actorRole: String(req.user.claims?.role || (req.user as any)?.role || 'Administrator'),
+        action: 'TENANT_SETTINGS_UPDATED',
+        module: 'Settings',
+        targetType: 'tenant',
+        targetId: tenantId,
+        targetName: String(cleanUpdate.name || tenantSnap.data()?.name || tenantId),
+        previousState: {
+          name: tenantSnap.data()?.name,
+          currency: tenantSnap.data()?.currency,
+          status: tenantSnap.data()?.status,
+          slug: tenantSnap.data()?.slug,
+        },
+        newState: cleanUpdate,
+        result: 'success',
+        severity: 'warning',
+        details: `Tenant organization settings updated: ${Object.keys(cleanUpdate).filter(k => k !== 'updatedAt').join(', ')}.`,
+      });
+      await recordAuditEvent(db, auditRecord);
+
       const updatedSnap = await tenantRef.get();
       return res.json({ success: true, tenant: { id: updatedSnap.id, ...updatedSnap.data() } });
     } catch (err: any) {
       const status = err?.statusCode || 400;
       return res.status(status).json({ error: err?.message || 'Unable to update tenant settings.' });
+    }
+  });
+
+  // =========================================================================
+  // TENANT AUDIT & SECURITY TELEMETRY
+  // =========================================================================
+  const requireAuditAccess = async (req: any, res: any, next: any) => {
+    const tenantId = extractAuthenticatedTenantId(req.user);
+    const db = getAdminDb();
+    if (!tenantId || !db) return res.status(503).json({ error: 'Tenant audit service is not configured.' });
+
+    try {
+      const tenantSnap = await db.collection('tenants').doc(tenantId).get();
+      const isOwner = tenantSnap.exists && tenantSnap.data()?.ownerUid === req.user?.uid;
+      if (isOwner) {
+        return next();
+      }
+
+      const claims = req.user?.claims || {};
+      const role = typeof claims.role === 'string' ? claims.role : '';
+      const permissions = Array.isArray(claims.permissions)
+        ? claims.permissions
+        : (DEFAULT_ROLE_PERMISSIONS as Record<string, string[]>)[role] || [];
+      if (!permissions.includes('users.audit')) {
+        return res.status(403).json({ error: 'Permission users.audit is required to access security audit logs.' });
+      }
+      return next();
+    } catch (err: any) {
+      return res.status(500).json({ error: err?.message || 'Unable to authorize audit access.' });
+    }
+  };
+
+  app.get('/api/tenant/audit', requireServerAuth, requireActiveTenantMembership, requireAuditAccess, async (req, res) => {
+    const tenantId = extractAuthenticatedTenantId(req.user);
+    const db = getAdminDb();
+    if (!tenantId || !db) return res.status(503).json({ error: 'Tenant audit service is not configured.' });
+    try {
+      const response = await queryTenantAuditLogs(db, tenantId, req.query as any);
+      return res.json(response);
+    } catch (err: any) {
+      const status = err?.statusCode || 500;
+      return res.status(status).json({ error: err?.message || 'Unable to load audit logs.' });
     }
   });
 
@@ -1157,6 +1305,26 @@ async function startServer() {
       const apiUrl = (process.env.MONIME_API_URL || 'https://api.monime.io').replace(/\/+$/, '');
       const webhookResult = await ensureMonimeWebhook({ apiUrl, accessToken: effectiveToken, spaceId, tenantId, webhookSecret: effectiveWebhookSecret, existingWebhookId: existing.monimeWebhookId ? String(existing.monimeWebhookId) : undefined, rotateSecret: Boolean(webhookSecret) });
       await existingRef.set({ provider: 'monime', monimeSpaceId: spaceId, ...(accessToken ? { monimeAccessToken: encryptMonimeSecret(accessToken) } : {}), ...(webhookSecret ? { webhookSecret: encryptMonimeSecret(webhookSecret) } : {}), monimeMode: mode, monimePreferredChannel: ['all', 'mobile_money', 'card', 'bank_transfer', 'payment_code'].includes(body.monimePreferredChannel) ? body.monimePreferredChannel : 'all', monimeVersion: 'caph.2025-08-23', monimeWebhookId: webhookResult.id, monimeWebhookUrl: webhookResult.url, webhookManaged: true, updatedAt: new Date().toISOString(), updatedBy: req.user.uid }, { merge: true });
+
+      // Authoritative audit event
+      const auditRecord = createAuthoritativeAuditRecord({
+        tenantId,
+        actorUid: req.user.uid,
+        actorName: (req.user as any)?.name || req.user.email || req.user.uid,
+        actorEmail: req.user.email || null,
+        actorRole: String(req.user.claims?.role || (req.user as any)?.role || 'Administrator'),
+        action: 'PAYMENT_CREDENTIALS_ROTATED',
+        module: 'Payments',
+        targetType: 'payment_gateway',
+        targetId: 'monime',
+        targetName: 'Monime Financial Gateway',
+        result: 'success',
+        severity: 'critical',
+        details: `Monime payment gateway configuration and credentials updated for space '${spaceId}'.`,
+        metadata: { spaceId, mode },
+      });
+      await recordAuditEvent(db, auditRecord);
+
       return res.json({ success: true, configured: true, environment: mode === 'live' ? 'production' : 'sandbox', spaceId, webhookConfigured: true });
     } catch {
       return res.status(500).json({ error: 'Unable to save Monime configuration.' });

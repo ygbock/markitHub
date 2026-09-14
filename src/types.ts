@@ -1101,22 +1101,68 @@ export interface CampaignLog {
   status: 'Delivered' | 'Scheduled' | 'Sent';
 }
 
+export type AuditSeverity = 'info' | 'warning' | 'critical';
+export type AuditResult = 'success' | 'denied' | 'failed';
+
 export interface AuditLog {
   id: string;
   timestamp: string;
   staffName: string;
   role: StaffRole | string;
   action: string;
-  module: 'Inventory' | 'POS' | 'CRM' | 'User Management' | 'Billing' | 'Storefront' | string;
+  module: 'Inventory' | 'POS' | 'CRM' | 'User Management' | 'Billing' | 'Storefront' | 'Security' | 'Settings' | 'Payments' | string;
   details: string;
   tenantId?: string;
   actorUid?: string;
-  targetStaffId?: string;
-  targetStaffName?: string;
+  actorName?: string;
+  actorEmail?: string | null;
+  actorRole?: string;
+  targetType?: 'staff' | 'tenant' | 'payment_gateway' | 'security' | 'order' | 'inventory' | 'settings' | string;
+  targetId?: string;
+  targetName?: string;
+  previousState?: Record<string, unknown> | string | null;
+  newState?: Record<string, unknown> | string | null;
   previousStatus?: string;
   newStatus?: string;
   reason?: string;
+  result?: AuditResult;
+  severity?: AuditSeverity;
+  targetStaffId?: string;
+  targetStaffName?: string;
   metadata?: Record<string, unknown>;
+}
+
+export interface AuditFilterParams {
+  startDate?: string;
+  endDate?: string;
+  actor?: string;
+  action?: string;
+  module?: string;
+  target?: string;
+  result?: AuditResult | string;
+  severity?: AuditSeverity | string;
+  search?: string;
+  page?: number | string;
+  pageSize?: number | string;
+}
+
+export interface AuditSecurityMetrics {
+  eventsToday: number;
+  eventsThisWeek: number;
+  staffSuspensions: number;
+  rolePermissionChanges: number;
+  ownershipEvents: number;
+  failedDeniedOperations: number;
+}
+
+export interface AuditApiResponse {
+  success: boolean;
+  events: AuditLog[];
+  totalCount: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+  metrics: AuditSecurityMetrics;
 }
 
 export type StaffStatus = 'active' | 'suspended';
