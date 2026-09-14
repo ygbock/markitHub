@@ -48,6 +48,7 @@ import {
   createOwnershipTransferAuditRecord,
 } from './src/server/tenantOwnershipAuth';
 import { assertPlatformAdmin } from './src/server/platformAdminAuth';
+import { registerPlatformAdminRoutes } from './src/server/platformAdminRoutes';
 import {
   createAuthoritativeAuditRecord,
   recordAuditEvent,
@@ -635,186 +636,11 @@ async function startServer() {
     }
   };
 
-  app.get('/api/platform/dashboard', requireServerAuth, requirePlatformAdmin, async (req, res) => {
-    const db = getAdminDb();
-    if (!db) return res.status(503).json({ error: 'Platform service is not configured.' });
-
-    try {
-      const tenantsRef = db.collection('tenants');
-      const staffRef = db.collection('staff');
-
-      const [tenantCountSnap, activeCountSnap, suspendedCountSnap, staffCountSnap, tenantsSnap, auditSnap] = await Promise.all([
-        tenantsRef.count().get(),
-        tenantsRef.where('status', '==', 'active').count().get(),
-        tenantsRef.where('status', '==', 'suspended').count().get(),
-        staffRef.count().get(),
-        tenantsRef.orderBy('updatedAt', 'desc').limit(100).get(),
-        db.collection('audit_logs').orderBy('timestamp', 'desc').limit(25).get(),
-      ]);
-
-      const tenants = tenantsSnap.docs.map(doc => {
-        const data = doc.data() as any;
-        return {
-          id: doc.id,
-          name: String(data.name || data.businessName || data.storeName || doc.id),
-          status: String(data.status || 'active'),
-          ownerUid: data.ownerUid ? String(data.ownerUid) : undefined,
-          updatedAt: data.updatedAt ? String(data.updatedAt) : undefined,
-        };
-      });
-
-      const activeTenantCount = activeCountSnap.data().count;
-      const suspendedTenantCount = suspendedCountSnap.data().count;
-
-      const recentAuditEvents = auditSnap.docs.map(doc => {
-        const data = doc.data() as any;
-        return {
-          id: doc.id,
-          action: String(data.action || ''),
-          tenantId: String(data.tenantId || ''),
-          result: String(data.result || ''),
-          severity: String(data.severity || ''),
-          timestamp: String(data.timestamp || ''),
-        };
-      });
-
-      return res.json({
-        success: true,
-        metrics: {
-          tenantCount: tenantCountSnap.data().count,
-          activeTenantCount,
-          suspendedTenantCount,
-          staffCount: staffCountSnap.data().count,
-          recentAuditCount: recentAuditEvents.length,
-        },
-        tenants,
-        recentAuditEvents,
-      });
-    } catch (err: any) {
-      return res.status(500).json({ error: err?.message || 'Unable to load platform dashboard.' });
-    }
-  });
-
-
-  app.get('/api/platform/tenants/:tenantId', requireServerAuth, requirePlatformAdmin, async (req, res) => {
-    const db = getAdminDb();
-    const tenantId = String(req.params.tenantId || '').trim();
-    if (!db) return res.status(503).json({ error: 'Platform service is not configured.' });
-    if (!tenantId) return res.status(400).json({ error: 'Tenant ID is required.' });
-
-    try {
-      const tenantRef = db.collection('tenants').doc(tenantId);
-      const [tenantSnap, staffCountSnap, auditSnap] = await Promise.all([
-        tenantRef.get(),
-        db.collection('staff').where('tenantId', '==', tenantId).count().get(),
-        db.collection('audit_logs').where('tenantId', '==', tenantId).orderBy('timestamp', 'desc').limit(20).get(),
-      ]);
-      if (!tenantSnap.exists) return res.status(404).json({ error: `Tenant '${tenantId}' not found.` });
-
-      const data = tenantSnap.data() as any;
-      const tenant = {
-        id: tenantId,
-        name: String(data.name || data.businessName || data.storeName || tenantId),
-        status: String(data.status || 'active'),
-        ownerUid: data.ownerUid ? String(data.ownerUid) : undefined,
-        slug: data.slug ? String(data.slug) : undefined,
-        currency: data.currency ? String(data.currency) : undefined,
-        timezone: data.timezone ? String(data.timezone) : undefined,
-        createdAt: data.createdAt ? String(data.createdAt) : undefined,
-        updatedAt: data.updatedAt ? String(data.updatedAt) : undefined,
-        staffCount: staffCountSnap.data().count,
-        payment: {
-          configured: Boolean(data.monime || data.monimeConfig || data.paymentConfig),
-          mode: data.monime?.mode || data.monimeConfig?.mode || data.paymentConfig?.mode || undefined,
-        },
-      };
-      const recentAuditEvents = auditSnap.docs.map(doc => {
-        const event = doc.data() as any;
-        return {
-          id: doc.id,
-          action: String(event.action || ''),
-          result: String(event.result || ''),
-          severity: String(event.severity || ''),
-          actorEmail: event.actorEmail ? String(event.actorEmail) : undefined,
-          timestamp: String(event.timestamp || ''),
-          details: String(event.details || ''),
-        };
-      });
-
-      return res.json({ success: true, tenant, recentAuditEvents });
-    } catch (err: any) {
-      return res.status(500).json({ error: err?.message || 'Unable to load tenant details.' });
-    }
-  });
-
-  app.patch('/api/platform/tenants/:tenantId/status', requireServerAuth, requirePlatformAdmin, async (req, res) => {
-    const db = getAdminDb();
-    const tenantId = String(req.params.tenantId || '').trim();
-    const nextStatus = String(req.body?.status || '').trim().toLowerCase();
-    const reason = String(req.body?.reason || '').trim();
-
-    if (!db) return res.status(503).json({ error: 'Platform service is not configured.' });
-    if (!tenantId) return res.status(400).json({ error: 'Tenant ID is required.' });
-    if (nextStatus !== 'active' && nextStatus !== 'suspended') {
-      return res.status(400).json({ error: 'Status must be active or suspended.' });
-    }
-    if (!reason) return res.status(400).json({ error: 'A reason is required for platform tenant status changes.' });
-
-    try {
-      const tenantRef = db.collection('tenants').doc(tenantId);
-      let auditRecord: any = null;
-      let tenant: any = null;
-
-      await db.runTransaction(async transaction => {
-        const tenantSnap = await transaction.get(tenantRef);
-        if (!tenantSnap.exists) {
-          const err = new Error(`Tenant '${tenantId}' not found.`);
-          (err as any).statusCode = 404;
-          throw err;
-        }
-
-        const data = tenantSnap.data() as any;
-        const previousStatus = String(data?.status || 'active').toLowerCase();
-        if (previousStatus === nextStatus) {
-          const err = new Error(`Tenant is already ${nextStatus}.`);
-          (err as any).statusCode = 409;
-          throw err;
-        }
-
-        const now = new Date().toISOString();
-        transaction.update(tenantRef, { status: nextStatus, updatedAt: now });
-
-        const auditRef = db.collection('audit_logs').doc();
-        auditRecord = createAuthoritativeAuditRecord({
-          tenantId,
-          actorUid: req.user.uid,
-          actorName: req.user.email || req.user.uid,
-          actorEmail: req.user.email || null,
-          actorRole: 'Super Admin',
-          action: nextStatus === 'suspended' ? 'TENANT_SUSPENDED' : 'TENANT_REACTIVATED',
-          module: 'Platform Administration',
-          targetType: 'tenant',
-          targetId: tenantId,
-          targetName: String(data?.name || data?.businessName || data?.storeName || tenantId),
-          previousState: { status: previousStatus },
-          newState: { status: nextStatus },
-          result: 'success',
-          severity: 'critical',
-          details: reason,
-          metadata: { platformAdmin: true, reason },
-        });
-        auditRecord.id = auditRef.id;
-
-        transaction.set(auditRef, auditRecord);
-        await updateAuthoritativeSecurityMetrics(db, auditRecord, transaction);
-
-        tenant = { id: tenantId, ...data, status: nextStatus, updatedAt: now };
-      });
-
-      return res.json({ success: true, tenant, auditLog: auditRecord });
-    } catch (err: any) {
-      return res.status(err?.statusCode || 500).json({ error: err?.message || 'Unable to change tenant status.' });
-    }
+  registerPlatformAdminRoutes({
+    app,
+    requireServerAuth,
+    requirePlatformAdmin,
+    getAdminDb,
   });
 
   // =========================================================================
