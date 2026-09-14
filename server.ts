@@ -643,10 +643,12 @@ async function startServer() {
       const tenantsRef = db.collection('tenants');
       const staffRef = db.collection('staff');
 
-      const [tenantCountSnap, staffCountSnap, tenantsSnap, auditSnap] = await Promise.all([
+      const [tenantCountSnap, activeCountSnap, suspendedCountSnap, staffCountSnap, tenantsSnap, auditSnap] = await Promise.all([
         tenantsRef.count().get(),
+        tenantsRef.where('status', '==', 'active').count().get(),
+        tenantsRef.where('status', '==', 'suspended').count().get(),
         staffRef.count().get(),
-        tenantsRef.limit(100).get(),
+        tenantsRef.orderBy('updatedAt', 'desc').limit(100).get(),
         db.collection('audit_logs').orderBy('timestamp', 'desc').limit(25).get(),
       ]);
 
@@ -661,8 +663,8 @@ async function startServer() {
         };
       });
 
-      const activeTenantCount = tenants.filter(t => t.status.toLowerCase() === 'active').length;
-      const suspendedTenantCount = tenants.filter(t => t.status.toLowerCase() === 'suspended').length;
+      const activeTenantCount = activeCountSnap.data().count;
+      const suspendedTenantCount = suspendedCountSnap.data().count;
 
       const recentAuditEvents = auditSnap.docs.map(doc => {
         const data = doc.data() as any;
@@ -690,6 +692,77 @@ async function startServer() {
       });
     } catch (err: any) {
       return res.status(500).json({ error: err?.message || 'Unable to load platform dashboard.' });
+    }
+  });
+
+
+  app.patch('/api/platform/tenants/:tenantId/status', requireServerAuth, requirePlatformAdmin, async (req, res) => {
+    const db = getAdminDb();
+    const tenantId = String(req.params.tenantId || '').trim();
+    const nextStatus = String(req.body?.status || '').trim().toLowerCase();
+    const reason = String(req.body?.reason || '').trim();
+
+    if (!db) return res.status(503).json({ error: 'Platform service is not configured.' });
+    if (!tenantId) return res.status(400).json({ error: 'Tenant ID is required.' });
+    if (nextStatus !== 'active' && nextStatus !== 'suspended') {
+      return res.status(400).json({ error: 'Status must be active or suspended.' });
+    }
+    if (!reason) return res.status(400).json({ error: 'A reason is required for platform tenant status changes.' });
+
+    try {
+      const tenantRef = db.collection('tenants').doc(tenantId);
+      let auditRecord: any = null;
+      let tenant: any = null;
+
+      await db.runTransaction(async transaction => {
+        const tenantSnap = await transaction.get(tenantRef);
+        if (!tenantSnap.exists) {
+          const err = new Error(`Tenant '${tenantId}' not found.`);
+          (err as any).statusCode = 404;
+          throw err;
+        }
+
+        const data = tenantSnap.data() as any;
+        const previousStatus = String(data?.status || 'active').toLowerCase();
+        if (previousStatus === nextStatus) {
+          const err = new Error(`Tenant is already ${nextStatus}.`);
+          (err as any).statusCode = 409;
+          throw err;
+        }
+
+        const now = new Date().toISOString();
+        transaction.update(tenantRef, { status: nextStatus, updatedAt: now });
+
+        const auditRef = db.collection('audit_logs').doc();
+        auditRecord = createAuthoritativeAuditRecord({
+          tenantId,
+          actorUid: req.user.uid,
+          actorName: req.user.email || req.user.uid,
+          actorEmail: req.user.email || null,
+          actorRole: 'Super Admin',
+          action: nextStatus === 'suspended' ? 'TENANT_SUSPENDED' : 'TENANT_REACTIVATED',
+          module: 'Platform Administration',
+          targetType: 'tenant',
+          targetId: tenantId,
+          targetName: String(data?.name || data?.businessName || data?.storeName || tenantId),
+          previousState: { status: previousStatus },
+          newState: { status: nextStatus },
+          result: 'success',
+          severity: 'critical',
+          details: reason,
+          metadata: { platformAdmin: true, reason },
+        });
+        auditRecord.id = auditRef.id;
+
+        transaction.set(auditRef, auditRecord);
+        await updateAuthoritativeSecurityMetrics(db, auditRecord, transaction);
+
+        tenant = { id: tenantId, ...data, status: nextStatus, updatedAt: now };
+      });
+
+      return res.json({ success: true, tenant, auditLog: auditRecord });
+    } catch (err: any) {
+      return res.status(err?.statusCode || 500).json({ error: err?.message || 'Unable to change tenant status.' });
     }
   });
 
