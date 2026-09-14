@@ -10,7 +10,7 @@ import { StaffMember } from '../types';
 import { EcommerceAdminTab } from './ecommerce/admin/ECommerceAdminPortal';
 import { useCurrency } from '../context/CurrencyContext';
 
-export type AdminSubTab = 'Dashboard' | 'Inventory' | 'POS' | 'CRM' | 'Invoices' | 'Reports' | 'Security' | 'Settings' | 'StorefrontManagement' | 'Reviews';
+export type AdminSubTab = 'Dashboard' | 'Inventory' | 'POS' | 'CRM' | 'Invoices' | 'Reports' | 'Security' | 'Platform' | 'Settings' | 'StorefrontManagement' | 'Reviews';
 
 interface EnhancedSidebarProps {
   currentView: 'Admin' | 'ECommerce';
@@ -101,6 +101,13 @@ export default function EnhancedSidebar({
       : 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30';
 
   const navItems = [
+    ...(activeStaff.role === 'Super Admin' ? [{
+      id: 'Platform' as AdminSubTab,
+      label: 'Super Admin Control Plane',
+      icon: Network,
+      badge: 'Platform',
+      badgeColor: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30',
+    }] : []),
     {
       id: 'Dashboard' as AdminSubTab,
       label: 'Command Center',
