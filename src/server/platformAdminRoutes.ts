@@ -63,6 +63,7 @@ export function registerPlatformAdminRoutes({
   requireServerAuth,
   requirePlatformAdmin,
   getAdminDb,
+  getAdminAuth,
 }: PlatformRouteDeps): void {
   const platformAuth = [requireServerAuth, requirePlatformAdmin];
 
@@ -110,7 +111,6 @@ export function registerPlatformAdminRoutes({
       const batch = db.batch();
       batch.set(ref, plan);
       batch.set(db.collection('audit_logs').doc(audit.id), audit);
-      await updateAuthoritativeSecurityMetrics(db, audit, batch);
       await batch.commit();
       return res.status(201).json({ success: true, plan });
     } catch (err: any) {
