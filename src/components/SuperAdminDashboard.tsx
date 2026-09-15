@@ -271,12 +271,20 @@ export default function SuperAdminDashboard() {
     setBusy('provision');
     setNotice(null);
     try {
-      await apiFetch('/api/platform/tenants', {
+      const idempotencyKey = `prov_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+      const res = await apiFetch<{ success: boolean; replayed?: boolean }>('/api/platform/tenants', {
         method: 'POST',
+        headers: {
+          'Idempotency-Key': idempotencyKey,
+        },
         body: JSON.stringify(provisionForm),
       });
       setProvisionForm(prev => ({ ...prev, name: '', ownerUid: '', ownerEmail: '' }));
-      setNotice('Tenant provisioned successfully with owner membership and subscription.');
+      setNotice(
+        res.replayed
+          ? 'Tenant provisioning replayed (idempotent request).'
+          : 'Tenant provisioned successfully with owner membership and subscription.'
+      );
       await loadAll();
       setTab('tenants');
     } catch (err: any) {
