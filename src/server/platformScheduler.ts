@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { evaluatePlatformHealth, type HealthEvaluationResult } from './platformHealthEngine';
 import { processAlertEscalations, processPendingNotifications } from './platformNotificationControlPlane';
 import { createAuthoritativeAuditRecord, recordAuditEvent } from './auditService';
+import { getPublishedPlatformConfig } from './platformGovernanceControlPlane';
 
 export type PlatformJobName = 'health' | 'escalation' | 'notifications';
 
@@ -162,8 +163,14 @@ export async function runJobWithLock(
     return { executed: false, skippedReason: 'already_running_locally' };
   }
 
+  const govConfig = await getPublishedPlatformConfig(db);
+  if (govConfig?.schedulerPolicy?.enabled === false) {
+    return { executed: false, skippedReason: 'lease_unavailable' };
+  }
+
   // 2. Acquire distributed lease
-  const leaseAcquired = await acquireSchedulerLease(db, jobName, INSTANCE_ID, 120000);
+  const leaseDuration = govConfig?.schedulerPolicy?.distributedLockLeaseMs || 120000;
+  const leaseAcquired = await acquireSchedulerLease(db, jobName, INSTANCE_ID, leaseDuration);
   if (!leaseAcquired) {
     return { executed: false, skippedReason: 'lease_unavailable' };
   }
@@ -247,12 +254,27 @@ export async function runJobWithLock(
  */
 export async function runPlatformJob(
   db: any,
-  jobName: PlatformJobName
+  jobName: string,
+  _triggerSource?: string
 ): Promise<any> {
-  if (jobName === 'health') {
+  const govConfig = await getPublishedPlatformConfig(db);
+  if (govConfig?.schedulerPolicy?.enabled === false) {
+    return {
+      status: 'skipped',
+      message: `Job ${jobName} skipped: scheduler is disabled by governance configuration.`,
+    };
+  }
+
+  const normalized = (jobName === 'platform_health_evaluation' || jobName === 'health') ? 'health'
+    : (jobName === 'platform_escalation_sweep' || jobName === 'escalation') ? 'escalation'
+    : (jobName === 'platform_notification_sweep' || jobName === 'notifications') ? 'notifications'
+    : (jobName as PlatformJobName);
+
+  if (normalized === 'health') {
     return runJobWithLock(db, 'health', async () => {
       const res: HealthEvaluationResult = await evaluatePlatformHealth(db);
       return {
+        status: 'completed',
         processedCount: res.processedTenants,
         createdAlerts: res.alertsCreated,
         resolvedAlerts: res.alertsResolved,
@@ -260,10 +282,11 @@ export async function runPlatformJob(
     });
   }
 
-  if (jobName === 'escalation') {
+  if (normalized === 'escalation') {
     return runJobWithLock(db, 'escalation', async () => {
       const res = await processAlertEscalations(db);
       return {
+        status: 'completed',
         processedCount: res.processedCount,
         createdAlerts: res.escalatedCount,
         resolvedAlerts: 0,
@@ -271,10 +294,11 @@ export async function runPlatformJob(
     });
   }
 
-  if (jobName === 'notifications') {
+  if (normalized === 'notifications') {
     return runJobWithLock(db, 'notifications', async () => {
       const res = await processPendingNotifications(db);
       return {
+        status: 'completed',
         processedCount: res.processedCount,
         createdAlerts: 0,
         resolvedAlerts: 0,

@@ -11,6 +11,10 @@ import {
   type TenantHealthInfo,
 } from './platformAdminControlPlane';
 import {
+  getPublishedPlatformConfig,
+  type PlatformGovernanceConfig,
+} from './platformGovernanceControlPlane';
+import {
   usageMeterId,
   usagePeriod,
   USAGE_METER_COLLECTION,
@@ -139,12 +143,30 @@ export async function autoResolvePlatformAlert(
 export async function evaluateTenantHealthAndAlerts(
   db: any,
   tenantDoc: { id: string; [key: string]: any },
-  options?: { provisioningDelayThresholdMinutes?: number }
+  options?: {
+    provisioningDelayThresholdMinutes?: number;
+    governanceConfig?: PlatformGovernanceConfig;
+  }
 ): Promise<TenantEvaluationResult> {
   const tenantId = tenantDoc.id;
   const data = tenantDoc;
   const tenantName = String(data.name || data.slug || tenantId);
-  const provisioningThresholdMins = options?.provisioningDelayThresholdMinutes || 30;
+
+  const govConfig = options?.governanceConfig || (await getPublishedPlatformConfig(db));
+  const provisioningThresholdMins =
+    options?.provisioningDelayThresholdMinutes ||
+    govConfig?.alertThresholds?.provisioningDelayMinutes ||
+    15;
+  const approachingPercent =
+    govConfig?.alertThresholds?.warningOrdersUsagePercent ||
+    govConfig?.usageThresholds?.usageApproachingThresholdPercent ||
+    80;
+  const violationPercent =
+    govConfig?.alertThresholds?.criticalOrdersUsagePercent ||
+    govConfig?.usageThresholds?.usageViolationThresholdPercent ||
+    100;
+  const riskScoreThreshold = govConfig?.alertThresholds?.healthRiskScoreThreshold || 60;
+  const shouldAutoResolve = govConfig?.alertThresholds?.autoResolveResolvedConditions !== false;
 
   const now = new Date();
   const nowIso = now.toISOString();
@@ -506,7 +528,7 @@ export async function evaluateTenantHealthAndAlerts(
   const meterData = meterSnap.exists ? meterSnap.data() : null;
 
   const planId = subscription.planId || data.planId || 'free';
-  const plan = DEFAULT_PLATFORM_PLANS.find(p => p.id === planId) || DEFAULT_PLATFORM_PLANS[0];
+  const plan = (govConfig?.plans || DEFAULT_PLATFORM_PLANS).find(p => p.id === planId) || DEFAULT_PLATFORM_PLANS[0];
   const monthlyOrderLimit = subscription.overrideMonthlyOrders ?? plan.limits.ordersMonthly;
   const ordersUsed = meterData?.ordersMonthly || 0;
   const usagePercent = monthlyOrderLimit > 0 ? Math.round((ordersUsed / monthlyOrderLimit) * 100) : 0;
@@ -516,7 +538,7 @@ export async function evaluateTenantHealthAndAlerts(
   const dedupUsageApproaching = `${tenantId}_USAGE_LIMIT_APPROACHING_${currentPeriod}`;
 
   if (!isOverrideActive) {
-    if (usagePercent >= 100) {
+    if (usagePercent >= violationPercent) {
       activeConditions.push('USAGE_LIMIT_VIOLATION');
       const res = await createPlatformAlert(db, {
         tenantId,
@@ -557,7 +579,7 @@ export async function evaluateTenantHealthAndAlerts(
       }
       // If there was an approaching alert, auto-resolve it as it transitioned to violation
       const activeApproaching = existingAlertsByDedupKey.get(dedupUsageApproaching);
-      if (activeApproaching) {
+      if (activeApproaching && shouldAutoResolve) {
         clearedConditions.push('USAGE_LIMIT_APPROACHING');
         await autoResolvePlatformAlert(
           db,
@@ -566,7 +588,7 @@ export async function evaluateTenantHealthAndAlerts(
         );
         resolvedAlerts.push(activeApproaching.alertId);
       }
-    } else if (usagePercent >= 80) {
+    } else if (usagePercent >= approachingPercent) {
       activeConditions.push('USAGE_LIMIT_APPROACHING');
       const res = await createPlatformAlert(db, {
         tenantId,
@@ -589,7 +611,7 @@ export async function evaluateTenantHealthAndAlerts(
       }
       // If there was an active violation alert and usage fell back below 100%, resolve violation
       const activeViolation = existingAlertsByDedupKey.get(dedupUsageViolation);
-      if (activeViolation) {
+      if (activeViolation && shouldAutoResolve) {
         clearedConditions.push('USAGE_LIMIT_VIOLATION');
         await autoResolvePlatformAlert(
           db,
@@ -599,9 +621,9 @@ export async function evaluateTenantHealthAndAlerts(
         resolvedAlerts.push(activeViolation.alertId);
       }
     } else {
-      // Usage is healthy (< 80%)
+      // Usage is healthy
       const activeViolation = existingAlertsByDedupKey.get(dedupUsageViolation);
-      if (activeViolation) {
+      if (activeViolation && shouldAutoResolve) {
         clearedConditions.push('USAGE_LIMIT_VIOLATION');
         await autoResolvePlatformAlert(
           db,
@@ -611,7 +633,7 @@ export async function evaluateTenantHealthAndAlerts(
         resolvedAlerts.push(activeViolation.alertId);
       }
       const activeApproaching = existingAlertsByDedupKey.get(dedupUsageApproaching);
-      if (activeApproaching) {
+      if (activeApproaching && shouldAutoResolve) {
         clearedConditions.push('USAGE_LIMIT_APPROACHING');
         await autoResolvePlatformAlert(
           db,
@@ -633,10 +655,12 @@ export async function evaluateTenantHealthAndAlerts(
     hasPaymentFailure: subscription.status === 'past_due',
     lastActivityAt: data.updatedAt,
     createdAt: data.createdAt,
+    warningUsagePercent: approachingPercent,
+    criticalUsagePercent: violationPercent,
   });
   const dedupHealthAtRisk = `${tenantId}_HEALTH_AT_RISK`;
 
-  if (healthMetrics.status === 'AT_RISK') {
+  if (healthMetrics.status === 'CRITICAL' || healthMetrics.healthScore < riskScoreThreshold) {
     activeConditions.push('HEALTH_AT_RISK');
     const res = await createPlatformAlert(db, {
       tenantId,
@@ -656,8 +680,9 @@ export async function evaluateTenantHealthAndAlerts(
       createdAlerts.push(res.alert.alertId);
     }
   } else {
+    // Health score normalized
     const activeHealthAlert = existingAlertsByDedupKey.get(dedupHealthAtRisk);
-    if (activeHealthAlert) {
+    if (activeHealthAlert && shouldAutoResolve) {
       clearedConditions.push('HEALTH_AT_RISK');
       await autoResolvePlatformAlert(
         db,
@@ -689,6 +714,21 @@ export async function evaluatePlatformHealth(
 ): Promise<HealthEvaluationResult> {
   const startTime = Date.now();
   const batchSize = options?.batchSize || 200;
+
+  const govConfig = await getPublishedPlatformConfig(db);
+  if (govConfig.featureFlags?.enableAutomatedHealthEvaluation === false) {
+    return {
+      processedTenants: 0,
+      succeededTenants: 0,
+      failedTenants: 0,
+      alertsCreated: 0,
+      alertsResolved: 0,
+      durationMs: Date.now() - startTime,
+      tenantResults: [],
+      errors: [],
+      evaluatedAt: new Date().toISOString(),
+    };
+  }
 
   let tenantDocs: any[] = [];
   if (options?.tenantIds && options.tenantIds.length > 0) {
@@ -732,6 +772,7 @@ export async function evaluatePlatformHealth(
       }
       const res = await evaluateTenantHealthAndAlerts(db, tenantDoc, {
         provisioningDelayThresholdMinutes: options?.provisioningDelayThresholdMinutes,
+        governanceConfig: govConfig,
       });
       succeededTenants++;
       alertsCreated += res.createdAlerts.length;

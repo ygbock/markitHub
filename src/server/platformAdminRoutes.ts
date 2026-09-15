@@ -45,6 +45,14 @@ import {
   getSchedulerStatus,
   runPlatformJob,
 } from './platformScheduler';
+import {
+  getPlatformGovernanceState,
+  getPlatformConfigHistory,
+  validatePlatformConfig,
+  savePlatformConfigDraft,
+  publishPlatformConfig,
+  rollbackPlatformConfig,
+} from './platformGovernanceControlPlane';
 
 interface PlatformRouteDeps {
   app: Express;
@@ -238,6 +246,145 @@ export function registerPlatformAdminRoutes({
       });
     } catch (err: any) {
       return res.status(500).json({ error: err?.message || 'Failed to trigger scheduled job.' });
+    }
+  });
+
+  // ==========================================
+  // PLATFORM GOVERNANCE & CONFIGURATION ROUTES
+  // ==========================================
+
+  app.get('/api/platform/governance/config', ...platformAuth, async (_req, res) => {
+    const db = getAdminDb();
+    if (!db) return res.status(503).json({ error: 'Platform service is not configured.' });
+    try {
+      const state = await getPlatformGovernanceState(db);
+      const validation = validatePlatformConfig(state.published);
+      return res.json({
+        success: true,
+        ...state,
+        validation,
+      });
+    } catch (err: any) {
+      return res.status(500).json({ error: err?.message || 'Failed to fetch platform governance configuration.' });
+    }
+  });
+
+  app.get('/api/platform/governance/config/history', ...platformAuth, async (req, res) => {
+    const db = getAdminDb();
+    if (!db) return res.status(503).json({ error: 'Platform service is not configured.' });
+    try {
+      const limit = Number(req.query.limit) || 50;
+      const history = await getPlatformConfigHistory(db, limit);
+      return res.json({
+        success: true,
+        versions: history,
+      });
+    } catch (err: any) {
+      return res.status(500).json({ error: err?.message || 'Failed to fetch platform configuration history.' });
+    }
+  });
+
+  app.post('/api/platform/governance/config/validate', ...platformAuth, async (req, res) => {
+    try {
+      const candidateConfig = req.body?.candidateConfig || req.body?.config || req.body;
+      const validation = validatePlatformConfig(candidateConfig);
+      return res.json({
+        success: true,
+        validation,
+      });
+    } catch (err: any) {
+      return res.status(500).json({ error: err?.message || 'Failed to validate platform configuration.' });
+    }
+  });
+
+  const handleDraftSave = async (req: any, res: any) => {
+    const db = getAdminDb();
+    if (!db) return res.status(503).json({ error: 'Platform service is not configured.' });
+    try {
+      const candidateConfig = req.body?.candidateConfig || req.body?.config;
+      const justification = String(req.body?.justification || '').trim();
+      const expectedVersion = req.body?.expectedVersion !== undefined ? Number(req.body.expectedVersion) : undefined;
+      const adminUser = {
+        uid: (req as any).user?.uid || 'superadmin',
+        email: (req as any).user?.email || 'superadmin@markithub.internal',
+      };
+
+      if (!candidateConfig || typeof candidateConfig !== 'object') {
+        return res.status(400).json({ error: 'candidateConfig object is required.' });
+      }
+
+      const result = await savePlatformConfigDraft(db, candidateConfig, adminUser, justification, expectedVersion);
+      return res.json({
+        success: true,
+        draft: result.draft,
+        validation: result.validation,
+      });
+    } catch (err: any) {
+      const status = err?.message?.toLowerCase()?.includes('conflict') ? 409 : (err?.message?.includes('justification') ? 400 : 500);
+      return res.status(status).json({ error: err?.message || 'Failed to save configuration draft.' });
+    }
+  };
+
+  app.patch('/api/platform/governance/config', ...platformAuth, handleDraftSave);
+  app.put('/api/platform/governance/config', ...platformAuth, handleDraftSave);
+  app.patch('/api/platform/governance/config/draft', ...platformAuth, handleDraftSave);
+  app.put('/api/platform/governance/config/draft', ...platformAuth, handleDraftSave);
+
+  app.post('/api/platform/governance/config/publish', ...platformAuth, async (req, res) => {
+    const db = getAdminDb();
+    if (!db) return res.status(503).json({ error: 'Platform service is not configured.' });
+    try {
+      const justification = String(req.body?.justification || '').trim();
+      const expectedVersion = Number(req.body?.expectedVersion);
+      const candidateConfig = req.body?.candidateConfig || req.body?.config;
+      const adminUser = {
+        uid: (req as any).user?.uid || 'superadmin',
+        email: (req as any).user?.email || 'superadmin@markithub.internal',
+      };
+
+      if (expectedVersion === undefined || expectedVersion === null || Number.isNaN(expectedVersion)) {
+        return res.status(400).json({ error: 'expectedVersion number is required for optimistic concurrency check.' });
+      }
+
+      const result = await publishPlatformConfig(db, adminUser, justification, expectedVersion, candidateConfig);
+      return res.json({
+        success: true,
+        published: result.published,
+        newVersion: result.newVersion,
+      });
+    } catch (err: any) {
+      const status = err?.message?.includes('conflict') ? 409 : (err?.message?.includes('justification') || err?.message?.includes('invalid') ? 400 : 500);
+      return res.status(status).json({ error: err?.message || 'Failed to publish platform configuration.' });
+    }
+  });
+
+  app.post('/api/platform/governance/config/rollback', ...platformAuth, async (req, res) => {
+    const db = getAdminDb();
+    if (!db) return res.status(503).json({ error: 'Platform service is not configured.' });
+    try {
+      const targetVersion = Number(req.body?.targetVersion);
+      const justification = String(req.body?.justification || '').trim();
+      const expectedCurrentVersion = req.body?.expectedCurrentVersion !== undefined
+        ? Number(req.body.expectedCurrentVersion)
+        : (req.body?.expectedVersion !== undefined ? Number(req.body.expectedVersion) : undefined);
+      const adminUser = {
+        uid: (req as any).user?.uid || 'superadmin',
+        email: (req as any).user?.email || 'superadmin@markithub.internal',
+      };
+
+      if (!targetVersion || Number.isNaN(targetVersion)) {
+        return res.status(400).json({ error: 'Valid targetVersion number is required.' });
+      }
+
+      const result = await rollbackPlatformConfig(db, adminUser, targetVersion, justification, expectedCurrentVersion);
+      return res.json({
+        success: true,
+        published: result.published,
+        newVersion: result.newVersion,
+      });
+    } catch (err: any) {
+      const status = err?.message?.toLowerCase()?.includes('conflict') ? 409 : (err?.message?.includes('not found') ? 404 : (err?.message?.includes('justification') ? 400 : 500));
+      return res.status(status).json({ error: err?.message || 'Failed to rollback platform configuration.' });
     }
   });
 

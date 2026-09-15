@@ -291,6 +291,8 @@ export function calculateTenantHealth(input: {
   hasPaymentFailure?: boolean;
   lastActivityAt?: string | null;
   createdAt?: string | null;
+  warningUsagePercent?: number;
+  criticalUsagePercent?: number;
 }): TenantHealthInfo {
   const reasons: string[] = [];
   let score = 100;
@@ -301,6 +303,8 @@ export function calculateTenantHealth(input: {
   const usagePercent = Number(input.usagePercent || 0);
   const overrideActive = Boolean(input.overrideActive);
   const hasPaymentFailure = Boolean(input.hasPaymentFailure);
+  const warningUsagePercent = Number(input.warningUsagePercent ?? 80);
+  const criticalUsagePercent = Number(input.criticalUsagePercent ?? 100);
 
   if (provisioning === 'failed') {
     score -= 100;
@@ -327,15 +331,15 @@ export function calculateTenantHealth(input: {
     reasons.push('Subscription payment past due / failed');
   }
 
-  if (usagePercent >= 100 && !overrideActive) {
+  if (usagePercent >= criticalUsagePercent && !overrideActive) {
     score -= 50;
-    reasons.push('Monthly order limit exceeded (100%+)');
-  } else if (usagePercent >= 100 && overrideActive) {
+    reasons.push(`Monthly order limit exceeded (${criticalUsagePercent}%+)`);
+  } else if (usagePercent >= criticalUsagePercent && overrideActive) {
     score -= 15;
     reasons.push('Monthly order limit exceeded with active override');
-  } else if (usagePercent >= 80) {
+  } else if (usagePercent >= warningUsagePercent) {
     score -= 20;
-    reasons.push('Monthly order usage near limit (80%+)');
+    reasons.push(`Monthly order usage near limit (${warningUsagePercent}%+)`);
   }
 
   if (lifecycle === 'provisioning' && provisioning === 'pending') {
@@ -364,11 +368,11 @@ export function calculateTenantHealth(input: {
     subscription === 'suspended' ||
     subscription === 'cancelled' ||
     subscription === 'past_due' ||
-    (usagePercent >= 100 && !overrideActive) ||
+    (usagePercent >= criticalUsagePercent && !overrideActive) ||
     healthScore < 50
   ) {
     status = 'CRITICAL';
-  } else if (healthScore < 90 || usagePercent >= 80 || lifecycle === 'provisioning' || hasPaymentFailure) {
+  } else if (healthScore < 90 || usagePercent >= warningUsagePercent || lifecycle === 'provisioning' || hasPaymentFailure) {
     status = 'AT_RISK';
   }
 

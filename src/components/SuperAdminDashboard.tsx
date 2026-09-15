@@ -54,8 +54,20 @@ import {
   Pie,
   Cell,
 } from 'recharts';
+import PlatformGovernanceSection from './PlatformGovernanceSection';
 
-type Tab = 'overview' | 'operations' | 'alerts' | 'notifications' | 'analytics_revenue' | 'analytics_usage' | 'analytics_health' | 'tenants' | 'plans' | 'billing';
+type Tab =
+  | 'overview'
+  | 'operations'
+  | 'alerts'
+  | 'notifications'
+  | 'analytics_revenue'
+  | 'analytics_usage'
+  | 'analytics_health'
+  | 'tenants'
+  | 'plans'
+  | 'billing'
+  | 'governance';
 type TimeframeOption = 'today' | '7d' | '30d' | '90d' | '12m';
 
 interface Plan {
@@ -738,6 +750,7 @@ export default function SuperAdminDashboard() {
     ['tenants', 'Tenant Provisioning', UserPlus],
     ['plans', 'Plans & Pricing', Layers3],
     ['billing', 'Billing Events', CreditCard],
+    ['governance', 'Platform Governance', Settings2],
   ];
 
   return (
@@ -2612,6 +2625,10 @@ export default function SuperAdminDashboard() {
                 </div>
               </div>
             </div>
+          )}
+
+          {tab === 'governance' && (
+            <PlatformGovernanceSection />
           )}
         </>
       )}
