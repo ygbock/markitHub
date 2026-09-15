@@ -41,6 +41,10 @@ import {
   updateEscalationPolicy,
   updateNotificationPreferences,
 } from './platformNotificationControlPlane';
+import {
+  getSchedulerStatus,
+  runPlatformJob,
+} from './platformScheduler';
 
 interface PlatformRouteDeps {
   app: Express;
@@ -200,6 +204,40 @@ export function registerPlatformAdminRoutes({
       });
     } catch (err: any) {
       return res.status(500).json({ error: err?.message || 'Unable to load platform operations overview.' });
+    }
+  });
+
+  app.get('/api/platform/operations/scheduler', ...platformAuth, async (_req, res) => {
+    const db = getAdminDb();
+    if (!db) return res.status(503).json({ error: 'Platform service is not configured.' });
+    try {
+      const status = await getSchedulerStatus(db);
+      return res.json({
+        success: true,
+        scheduler: status,
+      });
+    } catch (err: any) {
+      return res.status(500).json({ error: err?.message || 'Unable to fetch platform scheduler status.' });
+    }
+  });
+
+  app.post('/api/platform/operations/scheduler/run', ...platformAuth, async (req, res) => {
+    const db = getAdminDb();
+    if (!db) return res.status(503).json({ error: 'Platform service is not configured.' });
+    try {
+      const jobName = String(req.body?.jobName || 'health').toLowerCase();
+      if (!['health', 'escalation', 'notifications'].includes(jobName)) {
+        return res.status(400).json({ error: "Invalid jobName. Must be 'health', 'escalation', or 'notifications'." });
+      }
+
+      const result = await runPlatformJob(db, jobName as any);
+      return res.json({
+        success: true,
+        jobName,
+        result,
+      });
+    } catch (err: any) {
+      return res.status(500).json({ error: err?.message || 'Failed to trigger scheduled job.' });
     }
   });
 

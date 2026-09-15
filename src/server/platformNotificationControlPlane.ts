@@ -741,3 +741,53 @@ export async function markAllNotificationsAsRead(
   await batch.commit();
   return { count: snap.size };
 }
+
+/**
+ * Scans for pending or failed notifications with remaining retries and dispatches them.
+ */
+export async function processPendingNotifications(
+  db: any,
+  options?: { batchLimit?: number }
+): Promise<{
+  processedCount: number;
+  deliveredCount: number;
+  failedCount: number;
+}> {
+  const limit = options?.batchLimit || 50;
+  const snap = await db
+    .collection('platform_notifications')
+    .where('deliveryStatus', 'in', ['PENDING', 'FAILED'])
+    .limit(limit)
+    .get();
+
+  if (snap.empty) {
+    return { processedCount: 0, deliveredCount: 0, failedCount: 0 };
+  }
+
+  let processedCount = 0;
+  let deliveredCount = 0;
+  let failedCount = 0;
+
+  for (const doc of snap.docs) {
+    const data = doc.data() as PlatformNotification;
+    processedCount++;
+
+    if (data.retryCount >= 3) {
+      failedCount++;
+      continue;
+    }
+
+    try {
+      const dispatched = await dispatchNotificationDelivery(db, doc.id);
+      if (dispatched.deliveryStatus === 'DELIVERED') {
+        deliveredCount++;
+      } else {
+        failedCount++;
+      }
+    } catch {
+      failedCount++;
+    }
+  }
+
+  return { processedCount, deliveredCount, failedCount };
+}

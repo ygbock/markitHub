@@ -14,6 +14,7 @@ import {
   CheckCircle2,
   ChevronRight,
   Clock,
+  Cpu,
   CreditCard,
   DollarSign,
   Filter,
@@ -22,6 +23,7 @@ import {
   Layers3,
   Loader2,
   PieChart as PieChartIcon,
+  Play,
   Plus,
   RefreshCw,
   Search,
@@ -223,6 +225,8 @@ export default function SuperAdminDashboard() {
   const [meteredUsage, setMeteredUsage] = useState<MeteredUsageRow[]>([]);
   const [billing, setBilling] = useState<BillingData | null>(null);
   const [operations, setOperations] = useState<any | null>(null);
+  const [scheduler, setScheduler] = useState<any | null>(null);
+  const [triggeringJob, setTriggeringJob] = useState<string | null>(null);
 
   const [analyticsOverview, setAnalyticsOverview] = useState<any | null>(null);
   const [analyticsTenants, setAnalyticsTenants] = useState<any[]>([]);
@@ -542,6 +546,7 @@ export default function SuperAdminDashboard() {
         notificationSummaryRes,
         notificationPreferencesRes,
         escalationsRes,
+        schedulerRes,
       ] = await Promise.all([
         apiFetch<any>('/api/platform/operations/overview'),
         apiFetch<DashboardData>('/api/platform/dashboard'),
@@ -561,8 +566,10 @@ export default function SuperAdminDashboard() {
         apiFetch<any>('/api/platform/notifications/summary'),
         apiFetch<{ preferences: any }>('/api/platform/notification-preferences'),
         apiFetch<{ policies: any[] }>('/api/platform/escalation-policies'),
+        apiFetch<any>('/api/platform/operations/scheduler'),
       ]);
       setOperations(operationsRes);
+      setScheduler(schedulerRes?.scheduler || null);
       setDashboard(dashboardRes);
       setPlans(plansRes.plans || []);
       setTenants(tenantsRes.tenants || []);
@@ -593,6 +600,21 @@ export default function SuperAdminDashboard() {
       setLoading(false);
     }
   }, [provisionForm.planId, timeframe]);
+
+  const handleTriggerJob = async (jobName: 'health' | 'escalation' | 'notifications') => {
+    setTriggeringJob(jobName);
+    try {
+      await apiFetch('/api/platform/operations/scheduler/run', {
+        method: 'POST',
+        body: JSON.stringify({ jobName }),
+      });
+      await loadAll();
+    } catch (err) {
+      console.error('Failed to trigger scheduled job:', err);
+    } finally {
+      setTriggeringJob(null);
+    }
+  };
 
   useEffect(() => { loadAll(); }, [loadAll]);
 
@@ -868,6 +890,133 @@ export default function SuperAdminDashboard() {
                     ))}
                     {!operations?.recentActivity?.length && <div className="rounded-xl bg-slate-50 p-4 text-xs text-slate-500">No recent operational activity.</div>}
                   </div>
+                </div>
+              </div>
+
+              {/* Platform Automation & Scheduled Orchestration */}
+              <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <Cpu className="h-5 w-5 text-indigo-600" />
+                      <h3 className="text-sm font-black text-slate-900">Platform Automation & Scheduled Orchestration</h3>
+                      <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-black uppercase tracking-wider ${
+                        scheduler?.enabled !== false ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'
+                      }`}>
+                        {scheduler?.enabled !== false ? 'Active' : 'Disabled'}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-xs text-slate-500">
+                      Server-authoritative background evaluators executing distributed-lock leases for platform health, SLA escalations, and notification delivery.
+                    </p>
+                  </div>
+                  {scheduler?.instanceId && (
+                    <div className="text-[11px] font-semibold text-slate-400">
+                      Instance: <span className="font-mono text-slate-600">{scheduler.instanceId}</span>
+                    </div>
+                  )}
+                </div>
+
+                <div className="grid gap-4 md:grid-cols-3">
+                  {[
+                    {
+                      id: 'health' as const,
+                      title: 'Health Sweep Engine',
+                      description: 'Evaluates tenant lifecycle, billing, and metered usage limits',
+                      job: (scheduler?.jobs || []).find((j: any) => j.jobName === 'health'),
+                    },
+                    {
+                      id: 'escalation' as const,
+                      title: 'SLA Escalation Engine',
+                      description: 'Escalates unacknowledged alerts exceeding threshold policies',
+                      job: (scheduler?.jobs || []).find((j: any) => j.jobName === 'escalation'),
+                    },
+                    {
+                      id: 'notifications' as const,
+                      title: 'Notification Pipeline',
+                      description: 'Dispatches queued notifications and handles retry policies',
+                      job: (scheduler?.jobs || []).find((j: any) => j.jobName === 'notifications'),
+                    },
+                  ].map(({ id, title, description, job }) => {
+                    const status = job?.status || 'idle';
+                    const isRunning = triggeringJob === id || status === 'running';
+                    const badgeClass =
+                      status === 'healthy'
+                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                        : status === 'running'
+                        ? 'bg-indigo-50 text-indigo-700 border-indigo-200 animate-pulse'
+                        : status === 'failed'
+                        ? 'bg-rose-50 text-rose-700 border-rose-200'
+                        : 'bg-slate-50 text-slate-600 border-slate-200';
+
+                    return (
+                      <div key={id} className="flex flex-col justify-between rounded-xl border border-slate-100 bg-slate-50/50 p-4">
+                        <div>
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-black text-slate-900">{title}</span>
+                            <span className={`rounded-full border px-2 py-0.5 text-[10px] font-black uppercase ${badgeClass}`}>
+                              {status}
+                            </span>
+                          </div>
+                          <p className="mt-1 text-[11px] text-slate-500 leading-relaxed">{description}</p>
+
+                          <div className="mt-3 space-y-1.5 border-t border-slate-100 pt-2 text-[11px]">
+                            <div className="flex justify-between text-slate-600">
+                              <span>Last run:</span>
+                              <span className="font-semibold text-slate-800">
+                                {job?.lastCompletedAt ? dateLabel(job.lastCompletedAt) : 'Never'}
+                              </span>
+                            </div>
+                            {job?.lastDurationMs !== undefined && (
+                              <div className="flex justify-between text-slate-600">
+                                <span>Duration:</span>
+                                <span className="font-semibold text-slate-800">{job.lastDurationMs}ms</span>
+                              </div>
+                            )}
+                            {job?.lastProcessedCount !== undefined && (
+                              <div className="flex justify-between text-slate-600">
+                                <span>Processed items:</span>
+                                <span className="font-semibold text-slate-800">{job.lastProcessedCount}</span>
+                              </div>
+                            )}
+                            {job?.lastCreatedAlerts !== undefined && job.lastCreatedAlerts > 0 && (
+                              <div className="flex justify-between text-slate-600">
+                                <span>Alerts created:</span>
+                                <span className="font-semibold text-rose-600">+{job.lastCreatedAlerts}</span>
+                              </div>
+                            )}
+                            {job?.lastResolvedAlerts !== undefined && job.lastResolvedAlerts > 0 && (
+                              <div className="flex justify-between text-slate-600">
+                                <span>Alerts resolved:</span>
+                                <span className="font-semibold text-emerald-600">-{job.lastResolvedAlerts}</span>
+                              </div>
+                            )}
+                            {job?.lastError && (
+                              <div className="mt-1 text-[10px] font-medium text-rose-600 truncate">
+                                Error: {job.lastError}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="mt-4 pt-2">
+                          <button
+                            type="button"
+                            onClick={() => handleTriggerJob(id)}
+                            disabled={isRunning || loading}
+                            className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 shadow-sm hover:bg-slate-100 disabled:opacity-60"
+                          >
+                            {isRunning ? (
+                              <Loader2 className="h-3 w-3 animate-spin text-indigo-600" />
+                            ) : (
+                              <Play className="h-3 w-3 text-indigo-600" />
+                            )}
+                            {isRunning ? 'Running...' : 'Run Sweep Now'}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
 

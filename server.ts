@@ -49,6 +49,7 @@ import {
 } from './src/server/tenantOwnershipAuth';
 import { assertPlatformAdmin } from './src/server/platformAdminAuth';
 import { registerPlatformAdminRoutes } from './src/server/platformAdminRoutes';
+import { startPlatformScheduler, stopPlatformScheduler } from './src/server/platformScheduler';
 import { addUsageEventToTransaction, evaluateUsageLimit, usagePeriod, usageMeterId, USAGE_METER_COLLECTION } from './src/server/platformUsageMeter';
 import { DEFAULT_PLATFORM_PLANS } from './src/server/platformAdminControlPlane';
 import {
@@ -3422,9 +3423,24 @@ ${urls}</urlset>`;
     }
   });
 
-  app.listen(PORT, HOST, () => {
+  const server = app.listen(PORT, HOST, () => {
     console.log(`POS-Commerce Suite Server running on http://${HOST}:${PORT}`);
+    const adminDb = getAdminDb();
+    if (adminDb && process.env.NODE_ENV !== 'test') {
+      startPlatformScheduler(adminDb);
+    }
   });
+
+  const handleShutdown = async () => {
+    try {
+      await stopPlatformScheduler(getAdminDb());
+    } catch {
+      // ignore on shutdown
+    }
+  };
+
+  process.on('SIGTERM', handleShutdown);
+  process.on('SIGINT', handleShutdown);
 }
 
 startServer();
