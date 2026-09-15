@@ -46,8 +46,8 @@ function cleanSubscriptionStatus(value: unknown): SubscriptionStatus {
 }
 
 function cleanLifecycleStatus(value: unknown): TenantLifecycleStatus {
-  return ['provisioning', 'trialing', 'active', 'suspended', 'cancelled'].includes(String(value))
-    ? String(value) as TenantLifecycleStatus
+  return ['provisioning', 'trialing', 'active', 'suspended', 'archived', 'cancelled'].includes(String(value))
+    ? (String(value) as TenantLifecycleStatus)
     : 'active';
 }
 
@@ -628,35 +628,53 @@ export function registerPlatformAdminRoutes({
   app.patch('/api/platform/tenants/:tenantId/lifecycle', ...platformAuth, async (req, res) => {
     const db = getAdminDb();
     const tenantId = String(req.params.tenantId || '').trim();
-    const rawLifecycle = String(req.body?.lifecycleStatus || '').trim();
-    const nextLifecycle = cleanLifecycleStatus(rawLifecycle);
+    const rawLifecycle = String(req.body?.status || req.body?.lifecycleStatus || '').trim().toLowerCase();
     const reason = String(req.body?.reason || '').trim();
-    if (!db) return res.status(503).json({ error: 'Platform service is not configured.' });
-    if (!tenantId) return res.status(400).json({ error: 'Tenant ID is required.' });
-    if (!['provisioning', 'trialing', 'active', 'suspended', 'cancelled'].includes(rawLifecycle)) {
-      return res.status(400).json({ error: 'Invalid tenant lifecycle status.' });
+    if (!db) return res.status(503).json({ error: 'Platform service is not configured.', code: 'SERVICE_UNAVAILABLE' });
+    if (!tenantId) return res.status(400).json({ error: 'Tenant ID is required.', code: 'INVALID_REQUEST' });
+    if (!['provisioning', 'trialing', 'active', 'suspended', 'archived', 'cancelled'].includes(rawLifecycle)) {
+      return res.status(400).json({ error: 'Invalid tenant lifecycle status.', code: 'INVALID_STATUS' });
     }
-    if (!reason) return res.status(400).json({ error: 'A reason is required for tenant lifecycle changes.' });
+    if (!reason) {
+      return res.status(400).json({ error: 'A reason is required for tenant lifecycle changes.', code: 'AUDIT_REASON_REQUIRED' });
+    }
+
+    const nextLifecycle = cleanLifecycleStatus(rawLifecycle);
 
     try {
       let resultTenant: any = null;
+      let auditEventId = '';
       await db.runTransaction(async (transaction: any) => {
         const tenantRef = db.collection('tenants').doc(tenantId);
         const tenantSnap = await transaction.get(tenantRef);
-        if (!tenantSnap.exists) throw Object.assign(new Error(`Tenant '${tenantId}' not found.`), { statusCode: 404 });
+        if (!tenantSnap.exists) {
+          throw Object.assign(new Error(`Tenant '${tenantId}' not found.`), { statusCode: 404, code: 'TENANT_NOT_FOUND' });
+        }
         const data = tenantSnap.data() as any;
         const currentLifecycle = cleanLifecycleStatus(data.lifecycleStatus || data.status);
         assertLifecycleTransition(currentLifecycle, nextLifecycle);
         const now = new Date().toISOString();
-        const operationalStatus = nextLifecycle === 'suspended' ? 'suspended' : nextLifecycle === 'cancelled' ? 'cancelled' : 'active';
+        const operationalStatus = nextLifecycle;
         const subscription = { ...(data.subscription || {}) };
-        if (nextLifecycle === 'suspended') subscription.status = 'suspended';
-        if (nextLifecycle === 'cancelled') subscription.status = 'cancelled';
-        if (nextLifecycle === 'active') subscription.status = 'active';
-        if (nextLifecycle === 'trialing' && !['trialing', 'active'].includes(String(subscription.status || ''))) {
+        if (nextLifecycle === 'suspended' || nextLifecycle === 'archived') {
+          subscription.status = 'suspended';
+        } else if (nextLifecycle === 'cancelled') {
+          subscription.status = 'cancelled';
+        } else if (nextLifecycle === 'active') {
+          subscription.status = 'active';
+        } else if (nextLifecycle === 'trialing' && !['trialing', 'active'].includes(String(subscription.status || ''))) {
           subscription.status = 'trialing';
         }
         assertLifecycleSubscriptionConsistency(nextLifecycle, cleanSubscriptionStatus(subscription.status));
+
+        const actionName =
+          nextLifecycle === 'suspended'
+            ? 'TENANT_LIFECYCLE_SUSPENDED'
+            : nextLifecycle === 'active'
+            ? 'TENANT_LIFECYCLE_ACTIVE'
+            : nextLifecycle === 'archived'
+            ? 'TENANT_LIFECYCLE_ARCHIVED'
+            : `TENANT_LIFECYCLE_${nextLifecycle.toUpperCase()}`;
 
         const audit = createAuthoritativeAuditRecord({
           tenantId,
@@ -664,7 +682,7 @@ export function registerPlatformAdminRoutes({
           actorName: req.user!.email || req.user!.uid,
           actorEmail: req.user!.email || null,
           actorRole: 'Super Admin',
-          action: `TENANT_LIFECYCLE_${nextLifecycle.toUpperCase()}`,
+          action: actionName,
           module: 'Tenant Lifecycle',
           targetType: 'tenant',
           targetId: tenantId,
@@ -675,8 +693,9 @@ export function registerPlatformAdminRoutes({
           result: 'success',
           severity: 'critical',
           details: reason,
-          metadata: { platformAdmin: true },
+          metadata: { platformAdmin: true, transition: `${currentLifecycle} -> ${nextLifecycle}` },
         });
+        auditEventId = audit.id;
         await updateAuthoritativeSecurityMetrics(db, audit, transaction);
         transaction.set(tenantRef, { lifecycleStatus: nextLifecycle, status: operationalStatus, subscription, updatedAt: now }, { merge: true });
         transaction.set(db.collection('audit_logs').doc(audit.id), audit);
@@ -694,9 +713,11 @@ export function registerPlatformAdminRoutes({
         });
         resultTenant = { id: tenantId, ...data, lifecycleStatus: nextLifecycle, status: operationalStatus, subscription, updatedAt: now };
       });
-      return res.json({ success: true, tenant: resultTenant });
+      return res.json({ success: true, tenant: resultTenant, auditEventId });
     } catch (err: any) {
-      return res.status(err?.statusCode || 400).json({ error: err?.message || 'Tenant lifecycle update failed.' });
+      const statusCode = err?.statusCode || 400;
+      const code = err?.code || (statusCode === 404 ? 'TENANT_NOT_FOUND' : 'INVALID_REQUEST');
+      return res.status(statusCode).json({ error: err?.message || 'Tenant lifecycle update failed.', code });
     }
   });
 

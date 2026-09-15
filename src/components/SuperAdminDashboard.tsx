@@ -50,7 +50,7 @@ interface Tenant {
   id: string;
   name: string;
   status: string;
-  lifecycleStatus: 'provisioning' | 'trialing' | 'active' | 'suspended' | 'cancelled';
+  lifecycleStatus: 'provisioning' | 'trialing' | 'active' | 'suspended' | 'archived' | 'cancelled';
   ownerUid?: string;
   ownerEmail?: string;
   slug?: string;
@@ -140,10 +140,16 @@ const money = (amount: number, currency = 'USD') =>
 const dateLabel = (value?: string) => value ? new Date(value).toLocaleDateString() : '—';
 
 function StatusPill({ value }: { value: string }) {
-  const normalized = value.replace('_', ' ');
+  const norm = String(value || '').toLowerCase().replace('_', ' ');
+  let color = 'border-slate-200 bg-slate-50 text-slate-600';
+  if (norm === 'active') color = 'border-emerald-200 bg-emerald-50 text-emerald-700';
+  if (norm === 'suspended') color = 'border-amber-200 bg-amber-50 text-amber-700';
+  if (norm === 'archived') color = 'border-purple-200 bg-purple-50 text-purple-700';
+  if (norm === 'cancelled') color = 'border-rose-200 bg-rose-50 text-rose-700';
+  if (norm === 'trialing') color = 'border-indigo-200 bg-indigo-50 text-indigo-700';
   return (
-    <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[10px] font-black uppercase tracking-wider text-slate-600">
-      {normalized}
+    <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[10px] font-black uppercase tracking-wider ${color}`}>
+      {norm}
     </span>
   );
 }
@@ -161,6 +167,11 @@ export default function SuperAdminDashboard() {
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [selectedTenant, setSelectedTenant] = useState<Tenant | null>(null);
+  const [lifecycleModal, setLifecycleModal] = useState<{
+    tenant: Tenant;
+    targetStatus: 'active' | 'suspended' | 'archived';
+    reason: string;
+  } | null>(null);
 
   const [usageSearch, setUsageSearch] = useState('');
   const [usageStateFilter, setUsageStateFilter] = useState<'all' | 'healthy' | 'warning' | 'exceeded'>('all');
@@ -311,17 +322,19 @@ export default function SuperAdminDashboard() {
     }
   };
 
-  const changeLifecycle = async (tenant: Tenant, lifecycleStatus: Tenant['lifecycleStatus']) => {
-    const reason = window.prompt(`Reason for changing ${tenant.name} to ${lifecycleStatus}:`);
-    if (!reason?.trim()) return;
+  const executeLifecycleChange = async () => {
+    if (!lifecycleModal) return;
+    const { tenant, targetStatus, reason } = lifecycleModal;
+    if (!reason.trim()) return;
     setBusy(`lifecycle:${tenant.id}`);
     setError(null);
     try {
       await apiFetch(`/api/platform/tenants/${encodeURIComponent(tenant.id)}/lifecycle`, {
         method: 'PATCH',
-        body: JSON.stringify({ lifecycleStatus, reason: reason.trim() }),
+        body: JSON.stringify({ status: targetStatus, reason: reason.trim() }),
       });
-      setNotice(`${tenant.name} lifecycle changed to ${lifecycleStatus}.`);
+      setNotice(`${tenant.name} lifecycle updated to ${targetStatus}.`);
+      setLifecycleModal(null);
       await loadAll();
     } catch (err: any) {
       setError(err?.message || 'Tenant lifecycle update failed.');
@@ -561,13 +574,118 @@ export default function SuperAdminDashboard() {
                         <td className="px-5 py-4"><select value={tenant.subscription.planId} disabled={busy === `subscription:${tenant.id}`} onChange={e => changeSubscription(tenant, e.target.value, tenant.subscription.interval)} className="rounded-lg border border-slate-200 px-2 py-1.5 text-xs font-bold">{activePlans.map(plan => <option key={plan.id} value={plan.id}>{plan.name}</option>)}</select></td>
                         <td className="px-5 py-4"><select value={tenant.subscription.interval} onChange={e => changeSubscription(tenant, tenant.subscription.planId, e.target.value as 'monthly' | 'annual')} className="rounded-lg border border-slate-200 px-2 py-1.5 text-xs font-bold"><option value="monthly">Monthly</option><option value="annual">Annual</option></select><div className="mt-1 text-[10px] text-slate-500">{tenant.subscription.status} · {money(tenant.subscription.price, tenant.subscription.currency)}</div></td>
                         <td className="px-5 py-4 text-xs text-slate-500">{dateLabel(tenant.subscription.currentPeriodEnd)}</td>
-                        <td className="px-5 py-4 text-right"><select value="" onChange={e => { if (e.target.value) changeLifecycle(tenant, e.target.value as Tenant['lifecycleStatus']); e.currentTarget.value = ''; }} className="rounded-lg border border-slate-200 px-2 py-1.5 text-xs font-bold"><option value="">Change state…</option><option value="active">Activate</option><option value="suspended">Suspend</option><option value="cancelled">Cancel</option></select></td>
+                        <td className="px-5 py-4 text-right">
+                          <select
+                            value=""
+                            disabled={tenant.lifecycleStatus === 'cancelled' || busy === `lifecycle:${tenant.id}`}
+                            onChange={e => {
+                              if (e.target.value) {
+                                setLifecycleModal({
+                                  tenant,
+                                  targetStatus: e.target.value as 'active' | 'suspended' | 'archived',
+                                  reason: '',
+                                });
+                              }
+                              e.currentTarget.value = '';
+                            }}
+                            className="rounded-lg border border-slate-200 px-2 py-1.5 text-xs font-bold disabled:opacity-50"
+                          >
+                            <option value="">Actions…</option>
+                            {tenant.lifecycleStatus !== 'active' && tenant.lifecycleStatus !== 'cancelled' && (
+                              <option value="active">Reactivate</option>
+                            )}
+                            {tenant.lifecycleStatus === 'active' && (
+                              <option value="suspended">Suspend</option>
+                            )}
+                            {tenant.lifecycleStatus !== 'archived' && tenant.lifecycleStatus !== 'cancelled' && (
+                              <option value="archived">Archive</option>
+                            )}
+                          </select>
+                        </td>
                       </tr>)}
                     </tbody>
                   </table>
                   {!tenants.length && <div className="p-10 text-center text-sm text-slate-500">No tenants found.</div>}
                 </div>
               </div>
+
+              {lifecycleModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4" role="dialog" aria-modal="true" aria-label="Confirm lifecycle transition">
+                  <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl">
+                    <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+                      <div>
+                        <span className="text-[10px] font-black uppercase tracking-widest text-indigo-600">Tenant Lifecycle Action</span>
+                        <h3 className="text-lg font-black text-slate-900">
+                          {lifecycleModal.targetStatus === 'suspended'
+                            ? 'Suspend Tenant'
+                            : lifecycleModal.targetStatus === 'archived'
+                            ? 'Archive Tenant'
+                            : 'Reactivate Tenant'}
+                        </h3>
+                      </div>
+                      <button onClick={() => setLifecycleModal(null)} className="rounded-xl p-1.5 hover:bg-slate-100"><X className="h-5 w-5" /></button>
+                    </div>
+                    <div className="mt-4 space-y-3">
+                      <div className="rounded-2xl bg-slate-50 p-3 text-xs">
+                        <div><strong>Target Tenant:</strong> {lifecycleModal.tenant.name}</div>
+                        <div className="font-mono text-[10px] text-slate-500">{lifecycleModal.tenant.id}</div>
+                        <div className="mt-1 text-slate-600">Current status: <span className="font-bold">{lifecycleModal.tenant.lifecycleStatus}</span></div>
+                      </div>
+
+                      {lifecycleModal.targetStatus === 'archived' && (
+                        <div className="rounded-2xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-800">
+                          <strong>Warning:</strong> Archiving permanently disables normal tenant operations and storefront checkout. Tenant data will be retained in Firestore.
+                        </div>
+                      )}
+
+                      {lifecycleModal.targetStatus === 'suspended' && (
+                        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+                          <strong>Notice:</strong> Suspending blocks all order processing and staff operations until reactivated.
+                        </div>
+                      )}
+
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700">
+                          Mandatory Audit Reason <span className="text-rose-500">*</span>
+                        </label>
+                        <textarea
+                          rows={3}
+                          required
+                          value={lifecycleModal.reason}
+                          onChange={e => setLifecycleModal(prev => prev ? { ...prev, reason: e.target.value } : null)}
+                          placeholder="Provide an administrative reason for this transition (e.g., Non-payment overdue 60 days, Account retired, Verification completed)"
+                          className="mt-1 w-full rounded-xl border border-slate-200 p-3 text-xs outline-none focus:border-indigo-500"
+                        />
+                      </div>
+
+                      <div className="flex items-center justify-end gap-2 pt-2">
+                        <button
+                          type="button"
+                          onClick={() => setLifecycleModal(null)}
+                          className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          disabled={!lifecycleModal.reason.trim() || busy === `lifecycle:${lifecycleModal.tenant.id}`}
+                          onClick={executeLifecycleChange}
+                          className={`inline-flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-black text-white ${
+                            lifecycleModal.targetStatus === 'archived'
+                              ? 'bg-rose-600 hover:bg-rose-700'
+                              : lifecycleModal.targetStatus === 'suspended'
+                              ? 'bg-amber-600 hover:bg-amber-700'
+                              : 'bg-emerald-600 hover:bg-emerald-700'
+                          } disabled:opacity-50`}
+                        >
+                          {busy === `lifecycle:${lifecycleModal.tenant.id}` && <Loader2 className="h-3.5 w-3.5 animate-spin text-white" />}
+                          Confirm {lifecycleModal.targetStatus}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {selectedTenant && <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4" role="dialog" aria-modal="true" aria-label="Tenant details">
                 <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-3xl bg-white shadow-2xl">

@@ -190,6 +190,11 @@ export interface TenantSecurityMetricsDoc {
   rolePermissionChanges: number;
   ownershipEvents: number;
   failedDeniedOperations: number;
+  lifecycle?: {
+    suspended: number;
+    reactivated: number;
+    archived: number;
+  };
   dailyBuckets: Record<string, number>;
   updatedAt: string;
 }
@@ -247,16 +252,29 @@ export function applyEventToMetricsDoc(
   let rolePermissionChanges = Number(currentDoc?.rolePermissionChanges || 0);
   let ownershipEvents = Number(currentDoc?.ownershipEvents || 0);
   let failedDeniedOperations = Number(currentDoc?.failedDeniedOperations || 0);
+  const lifecycle = {
+    suspended: Number(currentDoc?.lifecycle?.suspended || 0),
+    reactivated: Number(currentDoc?.lifecycle?.reactivated || 0),
+    archived: Number(currentDoc?.lifecycle?.archived || 0),
+  };
 
   if (event.result === 'denied' || event.result === 'failed') {
     failedDeniedOperations += 1;
   } else {
     const actionUpper = String(event.action || '').toUpperCase();
     const detailsUpper = String(event.details || '').toUpperCase();
+    const isTenantLifecycle = event.module === 'Tenant Lifecycle' || actionUpper.startsWith('TENANT_LIFECYCLE_') || actionUpper.startsWith('TENANT_');
 
-    if (actionUpper.includes('SUSPEND') || detailsUpper.includes('SUSPENDED')) {
+    if (actionUpper === 'TENANT_SUSPENDED' || actionUpper === 'TENANT_LIFECYCLE_SUSPENDED') {
+      lifecycle.suspended += 1;
+    } else if (actionUpper === 'TENANT_REACTIVATED' || actionUpper === 'TENANT_LIFECYCLE_ACTIVE') {
+      lifecycle.reactivated += 1;
+    } else if (actionUpper === 'TENANT_ARCHIVED' || actionUpper === 'TENANT_LIFECYCLE_ARCHIVED') {
+      lifecycle.archived += 1;
+    } else if (!isTenantLifecycle && (actionUpper.includes('SUSPEND') || detailsUpper.includes('STAFF SUSPENDED'))) {
       staffSuspensions += 1;
     }
+
     if (
       actionUpper.includes('ROLE') ||
       actionUpper.includes('PERMISSION') ||
@@ -280,6 +298,7 @@ export function applyEventToMetricsDoc(
     rolePermissionChanges,
     ownershipEvents,
     failedDeniedOperations,
+    lifecycle,
     dailyBuckets: buckets,
     updatedAt: event.timestamp || new Date().toISOString(),
   };

@@ -553,7 +553,7 @@ test('Integration Test 2.5: Terminal state Cancelled rejects state transitions',
     superAdminToken,
   );
 
-  assert.equal(res.status, 400);
+  assert.equal(res.status, 409);
   assert.match(res.data.error, /Invalid tenant lifecycle transition/);
 });
 

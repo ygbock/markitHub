@@ -3,7 +3,7 @@ import type { TenantSecurityMetricsDoc } from './auditService';
 export type PlatformPlanStatus = 'active' | 'archived';
 export type BillingInterval = 'monthly' | 'annual';
 export type SubscriptionStatus = 'trialing' | 'active' | 'past_due' | 'suspended' | 'cancelled';
-export type TenantLifecycleStatus = 'provisioning' | 'trialing' | 'active' | 'suspended' | 'cancelled';
+export type TenantLifecycleStatus = 'provisioning' | 'trialing' | 'active' | 'suspended' | 'archived' | 'cancelled';
 
 export interface PlatformPlan {
   id: string;
@@ -126,18 +126,27 @@ export function normalizePlanInput(input: any, existing?: PlatformPlan): Platfor
 }
 
 export function assertLifecycleTransition(current: TenantLifecycleStatus, next: TenantLifecycleStatus): void {
-  if (current === next) throw new Error(`Tenant is already ${next}.`);
+  if (current === next) {
+    throw Object.assign(new Error(`Tenant is already ${next}.`), {
+      statusCode: 409,
+      code: 'INVALID_TENANT_LIFECYCLE_TRANSITION',
+    });
+  }
   const allowed: Record<TenantLifecycleStatus, TenantLifecycleStatus[]> = {
-    provisioning: ['trialing', 'active', 'cancelled'],
-    trialing: ['active', 'suspended', 'cancelled'],
-    active: ['suspended', 'cancelled'],
-    suspended: ['active', 'cancelled'],
+    provisioning: ['trialing', 'active', 'archived', 'cancelled'],
+    trialing: ['active', 'suspended', 'archived', 'cancelled'],
+    active: ['suspended', 'archived', 'cancelled'],
+    suspended: ['active', 'archived', 'cancelled'],
+    archived: ['active'],
     // Cancellation is terminal. A new subscription must be provisioned rather
     // than silently resurrecting a cancelled tenant.
     cancelled: [],
   };
-  if (!allowed[current].includes(next)) {
-    throw new Error(`Invalid tenant lifecycle transition: ${current} → ${next}.`);
+  if (!allowed[current]?.includes(next)) {
+    throw Object.assign(new Error(`Invalid tenant lifecycle transition: ${current} → ${next}.`), {
+      statusCode: 409,
+      code: 'INVALID_TENANT_LIFECYCLE_TRANSITION',
+    });
   }
 }
 
@@ -151,11 +160,15 @@ export function assertLifecycleSubscriptionConsistency(
     trialing: ['trialing', 'active'],
     active: ['active', 'past_due'],
     suspended: ['suspended'],
+    archived: ['suspended', 'cancelled'],
     cancelled: ['cancelled'],
   };
-  if (!allowed[lifecycle].includes(subscriptionStatus)) {
-    throw new Error(
-      `Invalid tenant/subscription state combination: lifecycle=${lifecycle}, subscription=${subscriptionStatus}.`,
+  if (!allowed[lifecycle]?.includes(subscriptionStatus)) {
+    throw Object.assign(
+      new Error(
+        `Invalid tenant/subscription state combination: lifecycle=${lifecycle}, subscription=${subscriptionStatus}.`,
+      ),
+      { statusCode: 409, code: 'INVALID_TENANT_LIFECYCLE_TRANSITION' },
     );
   }
 }

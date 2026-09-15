@@ -1097,6 +1097,14 @@ async function startServer() {
             });
           }
 
+          if (lifecycleStatus === 'archived' || subStatus === 'archived') {
+            return res.status(403).json({
+              success: false,
+              error: 'TENANT_ARCHIVED',
+              message: 'Tenant account is archived. Order creation is disabled.',
+            });
+          }
+
           if (lifecycleStatus === 'cancelled' || subStatus === 'cancelled') {
             return res.status(403).json({
               success: false,
