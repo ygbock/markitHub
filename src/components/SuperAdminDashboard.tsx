@@ -44,7 +44,7 @@ import {
   Cell,
 } from 'recharts';
 
-type Tab = 'overview' | 'analytics_revenue' | 'analytics_usage' | 'analytics_health' | 'tenants' | 'plans' | 'billing';
+type Tab = 'overview' | 'alerts' | 'analytics_revenue' | 'analytics_usage' | 'analytics_health' | 'tenants' | 'plans' | 'billing';
 type TimeframeOption = 'today' | '7d' | '30d' | '90d' | '12m';
 
 interface Plan {
@@ -220,6 +220,22 @@ export default function SuperAdminDashboard() {
   const [analyticsUsage, setAnalyticsUsage] = useState<any | null>(null);
   const [analyticsGrowth, setAnalyticsGrowth] = useState<any | null>(null);
 
+  const [alerts, setAlerts] = useState<any[]>([]);
+  const [alertSummary, setAlertSummary] = useState<any | null>(null);
+  const [alertSearch, setAlertSearch] = useState('');
+  const [alertSeverityFilter, setAlertSeverityFilter] = useState<'ALL' | 'CRITICAL' | 'WARNING' | 'INFO'>('ALL');
+  const [alertStatusFilter, setAlertStatusFilter] = useState<'ALL' | 'OPEN' | 'ACKNOWLEDGED' | 'RESOLVED' | 'DISMISSED'>('ALL');
+
+  const [selectedAlert, setSelectedAlert] = useState<any | null>(null);
+  const [selectedAlertDetail, setSelectedAlertDetail] = useState<any | null>(null);
+  const [loadingAlertDetail, setLoadingAlertDetail] = useState(false);
+
+  const [alertActionModal, setAlertActionModal] = useState<{
+    alert: any;
+    action: 'acknowledge' | 'resolve' | 'dismiss';
+    reason: string;
+  } | null>(null);
+
   const [healthSearch, setHealthSearch] = useState('');
   const [healthFilter, setHealthFilter] = useState<'ALL' | 'HEALTHY' | 'AT_RISK' | 'CRITICAL'>('ALL');
   const [lifecycleFilter, setLifecycleFilter] = useState<string>('ALL');
@@ -283,6 +299,69 @@ export default function SuperAdminDashboard() {
     }
   };
 
+  const filteredAlerts = useMemo(() => {
+    return alerts.filter(a => {
+      if (alertSeverityFilter !== 'ALL' && a.severity !== alertSeverityFilter) return false;
+      if (alertStatusFilter !== 'ALL' && a.status !== alertStatusFilter) return false;
+      if (alertSearch) {
+        const q = alertSearch.toLowerCase();
+        const match =
+          a.title?.toLowerCase().includes(q) ||
+          a.description?.toLowerCase().includes(q) ||
+          a.tenantId?.toLowerCase().includes(q) ||
+          a.tenantName?.toLowerCase().includes(q) ||
+          a.type?.toLowerCase().includes(q);
+        if (!match) return false;
+      }
+      return true;
+    });
+  }, [alerts, alertSeverityFilter, alertStatusFilter, alertSearch]);
+
+  const handleSelectAlert = async (alert: any) => {
+    setSelectedAlert(alert);
+    setLoadingAlertDetail(true);
+    try {
+      const detailRes = await apiFetch<any>(`/api/platform/alerts/${alert.alertId}`);
+      setSelectedAlertDetail(detailRes);
+    } catch (err: any) {
+      setError(err?.message || 'Unable to load alert details.');
+    } finally {
+      setLoadingAlertDetail(false);
+    }
+  };
+
+  const executeAlertAction = async () => {
+    if (!alertActionModal) return;
+    const { alert, action, reason } = alertActionModal;
+    if (!reason.trim()) {
+      setError('A mandatory administrative reason is required.');
+      return;
+    }
+    setBusy(`alert:${alert.alertId}:${action}`);
+    setError(null);
+    try {
+      await apiFetch(`/api/platform/alerts/${encodeURIComponent(alert.alertId)}/${action}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ reason: reason.trim() }),
+      });
+      setNotice(`Alert '${alert.title}' successfully ${action}d.`);
+      setAlertActionModal(null);
+      await loadAll();
+      if (selectedAlert?.alertId === alert.alertId) {
+        const updatedDetail = await apiFetch<any>(`/api/platform/alerts/${alert.alertId}`);
+        setSelectedAlertDetail(updatedDetail);
+      }
+    } catch (err: any) {
+      setError(err?.message || `Failed to ${action} alert.`);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const openAlertActionModal = (alert: any, action: 'acknowledge' | 'resolve' | 'dismiss') => {
+    setAlertActionModal({ alert, action, reason: '' });
+  };
+
   const [provisionForm, setProvisionForm] = useState({
     name: '',
     ownerUid: '',
@@ -322,6 +401,8 @@ export default function SuperAdminDashboard() {
         revenueRes,
         usageAnalyticsRes,
         growthRes,
+        alertsRes,
+        alertSummaryRes,
       ] = await Promise.all([
         apiFetch<DashboardData>('/api/platform/dashboard'),
         apiFetch<{ plans: Plan[] }>('/api/platform/plans'),
@@ -334,6 +415,8 @@ export default function SuperAdminDashboard() {
         apiFetch<any>(`/api/platform/analytics/revenue?timeframe=${timeframe}`),
         apiFetch<any>(`/api/platform/analytics/usage?timeframe=${timeframe}&limit=100`),
         apiFetch<any>(`/api/platform/analytics/growth?timeframe=${timeframe}`),
+        apiFetch<{ alerts: any[] }>('/api/platform/alerts?limit=100'),
+        apiFetch<{ summary: any }>('/api/platform/alerts/summary'),
       ]);
       setDashboard(dashboardRes);
       setPlans(plansRes.plans || []);
@@ -347,6 +430,9 @@ export default function SuperAdminDashboard() {
       setAnalyticsRevenue(revenueRes);
       setAnalyticsUsage(usageAnalyticsRes);
       setAnalyticsGrowth(growthRes);
+
+      setAlerts(alertsRes.alerts || []);
+      setAlertSummary(alertSummaryRes.summary || null);
 
       if (!provisionForm.planId && plansRes.plans?.[0]) {
         setProvisionForm(prev => ({ ...prev, planId: plansRes.plans[0].id }));
@@ -471,6 +557,7 @@ export default function SuperAdminDashboard() {
 
   const tabs: Array<[Tab, string, React.ElementType]> = [
     ['overview', 'Overview', Gauge],
+    ['alerts', 'Alerts & Incidents', ShieldAlert],
     ['analytics_revenue', 'Revenue Analytics', BadgeDollarSign],
     ['analytics_usage', 'Usage Analytics', Activity],
     ['analytics_health', 'Tenant Health', HeartPulse],
@@ -549,6 +636,222 @@ export default function SuperAdminDashboard() {
         </div>
       ) : (
         <>
+          {tab === 'alerts' && (
+            <div className="space-y-6">
+              {/* Header & Controls */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-xl font-black text-slate-900 flex items-center gap-2">
+                    <ShieldAlert className="h-6 w-6 text-rose-600" />
+                    Alert & Incident Control Plane
+                  </h2>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Server-authoritative platform alerts across Tenant Provisioning, Billing, Lifecycle, Usage, and Security.
+                  </p>
+                </div>
+                <button
+                  onClick={loadAll}
+                  disabled={loading}
+                  className="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-bold text-slate-700 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 shadow-sm"
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
+                  Sync Alerts
+                </button>
+              </div>
+
+              {/* KPI Summary Grid */}
+              <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+                <div className="rounded-2xl border border-rose-200 bg-rose-50/70 p-4">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-black uppercase tracking-wider text-rose-700">Critical Alerts</span>
+                    <AlertTriangle className="h-4 w-4 text-rose-600" />
+                  </div>
+                  <div className="mt-2 text-2xl font-black text-rose-950">{alertSummary?.criticalCount ?? 0}</div>
+                  <div className="mt-1 text-[11px] font-semibold text-rose-700">Requires immediate intervention</div>
+                </div>
+
+                <div className="rounded-2xl border border-amber-200 bg-amber-50/70 p-4">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-black uppercase tracking-wider text-amber-700">Warning Alerts</span>
+                    <Clock className="h-4 w-4 text-amber-600" />
+                  </div>
+                  <div className="mt-2 text-2xl font-black text-amber-950">{alertSummary?.warningCount ?? 0}</div>
+                  <div className="mt-1 text-[11px] font-semibold text-amber-700">Approaching limits or degraded</div>
+                </div>
+
+                <div className="rounded-2xl border border-indigo-200 bg-indigo-50/70 p-4">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-black uppercase tracking-wider text-indigo-700">Open Incidents</span>
+                    <Activity className="h-4 w-4 text-indigo-600" />
+                  </div>
+                  <div className="mt-2 text-2xl font-black text-indigo-950">{alertSummary?.openCount ?? 0}</div>
+                  <div className="mt-1 text-[11px] font-semibold text-indigo-700">Unacknowledged open events</div>
+                </div>
+
+                <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-4">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-black uppercase tracking-wider text-emerald-700">Resolved Today</span>
+                    <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                  </div>
+                  <div className="mt-2 text-2xl font-black text-emerald-950">{alertSummary?.resolvedTodayCount ?? 0}</div>
+                  <div className="mt-1 text-[11px] font-semibold text-emerald-700">Mitigated in last 24h</div>
+                </div>
+              </div>
+
+              {/* Filters & Table Card */}
+              <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm space-y-4">
+                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-100 pb-4">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs font-black uppercase tracking-wider text-slate-400 mr-1">Severity:</span>
+                    {(['ALL', 'CRITICAL', 'WARNING', 'INFO'] as const).map(s => (
+                      <button
+                        key={s}
+                        onClick={() => setAlertSeverityFilter(s)}
+                        className={`px-3 py-1 rounded-xl text-xs font-bold transition-all ${
+                          alertSeverityFilter === s
+                            ? 'bg-slate-900 text-white shadow-sm'
+                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                        }`}
+                      >
+                        {s}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs font-black uppercase tracking-wider text-slate-400 mr-1">Status:</span>
+                    {(['ALL', 'OPEN', 'ACKNOWLEDGED', 'RESOLVED', 'DISMISSED'] as const).map(st => (
+                      <button
+                        key={st}
+                        onClick={() => setAlertStatusFilter(st)}
+                        className={`px-3 py-1 rounded-xl text-xs font-bold transition-all ${
+                          alertStatusFilter === st
+                            ? 'bg-slate-900 text-white shadow-sm'
+                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                        }`}
+                      >
+                        {st}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="relative min-w-[220px]">
+                    <Search className="h-4 w-4 absolute left-3 top-2.5 text-slate-400" />
+                    <input
+                      type="text"
+                      placeholder="Search alerts or tenant..."
+                      value={alertSearch}
+                      onChange={e => setAlertSearch(e.target.value)}
+                      className="w-full pl-9 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium"
+                    />
+                  </div>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-50 text-[10px] font-black uppercase tracking-wider text-slate-400 border-b border-slate-100">
+                      <tr>
+                        <th className="px-4 py-3">Tenant</th>
+                        <th className="px-4 py-3">Alert Title & Detail</th>
+                        <th className="px-4 py-3">Source</th>
+                        <th className="px-4 py-3">Severity</th>
+                        <th className="px-4 py-3">Status</th>
+                        <th className="px-4 py-3">Created</th>
+                        <th className="px-4 py-3 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {filteredAlerts.length === 0 ? (
+                        <tr>
+                          <td colSpan={7} className="px-4 py-10 text-center text-slate-400 font-medium">
+                            No operational alerts matching specified filters.
+                          </td>
+                        </tr>
+                      ) : (
+                        filteredAlerts.map(a => (
+                          <tr
+                            key={a.alertId}
+                            onClick={() => handleSelectAlert(a)}
+                            className="hover:bg-slate-50/80 cursor-pointer transition-colors"
+                          >
+                            <td className="px-4 py-3 font-bold text-slate-900">
+                              <div>{a.tenantName || a.tenantId}</div>
+                              <div className="text-[10px] font-mono text-slate-400 font-normal">{a.tenantId}</div>
+                            </td>
+                            <td className="px-4 py-3 max-w-xs">
+                              <div className="font-bold text-slate-900 truncate">{a.title}</div>
+                              <div className="text-[11px] text-slate-500 truncate">{a.description}</div>
+                            </td>
+                            <td className="px-4 py-3 text-slate-600 font-semibold uppercase text-[10px] tracking-wider">
+                              {a.source}
+                            </td>
+                            <td className="px-4 py-3">
+                              <span
+                                className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
+                                  a.severity === 'CRITICAL'
+                                    ? 'bg-rose-100 text-rose-800'
+                                    : a.severity === 'WARNING'
+                                    ? 'bg-amber-100 text-amber-800'
+                                    : 'bg-blue-100 text-blue-800'
+                                }`}
+                              >
+                                {a.severity}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3">
+                              <span
+                                className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
+                                  a.status === 'OPEN'
+                                    ? 'bg-rose-50 text-rose-700 border border-rose-200'
+                                    : a.status === 'ACKNOWLEDGED'
+                                    ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                                    : a.status === 'RESOLVED'
+                                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                    : 'bg-slate-100 text-slate-600'
+                                }`}
+                              >
+                                {a.status}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-slate-500 text-[11px]">
+                              {new Date(a.createdAt).toLocaleString()}
+                            </td>
+                            <td className="px-4 py-3 text-right space-x-1.5" onClick={e => e.stopPropagation()}>
+                              {a.status === 'OPEN' && (
+                                <button
+                                  onClick={() => setAlertActionModal({ alert: a, action: 'acknowledge', reason: '' })}
+                                  className="px-2.5 py-1 text-[11px] font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 rounded-lg border border-amber-200 transition-colors"
+                                >
+                                  Acknowledge
+                                </button>
+                              )}
+                              {(a.status === 'OPEN' || a.status === 'ACKNOWLEDGED') && (
+                                <button
+                                  onClick={() => setAlertActionModal({ alert: a, action: 'resolve', reason: '' })}
+                                  className="px-2.5 py-1 text-[11px] font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded-lg border border-emerald-200 transition-colors"
+                                >
+                                  Resolve
+                                </button>
+                              )}
+                              {a.status !== 'DISMISSED' && a.status !== 'RESOLVED' && (
+                                <button
+                                  onClick={() => setAlertActionModal({ alert: a, action: 'dismiss', reason: '' })}
+                                  className="px-2.5 py-1 text-[11px] font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
+                                >
+                                  Dismiss
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+
           {tab === 'overview' && (
             <div className="space-y-6">
               {/* Analytics KPI Cards */}
@@ -1448,6 +1751,219 @@ export default function SuperAdminDashboard() {
             </div>
           )}
         </>
+      )}
+
+      {/* ALERT DETAIL DRAWER / MODAL */}
+      {selectedAlert && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-3xl bg-white p-6 shadow-2xl border border-slate-100 space-y-6">
+            <div className="flex items-start justify-between border-b border-slate-100 pb-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span
+                    className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
+                      selectedAlert.severity === 'CRITICAL'
+                        ? 'bg-rose-100 text-rose-800'
+                        : selectedAlert.severity === 'WARNING'
+                        ? 'bg-amber-100 text-amber-800'
+                        : 'bg-blue-100 text-blue-800'
+                    }`}
+                  >
+                    {selectedAlert.severity}
+                  </span>
+                  <span
+                    className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
+                      selectedAlert.status === 'OPEN'
+                        ? 'bg-rose-50 text-rose-700 border border-rose-200'
+                        : selectedAlert.status === 'ACKNOWLEDGED'
+                        ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                        : selectedAlert.status === 'RESOLVED'
+                        ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                        : 'bg-slate-100 text-slate-600'
+                    }`}
+                  >
+                    {selectedAlert.status}
+                  </span>
+                  <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
+                    {selectedAlert.source}
+                  </span>
+                </div>
+                <h3 className="mt-2 text-lg font-black text-slate-900">{selectedAlert.title}</h3>
+                <p className="text-xs text-slate-500">{selectedAlert.description}</p>
+              </div>
+              <button
+                onClick={() => {
+                  setSelectedAlert(null);
+                  setSelectedAlertDetail(null);
+                }}
+                className="p-1 rounded-full text-slate-400 hover:text-slate-600 hover:bg-slate-100"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {loadingAlertDetail ? (
+              <div className="flex py-12 justify-center items-center">
+                <Loader2 className="h-6 w-6 animate-spin text-indigo-600" />
+              </div>
+            ) : selectedAlertDetail ? (
+              <div className="space-y-6 text-xs text-slate-700">
+                {/* Tenant & Subscription Bundle */}
+                <div className="grid grid-cols-2 gap-4 bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                  <div>
+                    <div className="text-[10px] font-black uppercase tracking-wider text-slate-400">Tenant Identity</div>
+                    <div className="font-bold text-slate-900 text-sm mt-0.5">
+                      {selectedAlertDetail.tenant?.name || selectedAlert.tenantName || selectedAlert.tenantId}
+                    </div>
+                    <div className="font-mono text-[10px] text-slate-400">{selectedAlert.tenantId}</div>
+                    <div className="mt-2 flex items-center gap-1.5">
+                      <span className="text-[10px] text-slate-500">Lifecycle:</span>
+                      <StatusPill value={selectedAlertDetail.tenant?.lifecycleStatus || 'active'} />
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="text-[10px] font-black uppercase tracking-wider text-slate-400">Subscription & Plan</div>
+                    <div className="font-bold text-slate-900 text-sm mt-0.5">
+                      {selectedAlertDetail.subscription?.planName || 'Starter Plan'}
+                    </div>
+                    <div className="text-slate-500 text-[11px] mt-0.5">
+                      Status: <span className="font-bold text-slate-800">{selectedAlertDetail.subscription?.status || 'Active'}</span>
+                    </div>
+                    <div className="mt-2 text-slate-500 text-[11px]">
+                      Monthly Orders Used: <span className="font-bold text-slate-900">{selectedAlertDetail.usageMetrics?.ordersUsed ?? 0}</span> / {selectedAlertDetail.usageMetrics?.planLimit ?? 2500} ({selectedAlertDetail.usageMetrics?.usagePercent ?? 0}%)
+                    </div>
+                  </div>
+                </div>
+
+                {/* Resolution & Timeline */}
+                <div className="space-y-2">
+                  <div className="text-[10px] font-black uppercase tracking-wider text-slate-400">Resolution History & Timeline</div>
+                  <div className="space-y-1.5 bg-slate-50/70 p-3 rounded-xl border border-slate-100 font-mono text-[11px]">
+                    <div>Created At: <span className="text-slate-900">{new Date(selectedAlert.createdAt).toLocaleString()}</span></div>
+                    {selectedAlert.acknowledgedAt && (
+                      <div>Acknowledged At: <span className="text-slate-900">{new Date(selectedAlert.acknowledgedAt).toLocaleString()}</span> by {selectedAlert.acknowledgedBy}</div>
+                    )}
+                    {selectedAlert.resolvedAt && (
+                      <div>Resolved At: <span className="text-slate-900">{new Date(selectedAlert.resolvedAt).toLocaleString()}</span> by {selectedAlert.resolvedBy}</div>
+                    )}
+                    {selectedAlert.dismissedAt && (
+                      <div>Dismissed At: <span className="text-slate-900">{new Date(selectedAlert.dismissedAt).toLocaleString()}</span> by {selectedAlert.dismissedBy}</div>
+                    )}
+                    {selectedAlert.resolutionReason && (
+                      <div className="mt-1 pt-1 border-t border-slate-200 text-slate-800 font-sans">
+                        <strong>Reason:</strong> {selectedAlert.resolutionReason}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Recent Audit Events */}
+                {selectedAlertDetail.recentAuditEvents && selectedAlertDetail.recentAuditEvents.length > 0 && (
+                  <div className="space-y-2">
+                    <div className="text-[10px] font-black uppercase tracking-wider text-slate-400">Correlated Audit Events</div>
+                    <div className="max-h-36 overflow-y-auto rounded-xl border border-slate-100 bg-slate-50 p-2 space-y-1">
+                      {selectedAlertDetail.recentAuditEvents.map((e: any) => (
+                        <div key={e.id} className="flex items-center justify-between text-[11px] py-1 px-2 hover:bg-white rounded">
+                          <div>
+                            <span className="font-bold text-slate-900">{e.action}</span>
+                            <span className="text-slate-500 ml-2">{e.details}</span>
+                          </div>
+                          <span className="text-slate-400 font-mono text-[10px]">{new Date(e.timestamp).toLocaleTimeString()}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : null}
+
+            {/* Actions */}
+            <div className="flex items-center justify-end gap-2 border-t border-slate-100 pt-4">
+              {selectedAlert.status === 'OPEN' && (
+                <button
+                  onClick={() => openAlertActionModal(selectedAlert, 'acknowledge')}
+                  className="px-4 py-2 text-xs font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 rounded-xl border border-amber-200 shadow-sm"
+                >
+                  Acknowledge Alert
+                </button>
+              )}
+              {(selectedAlert.status === 'OPEN' || selectedAlert.status === 'ACKNOWLEDGED') && (
+                <button
+                  onClick={() => openAlertActionModal(selectedAlert, 'resolve')}
+                  className="px-4 py-2 text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded-xl border border-emerald-200 shadow-sm"
+                >
+                  Resolve Alert
+                </button>
+              )}
+              {selectedAlert.status !== 'DISMISSED' && selectedAlert.status !== 'RESOLVED' && (
+                <button
+                  onClick={() => openAlertActionModal(selectedAlert, 'dismiss')}
+                  className="px-4 py-2 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl"
+                >
+                  Dismiss Alert
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MANDATORY REASON ACTION MODAL */}
+      {alertActionModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl border border-slate-100 space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <h3 className="text-base font-black text-slate-900 capitalize">
+                {alertActionModal.action} Platform Alert
+              </h3>
+              <button
+                onClick={() => setAlertActionModal(null)}
+                className="p-1 text-slate-400 hover:text-slate-600 rounded-full"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div>
+              <div className="text-xs font-bold text-slate-800">{alertActionModal.alert.title}</div>
+              <div className="text-[11px] text-slate-500">{alertActionModal.alert.description}</div>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-slate-700 block">
+                Mandatory Administrative Justification Reason <span className="text-rose-600">*</span>
+              </label>
+              <textarea
+                rows={3}
+                placeholder={`Provide mandatory reason for ${alertActionModal.action}ing this alert...`}
+                value={alertActionModal.reason}
+                onChange={e => setAlertActionModal({ ...alertActionModal, reason: e.target.value })}
+                className="w-full p-2.5 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium"
+              />
+              <p className="text-[10px] text-slate-400">
+                This reason will be atomically committed to the immutable audit trail.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 border-t border-slate-100 pt-3">
+              <button
+                onClick={() => setAlertActionModal(null)}
+                className="px-3.5 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl"
+              >
+                Cancel
+              </button>
+              <button
+                disabled={!alertActionModal.reason.trim() || Boolean(busy?.startsWith('alert:'))}
+                onClick={executeAlertAction}
+                className="inline-flex items-center gap-2 px-4 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 rounded-xl shadow-sm"
+              >
+                {busy?.startsWith('alert:') && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                Confirm {alertActionModal.action}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </section>
   );

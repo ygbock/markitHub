@@ -21,6 +21,15 @@ import {
   type SubscriptionStatus,
   type TenantLifecycleStatus,
 } from './platformAdminControlPlane';
+import {
+  acknowledgePlatformAlert,
+  createPlatformAlert,
+  dismissPlatformAlert,
+  getPlatformAlertDetail,
+  getPlatformAlerts,
+  getPlatformAlertSummary,
+  resolvePlatformAlert,
+} from './platformAlertControlPlane';
 
 interface PlatformRouteDeps {
   app: Express;
@@ -1992,6 +2001,108 @@ export function registerPlatformAdminRoutes({
       });
     } catch (err: any) {
       return res.status(500).json({ error: err?.message || 'Unable to load platform growth analytics.' });
+    }
+  });
+
+  // ============================================================
+  // Alert & Incident Control Plane Endpoints
+  // ============================================================
+
+  // 1. GET /api/platform/alerts
+  app.get('/api/platform/alerts', ...platformAuth, async (req, res) => {
+    const db = getAdminDb();
+    if (!db) return res.status(503).json({ error: 'Platform service is not configured.' });
+    try {
+      const result = await getPlatformAlerts(db, {
+        status: req.query.status ? String(req.query.status) : undefined,
+        severity: req.query.severity ? String(req.query.severity) : undefined,
+        tenantId: req.query.tenantId ? String(req.query.tenantId) : undefined,
+        search: req.query.search ? String(req.query.search) : undefined,
+        page: req.query.page ? Number(req.query.page) : 1,
+        limit: req.query.pageSize || req.query.limit ? Number(req.query.pageSize || req.query.limit) : 20,
+      });
+      return res.json(result);
+    } catch (err: any) {
+      return res.status(500).json({ error: err?.message || 'Unable to load platform alerts.' });
+    }
+  });
+
+  // 2. GET /api/platform/alerts/summary
+  app.get('/api/platform/alerts/summary', ...platformAuth, async (_req, res) => {
+    const db = getAdminDb();
+    if (!db) return res.status(503).json({ error: 'Platform service is not configured.' });
+    try {
+      const summary = await getPlatformAlertSummary(db);
+      return res.json({ success: true, summary });
+    } catch (err: any) {
+      return res.status(500).json({ error: err?.message || 'Unable to load platform alert summary.' });
+    }
+  });
+
+  // 3. GET /api/platform/alerts/:alertId
+  app.get('/api/platform/alerts/:alertId', ...platformAuth, async (req, res) => {
+    const db = getAdminDb();
+    if (!db) return res.status(503).json({ error: 'Platform service is not configured.' });
+    try {
+      const detail = await getPlatformAlertDetail(db, req.params.alertId);
+      return res.json({ success: true, ...detail });
+    } catch (err: any) {
+      const status = err?.statusCode || 500;
+      return res.status(status).json({ error: err?.message || 'Unable to load alert detail.' });
+    }
+  });
+
+  // 4. PATCH /api/platform/alerts/:alertId/acknowledge
+  app.patch('/api/platform/alerts/:alertId/acknowledge', ...platformAuth, async (req, res) => {
+    const db = getAdminDb();
+    if (!db) return res.status(503).json({ error: 'Platform service is not configured.' });
+    try {
+      const actor = {
+        uid: (req as any).user?.uid || 'server_admin',
+        email: (req as any).user?.email || 'admin@markithub.internal',
+        role: (req as any).user?.role || 'Super Admin',
+      };
+      const alert = await acknowledgePlatformAlert(db, req.params.alertId, actor, req.body?.reason);
+      return res.json({ success: true, alert });
+    } catch (err: any) {
+      const status = err?.statusCode || 400;
+      return res.status(status).json({ error: err?.message || 'Unable to acknowledge alert.' });
+    }
+  });
+
+  // 5. PATCH /api/platform/alerts/:alertId/resolve
+  app.patch('/api/platform/alerts/:alertId/resolve', ...platformAuth, async (req, res) => {
+    const db = getAdminDb();
+    if (!db) return res.status(503).json({ error: 'Platform service is not configured.' });
+    try {
+      const actor = {
+        uid: (req as any).user?.uid || 'server_admin',
+        email: (req as any).user?.email || 'admin@markithub.internal',
+        role: (req as any).user?.role || 'Super Admin',
+      };
+      const alert = await resolvePlatformAlert(db, req.params.alertId, actor, req.body?.reason);
+      return res.json({ success: true, alert });
+    } catch (err: any) {
+      const status = err?.statusCode || 400;
+      return res.status(status).json({ error: err?.message || 'Unable to resolve alert.' });
+    }
+  });
+
+  // 6. PATCH /api/platform/alerts/:alertId/dismiss
+  app.patch('/api/platform/alerts/:alertId/dismiss', ...platformAuth, async (req, res) => {
+    const db = getAdminDb();
+    if (!db) return res.status(503).json({ error: 'Platform service is not configured.' });
+    try {
+      const actor = {
+        uid: (req as any).user?.uid || 'server_admin',
+        email: (req as any).user?.email || 'admin@markithub.internal',
+        role: (req as any).user?.role || 'Super Admin',
+      };
+      const alert = await dismissPlatformAlert(db, req.params.alertId, actor, req.body?.reason);
+      return res.json({ success: true, alert });
+    } catch (err: any) {
+      const status = err?.statusCode || 400;
+      return res.status(status).json({ error: err?.message || 'Unable to dismiss alert.' });
     }
   });
 }
