@@ -1,7 +1,101 @@
 // @ts-nocheck
 import express from 'express';
 import request from 'supertest';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, it } from 'node:test';
+import assert from 'node:assert/strict';
+
+function expect(actual: any) {
+  const matcher = (negated = false) => ({
+    toBe: (expected: any) => {
+      if (negated) assert.notStrictEqual(actual, expected);
+      else assert.strictEqual(actual, expected);
+    },
+    toEqual: (expected: any) => {
+      if (negated) assert.notDeepStrictEqual(actual, expected);
+      else assert.deepStrictEqual(actual, expected);
+    },
+    toBeDefined: () => {
+      if (negated) assert.strictEqual(actual, undefined);
+      else assert.notStrictEqual(actual, undefined);
+    },
+    toBeUndefined: () => {
+      if (negated) assert.notStrictEqual(actual, undefined);
+      else assert.strictEqual(actual, undefined);
+    },
+    toBeNull: () => {
+      if (negated) assert.notStrictEqual(actual, null);
+      else assert.strictEqual(actual, null);
+    },
+    toBeTruthy: () => {
+      if (negated) assert.ok(!Boolean(actual));
+      else assert.ok(Boolean(actual));
+    },
+    toBeFalsy: () => {
+      if (negated) assert.ok(Boolean(actual));
+      else assert.ok(!Boolean(actual));
+    },
+    toBeGreaterThan: (n: number) => {
+      if (negated) assert.ok(actual <= n);
+      else assert.ok(actual > n, `expected ${actual} > ${n}`);
+    },
+    toBeGreaterThanOrEqual: (n: number) => {
+      if (negated) assert.ok(actual < n);
+      else assert.ok(actual >= n, `expected ${actual} >= ${n}`);
+    },
+    toBeLessThan: (n: number) => {
+      if (negated) assert.ok(actual >= n);
+      else assert.ok(actual < n, `expected ${actual} < ${n}`);
+    },
+    toBeLessThanOrEqual: (n: number) => {
+      if (negated) assert.ok(actual > n);
+      else assert.ok(actual <= n, `expected ${actual} <= ${n}`);
+    },
+    toHaveLength: (len: number) => {
+      if (negated) assert.notStrictEqual(actual?.length, len);
+      else assert.strictEqual(actual?.length, len);
+    },
+    toBeInstanceOf: (cls: any) => {
+      if (negated) assert.ok(!(actual instanceof cls));
+      else assert.ok(actual instanceof cls);
+    },
+    toContain: (item: any) => {
+      const contains = (typeof actual === 'string' || Array.isArray(actual))
+        ? actual.includes(item)
+        : (item in actual);
+      if (negated) assert.ok(!contains, `expected not to contain ${item}`);
+      else assert.ok(contains, `expected to contain ${item}`);
+    },
+    toThrow: (regExpOrMsg?: any) => {
+      if (negated) {
+        assert.doesNotThrow(actual);
+      } else {
+        if (typeof regExpOrMsg === 'string') {
+          assert.throws(actual, (err: any) => err?.message?.includes(regExpOrMsg) ?? true);
+        } else if (regExpOrMsg instanceof RegExp) {
+          assert.throws(actual, regExpOrMsg);
+        } else {
+          assert.throws(actual);
+        }
+      }
+    },
+  });
+
+  return {
+    ...matcher(false),
+    not: matcher(true),
+    rejects: {
+      toThrow: async (regExpOrMsg?: any) => {
+        if (typeof regExpOrMsg === 'string') {
+          await assert.rejects(actual, (err: any) => err?.message?.includes(regExpOrMsg) ?? true);
+        } else if (regExpOrMsg instanceof RegExp) {
+          await assert.rejects(actual, regExpOrMsg);
+        } else {
+          await assert.rejects(actual);
+        }
+      },
+    },
+  };
+}
 import { registerPlatformAdminRoutes } from './platformAdminRoutes';
 import { createPlatformAlert } from './platformAlertControlPlane';
 import {
