@@ -132,11 +132,38 @@ export function assertLifecycleTransition(current: TenantLifecycleStatus, next: 
     trialing: ['active', 'suspended', 'cancelled'],
     active: ['suspended', 'cancelled'],
     suspended: ['active', 'cancelled'],
-    cancelled: ['active'],
+    // Cancellation is terminal. A new subscription must be provisioned rather
+    // than silently resurrecting a cancelled tenant.
+    cancelled: [],
   };
   if (!allowed[current].includes(next)) {
     throw new Error(`Invalid tenant lifecycle transition: ${current} → ${next}.`);
   }
+}
+
+/** Canonical subscription state required by each operational lifecycle state. */
+export function assertLifecycleSubscriptionConsistency(
+  lifecycle: TenantLifecycleStatus,
+  subscriptionStatus: SubscriptionStatus,
+): void {
+  const allowed: Record<TenantLifecycleStatus, SubscriptionStatus[]> = {
+    provisioning: ['trialing', 'active'],
+    trialing: ['trialing', 'active'],
+    active: ['active', 'past_due'],
+    suspended: ['suspended'],
+    cancelled: ['cancelled'],
+  };
+  if (!allowed[lifecycle].includes(subscriptionStatus)) {
+    throw new Error(
+      `Invalid tenant/subscription state combination: lifecycle=${lifecycle}, subscription=${subscriptionStatus}.`,
+    );
+  }
+}
+
+export function lifecycleForSubscriptionStatus(status: SubscriptionStatus): TenantLifecycleStatus | null {
+  if (status === 'suspended') return 'suspended';
+  if (status === 'cancelled') return 'cancelled';
+  return null;
 }
 
 export function makeTenantSlug(name: string, suffix = ''): string {
