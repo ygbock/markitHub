@@ -306,12 +306,16 @@ export default function SuperAdminDashboard() {
   };
 
   const changeSubscription = async (tenant: Tenant, planId: string, interval: 'monthly' | 'annual') => {
+    const defaultReason = `Super Admin updated subscription plan for ${tenant.name} to ${planId} (${interval})`;
+    const reason = window.prompt(`Reason for updating subscription for ${tenant.name}:`, defaultReason);
+    if (!reason || !reason.trim()) return;
+
     setBusy(`subscription:${tenant.id}`);
     setError(null);
     try {
-      await apiFetch(`/api/platform/tenants/${encodeURIComponent(tenant.id)}/subscription`, {
+      await apiFetch(`/api/platform/tenants/${encodeURIComponent(tenant.id)}/subscription/plan`, {
         method: 'PATCH',
-        body: JSON.stringify({ planId, billingInterval: interval }),
+        body: JSON.stringify({ planId, billingInterval: interval, reason: reason.trim() }),
       });
       setNotice(`${tenant.name} subscription updated.`);
       await loadAll();

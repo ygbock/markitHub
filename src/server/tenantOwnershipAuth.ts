@@ -133,7 +133,7 @@ export function assertCallerIsOwner(context: TenantSecurityContext): void {
 
   // Tenant itself must be active
   const tenantLifecycle = String((context.tenant as any)?.lifecycleStatus || context.tenant?.status || '').toLowerCase();
-  if (tenantLifecycle === 'suspended' || tenantLifecycle === 'archived' || context.tenant?.status === 'suspended' || context.tenant?.status === 'archived') {
+  if (tenantLifecycle === 'suspended' || tenantLifecycle === 'archived' || String(context.tenant?.status) === 'suspended' || String(context.tenant?.status) === 'archived') {
     const error = new Error(`Forbidden: operations on ${tenantLifecycle || 'non-active'} tenants are prohibited.`);
     (error as any).statusCode = 403;
     throw error;

@@ -35,6 +35,7 @@ export interface PlatformSubscription {
   currentPeriodStart: string;
   currentPeriodEnd: string;
   trialEndsAt?: string;
+  overrideMonthlyOrders?: boolean;
 }
 
 export interface PlatformUsageSnapshot {

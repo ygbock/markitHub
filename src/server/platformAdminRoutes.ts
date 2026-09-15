@@ -206,41 +206,244 @@ export function registerPlatformAdminRoutes({
     const db = getAdminDb();
     if (!db) return res.status(503).json({ error: 'Platform service is not configured.' });
     try {
-      const limit = Math.min(100, Math.max(1, Math.floor(Number(req.query.limit || 100))));
-      const lifecycle = req.query.lifecycle ? String(req.query.lifecycle) : '';
-      const planId = req.query.planId ? String(req.query.planId) : '';
-      const snap = await db.collection('tenants').orderBy('updatedAt', 'desc').limit(limit).get();
-      const tenants = snap.docs
-        .map((doc: any) => {
-          const data = doc.data() as any;
-          const subscription = data.subscription || {};
-          return {
-            id: doc.id,
-            name: String(data.name || data.businessName || data.storeName || doc.id),
-            status: String(data.status || 'active'),
-            lifecycleStatus: cleanLifecycleStatus(data.lifecycleStatus || data.status),
-            ownerUid: data.ownerUid ? String(data.ownerUid) : undefined,
-            ownerEmail: data.ownerEmail ? String(data.ownerEmail) : undefined,
-            slug: data.slug ? String(data.slug) : undefined,
-            createdAt: data.createdAt ? String(data.createdAt) : undefined,
-            updatedAt: data.updatedAt ? String(data.updatedAt) : undefined,
-            subscription: {
-              planId: String(subscription.planId || 'starter'),
-              planName: String(subscription.planName || 'Starter'),
-              status: cleanSubscriptionStatus(subscription.status),
-              interval: cleanInterval(subscription.interval),
-              price: Number(subscription.price || 0),
-              currency: cleanCurrency(subscription.currency),
-              seatsLimit: Number(subscription.seatsLimit || 0),
-              currentPeriodEnd: subscription.currentPeriodEnd ? String(subscription.currentPeriodEnd) : undefined,
-            },
-          };
-        })
-        .filter((tenant: any) => !lifecycle || tenant.lifecycleStatus === lifecycle)
-        .filter((tenant: any) => !planId || tenant.subscription.planId === planId);
-      return res.json({ success: true, tenants });
+      const page = Math.max(1, Math.floor(Number(req.query.page || 1)));
+      const limit = Math.min(100, Math.max(1, Math.floor(Number(req.query.pageSize || req.query.limit || 100))));
+      const lifecycle = req.query.lifecycleStatus || req.query.lifecycle ? String(req.query.lifecycleStatus || req.query.lifecycle) : '';
+      const planId = req.query.planId || req.query.plan ? String(req.query.planId || req.query.plan) : '';
+      const search = req.query.search ? String(req.query.search).trim().toLowerCase() : '';
+
+      const snap = await db.collection('tenants').orderBy('updatedAt', 'desc').limit(500).get();
+      let tenants = snap.docs.map((doc: any) => {
+        const data = doc.data() as any;
+        const subscription = data.subscription || {};
+        return {
+          id: doc.id,
+          name: String(data.name || data.businessName || data.storeName || doc.id),
+          status: String(data.status || 'active'),
+          lifecycleStatus: cleanLifecycleStatus(data.lifecycleStatus || data.status),
+          ownerUid: data.ownerUid ? String(data.ownerUid) : undefined,
+          ownerEmail: data.ownerEmail ? String(data.ownerEmail) : undefined,
+          slug: data.slug ? String(data.slug) : undefined,
+          createdAt: data.createdAt ? String(data.createdAt) : undefined,
+          updatedAt: data.updatedAt ? String(data.updatedAt) : undefined,
+          subscription: {
+            planId: String(subscription.planId || 'starter'),
+            planName: String(subscription.planName || 'Starter'),
+            status: cleanSubscriptionStatus(subscription.status),
+            interval: cleanInterval(subscription.interval),
+            price: Number(subscription.price || 0),
+            currency: cleanCurrency(subscription.currency),
+            seatsLimit: Number(subscription.seatsLimit || 0),
+            currentPeriodStart: subscription.currentPeriodStart ? String(subscription.currentPeriodStart) : undefined,
+            currentPeriodEnd: subscription.currentPeriodEnd ? String(subscription.currentPeriodEnd) : undefined,
+            overrideMonthlyOrders: Boolean(subscription.overrideMonthlyOrders || data.overrideMonthlyOrders),
+          },
+        };
+      });
+
+      if (search) {
+        tenants = tenants.filter(t =>
+          t.name.toLowerCase().includes(search) ||
+          t.id.toLowerCase().includes(search) ||
+          (t.ownerEmail && t.ownerEmail.toLowerCase().includes(search)) ||
+          (t.slug && t.slug.toLowerCase().includes(search))
+        );
+      }
+      if (lifecycle) tenants = tenants.filter(t => t.lifecycleStatus === lifecycle);
+      if (planId) tenants = tenants.filter(t => t.subscription.planId === planId);
+
+      const total = tenants.length;
+      const totalPages = Math.max(1, Math.ceil(total / limit));
+      const pageTenants = tenants.slice((page - 1) * limit, page * limit);
+
+      return res.json({
+        success: true,
+        page,
+        pageSize: limit,
+        total,
+        totalPages,
+        tenants: pageTenants,
+      });
     } catch (err: any) {
       return res.status(500).json({ error: err?.message || 'Unable to load platform tenants.' });
+    }
+  });
+
+  app.get('/api/platform/billing/tenants', ...platformAuth, async (req, res) => {
+    const db = getAdminDb();
+    if (!db) return res.status(503).json({ error: 'Platform service is not configured.' });
+    try {
+      const page = Math.max(1, Math.floor(Number(req.query.page || 1)));
+      const pageSize = Math.min(100, Math.max(1, Math.floor(Number(req.query.pageSize || req.query.limit || 10))));
+      const search = req.query.search ? String(req.query.search).trim().toLowerCase() : '';
+      const planId = req.query.planId || req.query.plan ? String(req.query.planId || req.query.plan).trim() : '';
+      const subscriptionStatus = req.query.subscriptionStatus ? String(req.query.subscriptionStatus).trim() : '';
+      const lifecycleStatus = req.query.lifecycleStatus || req.query.lifecycle ? String(req.query.lifecycleStatus || req.query.lifecycle).trim() : '';
+      const usageStateFilter = req.query.usageState ? String(req.query.usageState).trim() : '';
+      const overrideFilter = req.query.override ? String(req.query.override).trim() : '';
+      const period = String(req.query.period || usagePeriod()).trim();
+
+      const tenantSnap = await db.collection('tenants').orderBy('updatedAt', 'desc').limit(500).get();
+      const allRows = await Promise.all(tenantSnap.docs.map(async (doc: any) => {
+        const data = doc.data() as any;
+        const subscription = data.subscription || {};
+        const pId = String(subscription.planId || 'starter');
+        const resolvedPlan = await loadPlan(db, pId);
+        const meterSnap = await db.collection(USAGE_METER_COLLECTION).doc(usageMeterId(doc.id, period)).get();
+        const meter = meterSnap.exists ? meterSnap.data() as any : {};
+        const used = Math.max(0, Math.floor(Number(meter.ordersMonthly || 0)));
+        const limit = Math.max(0, Math.floor(Number(resolvedPlan.plan.limits.ordersMonthly || 0)));
+        const overrideActive = Boolean(meter.overrideMonthlyOrders || subscription.overrideMonthlyOrders || data.overrideMonthlyOrders);
+        const decision = evaluateUsageLimit(used, limit, overrideActive);
+
+        return {
+          id: doc.id,
+          name: String(data.name || data.businessName || data.storeName || doc.id),
+          slug: data.slug ? String(data.slug) : undefined,
+          lifecycleStatus: cleanLifecycleStatus(data.lifecycleStatus || data.status),
+          ownerUid: data.ownerUid ? String(data.ownerUid) : undefined,
+          ownerEmail: data.ownerEmail ? String(data.ownerEmail) : undefined,
+          createdAt: data.createdAt ? String(data.createdAt) : undefined,
+          updatedAt: data.updatedAt ? String(data.updatedAt) : undefined,
+          subscription: {
+            planId: pId,
+            planName: resolvedPlan.plan.name,
+            status: cleanSubscriptionStatus(subscription.status),
+            interval: cleanInterval(subscription.interval),
+            price: Number(subscription.price || (subscription.interval === 'annual' ? resolvedPlan.plan.annualPrice : resolvedPlan.plan.monthlyPrice)),
+            currency: cleanCurrency(subscription.currency || resolvedPlan.plan.currency),
+            seatsLimit: Number(subscription.seatsLimit || resolvedPlan.plan.includedSeats),
+            currentPeriodStart: subscription.currentPeriodStart ? String(subscription.currentPeriodStart) : undefined,
+            currentPeriodEnd: subscription.currentPeriodEnd ? String(subscription.currentPeriodEnd) : undefined,
+            overrideMonthlyOrders: overrideActive,
+          },
+          usage: {
+            period,
+            ordersMonthly: {
+              used,
+              limit,
+              percent: calculateUsagePercent(used, limit),
+              state: decision.state,
+              allowed: decision.allowed,
+              remaining: decision.remaining,
+              overrideActive,
+            },
+          },
+        };
+      }));
+
+      let filtered = allRows;
+      if (search) {
+        filtered = filtered.filter(t =>
+          t.name.toLowerCase().includes(search) ||
+          t.id.toLowerCase().includes(search) ||
+          (t.ownerEmail && t.ownerEmail.toLowerCase().includes(search)) ||
+          (t.slug && t.slug.toLowerCase().includes(search)) ||
+          t.subscription.planName.toLowerCase().includes(search)
+        );
+      }
+      if (planId) filtered = filtered.filter(t => t.subscription.planId === planId);
+      if (subscriptionStatus) filtered = filtered.filter(t => t.subscription.status === subscriptionStatus);
+      if (lifecycleStatus) filtered = filtered.filter(t => t.lifecycleStatus === lifecycleStatus);
+      if (usageStateFilter) filtered = filtered.filter(t => t.usage.ordersMonthly.state === usageStateFilter);
+      if (overrideFilter === 'true' || overrideFilter === 'active' || overrideFilter === 'override_only') {
+        filtered = filtered.filter(t => t.subscription.overrideMonthlyOrders);
+      } else if (overrideFilter === 'false' || overrideFilter === 'none' || overrideFilter === 'standard') {
+        filtered = filtered.filter(t => !t.subscription.overrideMonthlyOrders);
+      }
+
+      const total = filtered.length;
+      const totalPages = Math.max(1, Math.ceil(total / pageSize));
+      const tenants = filtered.slice((page - 1) * pageSize, page * pageSize);
+
+      return res.json({
+        success: true,
+        page,
+        pageSize,
+        total,
+        totalPages,
+        tenants,
+      });
+    } catch (err: any) {
+      return res.status(500).json({ error: err?.message || 'Unable to load platform billing tenants.' });
+    }
+  });
+
+  app.get('/api/platform/billing/summary', ...platformAuth, async (_req, res) => {
+    const db = getAdminDb();
+    if (!db) return res.status(503).json({ error: 'Platform service is not configured.' });
+    try {
+      const snap = await db.collection('tenants').limit(500).get();
+      const period = usagePeriod();
+
+      let activeSubscriptions = 0;
+      let trialSubscriptions = 0;
+      let pastDueSubscriptions = 0;
+      let suspendedSubscriptions = 0;
+      let cancelledSubscriptions = 0;
+      let monthlyRecurringRevenue = 0;
+      let annualRecurringRevenue = 0;
+      let usageWarnings = 0;
+      let usageExceeded = 0;
+      let activeOverrides = 0;
+
+      for (const doc of snap.docs) {
+        const data = doc.data() as any;
+        const sub = data.subscription || {};
+        const status = cleanSubscriptionStatus(sub.status);
+        const interval = cleanInterval(sub.interval);
+        const price = Math.max(0, Number(sub.price || 0));
+
+        if (status === 'active') {
+          activeSubscriptions++;
+          if (interval === 'monthly') monthlyRecurringRevenue += price;
+          else annualRecurringRevenue += price;
+        } else if (status === 'trialing') trialSubscriptions++;
+        else if (status === 'past_due') pastDueSubscriptions++;
+        else if (status === 'suspended') suspendedSubscriptions++;
+        else if (status === 'cancelled') cancelledSubscriptions++;
+
+        const override = Boolean(sub.overrideMonthlyOrders || data.overrideMonthlyOrders);
+        if (override) activeOverrides++;
+
+        const planId = String(sub.planId || 'starter');
+        const resolvedPlan = await loadPlan(db, planId);
+        const meterSnap = await db.collection(USAGE_METER_COLLECTION).doc(usageMeterId(doc.id, period)).get();
+        const meter = meterSnap.exists ? meterSnap.data() as any : {};
+        const used = Math.max(0, Math.floor(Number(meter.ordersMonthly || 0)));
+        const limit = Math.max(0, Math.floor(Number(resolvedPlan.plan.limits.ordersMonthly || 0)));
+        const decision = evaluateUsageLimit(used, limit, override);
+
+        if (decision.state === 'warning') usageWarnings++;
+        else if (decision.state === 'exceeded') usageExceeded++;
+      }
+
+      const estimatedMonthlyRunRate = monthlyRecurringRevenue + (annualRecurringRevenue / 12);
+
+      return res.json({
+        success: true,
+        summary: {
+          currency: 'USD',
+          activeSubscriptions,
+          trialSubscriptions,
+          trialingTenants: trialSubscriptions,
+          pastDueSubscriptions,
+          pastDueTenants: pastDueSubscriptions,
+          suspendedSubscriptions,
+          suspendedTenants: suspendedSubscriptions,
+          cancelledSubscriptions,
+          cancelledTenants: cancelledSubscriptions,
+          monthlyRecurringRevenue,
+          annualRecurringRevenue,
+          estimatedMonthlyRunRate,
+          usageWarnings,
+          usageExceeded,
+          activeOverrides,
+          totalTenants: snap.docs.length,
+        },
+      });
+    } catch (err: any) {
+      return res.status(500).json({ error: err?.message || 'Unable to load billing summary.' });
     }
   });
 
@@ -528,6 +731,211 @@ export function registerPlatformAdminRoutes({
       });
     } catch (err: any) {
       return res.status(400).json({ error: err?.message || 'Tenant provisioning failed.' });
+    }
+  });
+
+  app.patch('/api/platform/tenants/:tenantId/subscription/plan', ...platformAuth, async (req, res) => {
+    const db = getAdminDb();
+    const tenantId = String(req.params.tenantId || '').trim();
+    const planId = String(req.body?.planId || '').trim().toLowerCase();
+    const intervalInput = req.body?.billingInterval ? String(req.body.billingInterval).trim().toLowerCase() : undefined;
+    const reason = String(req.body?.reason || '').trim();
+
+    if (!db) return res.status(503).json({ error: 'Platform service is not configured.' });
+    if (!tenantId) return res.status(400).json({ error: 'Tenant ID is required.' });
+    if (!planId) return res.status(400).json({ error: 'Plan ID is required.' });
+    if (!reason) return res.status(400).json({ error: 'A reason is required for subscription plan changes.' });
+
+    try {
+      const resolvedPlan = await loadPlan(db, planId);
+      if (!resolvedPlan.exists) return res.status(404).json({ error: `Plan '${planId}' not found.` });
+      if (resolvedPlan.plan.status !== 'active') return res.status(409).json({ error: 'Archived plans cannot be assigned to tenants.' });
+
+      let resultSubscription: PlatformSubscription | null = null;
+      await db.runTransaction(async (transaction: any) => {
+        const tenantRef = db.collection('tenants').doc(tenantId);
+        const tenantSnap = await transaction.get(tenantRef);
+        if (!tenantSnap.exists) throw Object.assign(new Error(`Tenant '${tenantId}' not found.`), { statusCode: 404 });
+
+        const data = tenantSnap.data() as any;
+        const current = data.subscription || {};
+        const interval = cleanInterval(intervalInput || current.interval || 'monthly');
+        const plan = resolvedPlan.plan;
+        const now = new Date().toISOString();
+
+        const subscription: PlatformSubscription = {
+          planId: plan.id,
+          planName: plan.name,
+          status: cleanSubscriptionStatus(current.status || 'active'),
+          interval,
+          price: interval === 'annual' ? plan.annualPrice : plan.monthlyPrice,
+          currency: plan.currency,
+          seatsLimit: plan.includedSeats,
+          currentPeriodStart: String(current.currentPeriodStart || now),
+          currentPeriodEnd: String(current.currentPeriodEnd || isoPlusDays(interval === 'annual' ? 365 : 30)),
+          overrideMonthlyOrders: Boolean(current.overrideMonthlyOrders || data.overrideMonthlyOrders),
+          ...(current.trialEndsAt ? { trialEndsAt: String(current.trialEndsAt) } : {}),
+        };
+
+        const audit = createAuthoritativeAuditRecord({
+          tenantId,
+          actorUid: req.user!.uid,
+          actorName: req.user!.email || req.user!.uid,
+          actorEmail: req.user!.email || null,
+          actorRole: 'Super Admin',
+          action: 'TENANT_SUBSCRIPTION_PLAN_CHANGED',
+          module: 'Platform Billing',
+          targetType: 'tenant',
+          targetId: tenantId,
+          targetName: String(data.name || data.businessName || tenantId),
+          previousState: { planId: current.planId, planName: current.planName, price: current.price, interval: current.interval },
+          newState: { planId: plan.id, planName: plan.name, price: subscription.price, interval },
+          reason,
+          result: 'success',
+          severity: 'warning',
+          details: `Subscription plan changed from ${current.planName || current.planId} to ${plan.name} (${interval}). Reason: ${reason}`,
+          metadata: { platformAdmin: true, previousPlanId: current.planId, newPlanId: plan.id },
+        });
+
+        await updateAuthoritativeSecurityMetrics(db, audit, transaction);
+        transaction.set(tenantRef, { subscription, updatedAt: now }, { merge: true });
+        transaction.set(db.collection('audit_logs').doc(audit.id), audit);
+        transaction.set(db.collection('platform_billing_events').doc(), {
+          tenantId,
+          type: 'subscription_changed',
+          planId: plan.id,
+          planName: plan.name,
+          interval,
+          amount: subscription.price,
+          currency: subscription.currency,
+          status: subscription.status,
+          occurredAt: now,
+          description: `Plan changed to ${plan.name}. Reason: ${reason}`,
+        });
+
+        resultSubscription = subscription;
+      });
+
+      return res.json({ success: true, tenantId, subscription: resultSubscription });
+    } catch (err: any) {
+      return res.status(err?.statusCode || 400).json({ error: err?.message || 'Plan change failed.' });
+    }
+  });
+
+  app.patch('/api/platform/tenants/:tenantId/subscription/status', ...platformAuth, async (req, res) => {
+    const db = getAdminDb();
+    const tenantId = String(req.params.tenantId || '').trim();
+    const statusInput = String(req.body?.status || '').trim().toLowerCase();
+    const reason = String(req.body?.reason || '').trim();
+
+    if (!db) return res.status(503).json({ error: 'Platform service is not configured.' });
+    if (!tenantId) return res.status(400).json({ error: 'Tenant ID is required.' });
+    if (!['trialing', 'active', 'past_due', 'suspended', 'cancelled'].includes(statusInput)) {
+      return res.status(400).json({ error: 'Invalid subscription status.' });
+    }
+    if (!reason) return res.status(400).json({ error: 'A reason is required for subscription status changes.' });
+
+    const newStatus = cleanSubscriptionStatus(statusInput);
+
+    try {
+      let resultSubscription: PlatformSubscription | null = null;
+      let nextLifecycle: TenantLifecycleStatus = 'active';
+
+      await db.runTransaction(async (transaction: any) => {
+        const tenantRef = db.collection('tenants').doc(tenantId);
+        const tenantSnap = await transaction.get(tenantRef);
+        if (!tenantSnap.exists) throw Object.assign(new Error(`Tenant '${tenantId}' not found.`), { statusCode: 404 });
+
+        const data = tenantSnap.data() as any;
+        const current = data.subscription || {};
+        const currentLifecycle = cleanLifecycleStatus(data.lifecycleStatus || data.status);
+
+        const lifecycleFromStatus = lifecycleForSubscriptionStatus(newStatus);
+        nextLifecycle = currentLifecycle;
+        if (lifecycleFromStatus && lifecycleFromStatus !== currentLifecycle) {
+          nextLifecycle = lifecycleFromStatus;
+          assertLifecycleTransition(currentLifecycle, nextLifecycle);
+        } else if (['suspended', 'cancelled'].includes(currentLifecycle) && newStatus === 'active') {
+          nextLifecycle = 'active';
+          assertLifecycleTransition(currentLifecycle, nextLifecycle);
+        }
+
+        assertLifecycleSubscriptionConsistency(nextLifecycle, newStatus);
+
+        const now = new Date().toISOString();
+        const subscription: PlatformSubscription = {
+          planId: String(current.planId || 'starter'),
+          planName: String(current.planName || 'Starter'),
+          status: newStatus,
+          interval: cleanInterval(current.interval || 'monthly'),
+          price: Math.max(0, Number(current.price || 0)),
+          currency: cleanCurrency(current.currency || 'USD'),
+          seatsLimit: Math.max(0, Number(current.seatsLimit || 0)),
+          currentPeriodStart: String(current.currentPeriodStart || now),
+          currentPeriodEnd: String(current.currentPeriodEnd || isoPlusDays(30)),
+          overrideMonthlyOrders: Boolean(current.overrideMonthlyOrders || data.overrideMonthlyOrders),
+          ...(current.trialEndsAt ? { trialEndsAt: String(current.trialEndsAt) } : {}),
+        };
+
+        const actionName =
+          newStatus === 'active' && current.status === 'suspended'
+            ? 'TENANT_SUBSCRIPTION_REACTIVATED'
+            : newStatus === 'active'
+            ? 'TENANT_SUBSCRIPTION_ACTIVATED'
+            : newStatus === 'suspended'
+            ? 'TENANT_SUBSCRIPTION_SUSPENDED'
+            : newStatus === 'cancelled'
+            ? 'TENANT_SUBSCRIPTION_CANCELLED'
+            : `TENANT_SUBSCRIPTION_${newStatus.toUpperCase()}`;
+
+        const audit = createAuthoritativeAuditRecord({
+          tenantId,
+          actorUid: req.user!.uid,
+          actorName: req.user!.email || req.user!.uid,
+          actorEmail: req.user!.email || null,
+          actorRole: 'Super Admin',
+          action: actionName,
+          module: 'Platform Billing',
+          targetType: 'tenant',
+          targetId: tenantId,
+          targetName: String(data.name || data.businessName || tenantId),
+          previousState: { status: current.status, lifecycleStatus: currentLifecycle },
+          newState: { status: newStatus, lifecycleStatus: nextLifecycle },
+          reason,
+          result: 'success',
+          severity: 'warning',
+          details: `Subscription status updated to '${newStatus}'. Reason: ${reason}`,
+          metadata: { platformAdmin: true },
+        });
+
+        await updateAuthoritativeSecurityMetrics(db, audit, transaction);
+        transaction.set(tenantRef, {
+          subscription,
+          lifecycleStatus: nextLifecycle,
+          status: nextLifecycle === 'suspended' ? 'suspended' : nextLifecycle === 'cancelled' ? 'cancelled' : 'active',
+          updatedAt: now,
+        }, { merge: true });
+
+        transaction.set(db.collection('audit_logs').doc(audit.id), audit);
+        transaction.set(db.collection('platform_billing_events').doc(), {
+          tenantId,
+          type: `subscription_${newStatus}`,
+          planId: subscription.planId,
+          planName: subscription.planName,
+          interval: subscription.interval,
+          amount: newStatus === 'cancelled' ? 0 : subscription.price,
+          currency: subscription.currency,
+          status: newStatus,
+          occurredAt: now,
+          description: `Subscription status set to ${newStatus}. Reason: ${reason}`,
+        });
+
+        resultSubscription = subscription;
+      });
+
+      return res.json({ success: true, tenantId, subscription: resultSubscription, lifecycleStatus: nextLifecycle });
+    } catch (err: any) {
+      return res.status(err?.statusCode || 400).json({ error: err?.message || 'Subscription status update failed.' });
     }
   });
 
