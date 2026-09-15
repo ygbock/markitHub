@@ -580,40 +580,68 @@ export function registerPlatformAdminRoutes({
     if (!db) return res.status(503).json({ error: 'Platform service is not configured.' });
 
     const name = String(req.body?.name || '').trim();
-    const ownerUid = String(req.body?.ownerUid || '').trim();
-    const ownerEmail = String(req.body?.ownerEmail || '').trim().toLowerCase();
+    let ownerEmail = String(req.body?.ownerEmail || '').trim().toLowerCase();
+    let ownerUid = String(req.body?.ownerUid || '').trim();
+    const ownerName = String(req.body?.ownerName || '').trim();
+    const reason = String(req.body?.reason || '').trim();
     const currency = cleanCurrency(req.body?.currency);
     const timezone = String(req.body?.timezone || 'UTC').trim() || 'UTC';
     const planId = String(req.body?.planId || 'starter').trim().toLowerCase();
     const interval = cleanInterval(req.body?.billingInterval);
-    const trialDays = Math.min(30, Math.max(0, Math.floor(Number(req.body?.trialDays || 0))));
-    const idempotencyKey = String(req.headers['idempotency-key'] || '').trim().slice(0, 128);
+    const trialDays = Math.min(30, Math.max(0, Math.floor(Number(req.body?.trialDays ?? 14))));
+    const autoProvision = req.body?.autoProvision !== false;
+    const idempotencyKey = String(req.headers['idempotency-key'] || req.body?.idempotencyKey || '').trim().slice(0, 128);
 
     if (!name) return res.status(400).json({ error: 'Tenant name is required.' });
-    if (!ownerUid) return res.status(400).json({ error: 'An existing Firebase owner UID is required for provisioning.' });
+    if (!ownerEmail && !ownerUid) return res.status(400).json({ error: 'Owner email or Firebase UID is required for tenant provisioning.' });
+    if (!reason) return res.status(400).json({ error: 'An administrative reason is required for tenant creation.' });
+
+    if (!ownerUid) {
+      ownerUid = `user_${crypto.randomUUID().replace(/-/g, '').slice(0, 20)}`;
+    }
+    if (!ownerEmail) {
+      ownerEmail = `owner_${ownerUid.slice(-8)}@example.com`;
+    }
 
     try {
       const auth = getAdminAuth();
-      if (!auth) return res.status(503).json({ error: 'Platform authentication service is not configured.' });
-      let ownerUser: any;
+      let ownerUser: any = null;
+    if (req.body?.ownerUid && auth) {
       try {
         ownerUser = await auth.getUser(ownerUid);
-      } catch {
+      } catch (err: any) {
         return res.status(400).json({ error: 'The supplied owner Firebase UID does not exist.' });
       }
+    }
 
       const tenantId = `tenant_${crypto.randomUUID().replace(/-/g, '').slice(0, 20)}`;
       const staffId = `staff_${crypto.randomUUID().replace(/-/g, '').slice(0, 20)}`;
+      const membershipId = `membership_${tenantId.slice(-8)}_${ownerUid.slice(-8)}`;
+      const billingEventId = `event_${crypto.randomUUID().replace(/-/g, '').slice(0, 20)}`;
+
       const tenantRef = db.collection('tenants').doc(tenantId);
+      const userRef = db.collection('users').doc(ownerUid);
+      const membershipRef = db.collection('tenant_memberships').doc(membershipId);
       const staffRef = db.collection('staff').doc(staffId);
-      const billingRef = db.collection('platform_billing_events').doc();
+      const metricsRef = db.collection('tenant_security_metrics').doc(tenantId);
+      const subRef = db.collection('subscription').doc(tenantId);
+      const subPluralRef = db.collection('subscriptions').doc(tenantId);
+      const billingRef = db.collection('billing_events').doc(billingEventId);
+      const platformBillingRef = db.collection('platform_billing_events').doc(billingEventId);
+
       let createdTenant: any = null;
       let replayedProvisioning = false;
 
-      const resolvedPlan = await loadPlan(db, planId);
+      let resolvedPlan: { plan: PlatformPlan; exists: boolean };
+      try {
+        resolvedPlan = await loadPlan(db, planId);
+      } catch (err: any) {
+        return res.status(404).json({ error: err?.message || `Plan '${planId}' not found.` });
+      }
       if (resolvedPlan.plan.status !== 'active') {
         return res.status(409).json({ error: 'Archived plans cannot be assigned during provisioning.' });
       }
+
       await db.runTransaction(async (transaction: any) => {
         const requestRef = idempotencyKey
           ? db.collection('platform_provisioning_requests').doc(crypto.createHash('sha256').update(idempotencyKey).digest('hex'))
@@ -633,10 +661,17 @@ export function registerPlatformAdminRoutes({
 
         const plan = resolvedPlan.plan;
         const now = new Date().toISOString();
-        const lifecycleStatus: TenantLifecycleStatus = trialDays > 0 ? 'trialing' : 'active';
+
+        const lifecycleStatus: TenantLifecycleStatus = autoProvision
+          ? (trialDays > 0 ? 'trialing' : 'active')
+          : 'provisioning';
         const subscriptionStatus: SubscriptionStatus = trialDays > 0 ? 'trialing' : 'active';
+        const provisioningStatus = autoProvision ? 'completed' : 'pending';
+        const onboardingCompletionPercent = autoProvision ? 100 : 25;
         const periodDays = interval === 'annual' ? 365 : 30;
+
         assertLifecycleSubscriptionConsistency(lifecycleStatus, subscriptionStatus);
+
         const subscription: PlatformSubscription = {
           planId: plan.id,
           planName: plan.name,
@@ -650,20 +685,33 @@ export function registerPlatformAdminRoutes({
           ...(trialDays > 0 ? { trialEndsAt: isoPlusDays(trialDays) } : {}),
         };
         const slug = makeTenantSlug(name, tenantId.slice(-6));
+
         createdTenant = {
           id: tenantId,
           name,
-          legalName: name,
+          legalName: String(req.body?.legalName || name).trim(),
           slug,
           status: 'active',
           lifecycleStatus,
+          provisioningStatus,
+          onboardingCompletionPercent,
+          lastProvisioningAttemptAt: autoProvision ? now : null,
+          provisioningError: null,
           ownerUid,
-          ownerEmail: ownerEmail || ownerUser.email || undefined,
+          ownerEmail: ownerEmail || ownerUser?.email || undefined,
+          ownerName: ownerName || (ownerEmail ? ownerEmail.split('@')[0] : 'Business Owner'),
           currency,
           timezone,
           createdAt: now,
           updatedAt: now,
           subscription,
+          store: {
+            name: `${name} Store`,
+            currency,
+            timezone,
+            supportEmail: String(req.body?.supportEmail || ownerEmail).trim(),
+            supportPhone: String(req.body?.supportPhone || '').trim(),
+          },
         };
 
         const audit = createAuthoritativeAuditRecord({
@@ -672,38 +720,71 @@ export function registerPlatformAdminRoutes({
           actorName: req.user!.email || req.user!.uid,
           actorEmail: req.user!.email || null,
           actorRole: 'Super Admin',
-          action: 'TENANT_PROVISIONED',
+          action: autoProvision ? 'TENANT_PROVISIONED' : 'TENANT_CREATION_INITIATED',
           module: 'Platform Administration',
           targetType: 'tenant',
           targetId: tenantId,
           targetName: name,
-          newState: { lifecycleStatus, planId: plan.id, billingInterval: interval, ownerUid },
+          newState: { lifecycleStatus, provisioningStatus, planId: plan.id, billingInterval: interval, ownerUid },
+          reason,
           result: 'success',
           severity: 'critical',
-          details: `Provisioned tenant '${name}' on ${plan.name} plan.`,
+          details: `Provisioned tenant '${name}' on ${plan.name} plan. Reason: ${reason}`,
           metadata: { platformAdmin: true, trialDays, currency, timezone },
         });
+
         await updateAuthoritativeSecurityMetrics(db, audit, transaction);
 
         if (!resolvedPlan.exists) {
           transaction.set(db.collection('platform_plans').doc(plan.id), plan);
         }
+
+        // Write all 7 required docs atomically inside transaction
         transaction.set(tenantRef, createdTenant);
-        transaction.set(staffRef, {
-          id: staffId,
+        transaction.set(userRef, {
+          uid: ownerUid,
+          email: ownerEmail || ownerUser?.email || '',
+          name: ownerName || (ownerEmail ? ownerEmail.split('@')[0] : 'Business Owner'),
+          tenantId,
+          role: 'Business Owner',
+          status: 'active',
+          createdAt: now,
+          updatedAt: now,
+        }, { merge: true });
+
+        const staffMemberData = {
+          id: membershipId,
           uid: ownerUid,
           tenantId,
-          name: (ownerEmail || ownerUser.email) ? String(ownerEmail || ownerUser.email).split('@')[0] : 'Business Owner',
-          email: ownerEmail || ownerUser.email || '',
+          name: ownerName || (ownerEmail ? ownerEmail.split('@')[0] : 'Business Owner'),
+          email: ownerEmail || ownerUser?.email || '',
           role: 'Business Owner',
           status: 'active',
           permissionsOverride: DEFAULT_ROLE_PERMISSIONS['Business Owner'],
           createdAt: now,
           updatedAt: now,
-        });
-        transaction.set(db.collection('audit_logs').doc(audit.id), audit);
+        };
 
-        transaction.set(billingRef, {
+        transaction.set(membershipRef, staffMemberData, { merge: true });
+        transaction.set(staffRef, staffMemberData, { merge: true });
+
+        transaction.set(metricsRef, {
+          tenantId,
+          activeStaffCount: 1,
+          suspendedStaffCount: 0,
+          failedLoginAttempts: 0,
+          securityAlertsCount: 0,
+          lastAuditTimestamp: now,
+          createdAt: now,
+          updatedAt: now,
+        }, { merge: true });
+
+        const subPayload = { tenantId, ...subscription, createdAt: now, updatedAt: now };
+        transaction.set(subRef, subPayload, { merge: true });
+        transaction.set(subPluralRef, subPayload, { merge: true });
+
+        const billingData = {
+          id: billingEventId,
           tenantId,
           type: 'subscription_created',
           planId: plan.id,
@@ -714,7 +795,12 @@ export function registerPlatformAdminRoutes({
           status: trialDays > 0 ? 'trialing' : 'active',
           occurredAt: now,
           description: trialDays > 0 ? `Trial started on ${plan.name}.` : `Subscription started on ${plan.name}.`,
-        });
+        };
+        transaction.set(billingRef, billingData);
+        transaction.set(platformBillingRef, billingData);
+
+        transaction.set(db.collection('audit_logs').doc(audit.id), audit);
+
         if (requestRef) {
           transaction.create(requestRef, {
             tenantId,
@@ -730,7 +816,432 @@ export function registerPlatformAdminRoutes({
         ...(replayedProvisioning ? { replayed: true } : {}),
       });
     } catch (err: any) {
-      return res.status(400).json({ error: err?.message || 'Tenant provisioning failed.' });
+      const statusCode = err?.statusCode || (err?.message?.includes('not found') ? 404 : err?.message?.includes('Archived') ? 409 : 400);
+      return res.status(statusCode).json({ error: err?.message || 'Tenant provisioning failed.' });
+    }
+  });
+
+  app.get('/api/platform/tenants/:tenantId', ...platformAuth, async (req, res) => {
+    const db = getAdminDb();
+    if (!db) return res.status(503).json({ error: 'Platform service is not configured.' });
+    const tenantId = String(req.params.tenantId || '').trim();
+    if (!tenantId) return res.status(400).json({ error: 'Tenant ID is required.' });
+
+    try {
+      const tenantSnap = await db.collection('tenants').doc(tenantId).get();
+      if (!tenantSnap.exists) return res.status(404).json({ error: `Tenant '${tenantId}' not found.` });
+
+      const data = tenantSnap.data() as any;
+      const ownerUid = String(data.ownerUid || '').trim();
+
+      const [userSnap, secSnap, subSnap] = await Promise.all([
+        ownerUid ? db.collection('users').doc(ownerUid).get() : Promise.resolve(null),
+        db.collection('tenant_security_metrics').doc(tenantId).get(),
+        db.collection('subscription').doc(tenantId).get(),
+      ]);
+
+      const ownerUser = userSnap?.exists ? userSnap.data() : { uid: ownerUid, email: data.ownerEmail, name: data.ownerName };
+      const securityMetrics = secSnap?.exists ? secSnap.data() : null;
+      const standaloneSub = subSnap?.exists ? subSnap.data() : null;
+
+      const onboarding = {
+        completionPercent: data.onboardingCompletionPercent ?? (data.lifecycleStatus === 'active' ? 100 : data.lifecycleStatus === 'trialing' ? 80 : 25),
+        provisioningStatus: data.provisioningStatus ?? (data.lifecycleStatus === 'provisioning' ? 'pending' : 'completed'),
+        lastProvisioningAttemptAt: data.lastProvisioningAttemptAt || data.createdAt || null,
+        provisioningError: data.provisioningError || null,
+      };
+
+      return res.json({
+        success: true,
+        tenant: {
+          ...data,
+          subscription: standaloneSub || data.subscription,
+          ownerUser,
+          securityMetrics,
+          onboarding,
+        },
+      });
+    } catch (err: any) {
+      return res.status(500).json({ error: err?.message || 'Unable to fetch tenant details.' });
+    }
+  });
+
+  app.patch('/api/platform/tenants/:tenantId/profile', ...platformAuth, async (req, res) => {
+    const db = getAdminDb();
+    if (!db) return res.status(503).json({ error: 'Platform service is not configured.' });
+    const tenantId = String(req.params.tenantId || '').trim();
+    const reason = String(req.body?.reason || '').trim();
+
+    if (!tenantId) return res.status(400).json({ error: 'Tenant ID is required.' });
+    if (!reason) return res.status(400).json({ error: 'An administrative reason is required for profile updates.' });
+
+    try {
+      let updatedTenant: any = null;
+      await db.runTransaction(async (transaction: any) => {
+        const ref = db.collection('tenants').doc(tenantId);
+        const snap = await transaction.get(ref);
+        if (!snap.exists) throw Object.assign(new Error(`Tenant '${tenantId}' not found.`), { statusCode: 404 });
+
+        const prev = snap.data() as any;
+        const now = new Date().toISOString();
+
+        const name = req.body?.name ? String(req.body.name).trim() : prev.name;
+        const legalName = req.body?.legalName ? String(req.body.legalName).trim() : prev.legalName;
+        const currency = req.body?.currency ? cleanCurrency(req.body.currency) : prev.currency;
+        const timezone = req.body?.timezone ? String(req.body.timezone).trim() : prev.timezone;
+
+        updatedTenant = {
+          ...prev,
+          name,
+          legalName,
+          currency,
+          timezone,
+          store: {
+            ...(prev.store || {}),
+            ...(req.body?.store || {}),
+            ...(req.body?.supportEmail ? { supportEmail: String(req.body.supportEmail).trim() } : {}),
+            ...(req.body?.supportPhone ? { supportPhone: String(req.body.supportPhone).trim() } : {}),
+          },
+          branding: req.body?.branding ? { ...(prev.branding || {}), ...req.body.branding } : prev.branding,
+          policies: req.body?.policies ? { ...(prev.policies || {}), ...req.body.policies } : prev.policies,
+          updatedAt: now,
+        };
+
+        const audit = createAuthoritativeAuditRecord({
+          tenantId,
+          actorUid: req.user!.uid,
+          actorName: req.user!.email || req.user!.uid,
+          actorEmail: req.user!.email || null,
+          actorRole: 'Super Admin',
+          action: 'TENANT_PROFILE_UPDATED',
+          module: 'Platform Administration',
+          targetType: 'tenant',
+          targetId: tenantId,
+          targetName: name,
+          previousState: { name: prev.name, legalName: prev.legalName, currency: prev.currency, timezone: prev.timezone },
+          newState: { name, legalName, currency, timezone },
+          reason,
+          result: 'success',
+          severity: 'info',
+          details: `Updated profile for tenant '${name}'. Reason: ${reason}`,
+          metadata: { platformAdmin: true },
+        });
+
+        await updateAuthoritativeSecurityMetrics(db, audit, transaction);
+        transaction.set(ref, updatedTenant);
+        transaction.set(db.collection('audit_logs').doc(audit.id), audit);
+      });
+
+      return res.json({ success: true, tenant: updatedTenant });
+    } catch (err: any) {
+      const statusCode = err?.statusCode || (err?.message?.includes('not found') ? 404 : 400);
+      return res.status(statusCode).json({ error: err?.message || 'Profile update failed.' });
+    }
+  });
+
+  app.post('/api/platform/tenants/:tenantId/provision', ...platformAuth, async (req, res) => {
+    const db = getAdminDb();
+    if (!db) return res.status(503).json({ error: 'Platform service is not configured.' });
+    const tenantId = String(req.params.tenantId || '').trim();
+    const reason = String(req.body?.reason || '').trim();
+
+    if (!tenantId) return res.status(400).json({ error: 'Tenant ID is required.' });
+    if (!reason) return res.status(400).json({ error: 'An administrative reason is required for tenant provisioning.' });
+
+    try {
+      let provisionedTenant: any = null;
+      const now = new Date().toISOString();
+
+      await db.runTransaction(async (transaction: any) => {
+        const tenantRef = db.collection('tenants').doc(tenantId);
+        const tenantSnap = await transaction.get(tenantRef);
+        if (!tenantSnap.exists) throw Object.assign(new Error(`Tenant '${tenantId}' not found.`), { statusCode: 404 });
+
+        const tenantData = tenantSnap.data() as any;
+        if (tenantData.lifecycleStatus === 'cancelled') {
+          throw Object.assign(new Error('Cancelled tenants cannot be provisioned.'), { statusCode: 409 });
+        }
+
+        if (tenantData.provisioningStatus === 'completed' && tenantData.lifecycleStatus !== 'provisioning') {
+          provisionedTenant = tenantData;
+          return;
+        }
+
+        const trialDays = tenantData.subscription?.trialEndsAt ? 14 : 0;
+        const targetLifecycle: TenantLifecycleStatus = (tenantData.subscription?.status === 'trialing' || trialDays > 0) ? 'trialing' : 'active';
+        const targetSubStatus: SubscriptionStatus = targetLifecycle === 'trialing' ? 'trialing' : 'active';
+
+        assertLifecycleTransition(tenantData.lifecycleStatus || 'provisioning', targetLifecycle);
+        assertLifecycleSubscriptionConsistency(targetLifecycle, targetSubStatus);
+
+        const ownerUid = tenantData.ownerUid || `user_${crypto.randomUUID().replace(/-/g, '').slice(0, 20)}`;
+        const ownerEmail = tenantData.ownerEmail || `owner_${ownerUid.slice(-8)}@example.com`;
+        const membershipId = `membership_${tenantId.slice(-8)}_${ownerUid.slice(-8)}`;
+        const staffId = `staff_${crypto.randomUUID().replace(/-/g, '').slice(0, 20)}`;
+        const billingEventId = `event_${crypto.randomUUID().replace(/-/g, '').slice(0, 20)}`;
+
+        const updatedSubscription = {
+          ...(tenantData.subscription || {}),
+          status: targetSubStatus,
+          updatedAt: now,
+        };
+
+        provisionedTenant = {
+          ...tenantData,
+          lifecycleStatus: targetLifecycle,
+          provisioningStatus: 'completed',
+          provisioningError: null,
+          lastProvisioningAttemptAt: now,
+          onboardingCompletionPercent: 100,
+          subscription: updatedSubscription,
+          updatedAt: now,
+        };
+
+        const userRef = db.collection('users').doc(ownerUid);
+        const membershipRef = db.collection('tenant_memberships').doc(membershipId);
+        const staffRef = db.collection('staff').doc(staffId);
+        const metricsRef = db.collection('tenant_security_metrics').doc(tenantId);
+        const subRef = db.collection('subscription').doc(tenantId);
+        const billingRef = db.collection('billing_events').doc(billingEventId);
+        const platformBillingRef = db.collection('platform_billing_events').doc(billingEventId);
+
+        transaction.set(tenantRef, provisionedTenant);
+        transaction.set(userRef, {
+          uid: ownerUid,
+          email: ownerEmail,
+          name: tenantData.ownerName || ownerEmail.split('@')[0],
+          tenantId,
+          role: 'Business Owner',
+          status: 'active',
+          createdAt: now,
+          updatedAt: now,
+        }, { merge: true });
+
+        const memberData = {
+          id: membershipId,
+          uid: ownerUid,
+          tenantId,
+          name: tenantData.ownerName || ownerEmail.split('@')[0],
+          email: ownerEmail,
+          role: 'Business Owner',
+          status: 'active',
+          permissionsOverride: DEFAULT_ROLE_PERMISSIONS['Business Owner'],
+          createdAt: now,
+          updatedAt: now,
+        };
+        transaction.set(membershipRef, memberData, { merge: true });
+        transaction.set(staffRef, memberData, { merge: true });
+
+        transaction.set(metricsRef, {
+          tenantId,
+          activeStaffCount: 1,
+          suspendedStaffCount: 0,
+          failedLoginAttempts: 0,
+          securityAlertsCount: 0,
+          lastAuditTimestamp: now,
+          createdAt: now,
+          updatedAt: now,
+        }, { merge: true });
+
+        transaction.set(subRef, { tenantId, ...updatedSubscription }, { merge: true });
+
+        const billingData = {
+          id: billingEventId,
+          tenantId,
+          type: 'provisioning_completed',
+          planId: updatedSubscription.planId || 'starter',
+          planName: updatedSubscription.planName || 'Starter',
+          interval: updatedSubscription.interval || 'monthly',
+          amount: updatedSubscription.price || 0,
+          currency: updatedSubscription.currency || 'USD',
+          status: targetSubStatus,
+          occurredAt: now,
+          description: `Tenant '${tenantData.name}' provisioning completed successfully.`,
+        };
+        transaction.set(billingRef, billingData);
+        transaction.set(platformBillingRef, billingData);
+
+        const audit = createAuthoritativeAuditRecord({
+          tenantId,
+          actorUid: req.user!.uid,
+          actorName: req.user!.email || req.user!.uid,
+          actorEmail: req.user!.email || null,
+          actorRole: 'Super Admin',
+          action: 'TENANT_PROVISIONED',
+          module: 'Platform Administration',
+          targetType: 'tenant',
+          targetId: tenantId,
+          targetName: tenantData.name,
+          previousState: { lifecycleStatus: tenantData.lifecycleStatus, provisioningStatus: tenantData.provisioningStatus },
+          newState: { lifecycleStatus: targetLifecycle, provisioningStatus: 'completed' },
+          reason,
+          result: 'success',
+          severity: 'critical',
+          details: `Completed tenant provisioning for '${tenantData.name}'. Reason: ${reason}`,
+          metadata: { platformAdmin: true },
+        });
+
+        await updateAuthoritativeSecurityMetrics(db, audit, transaction);
+        transaction.set(db.collection('audit_logs').doc(audit.id), audit);
+      });
+
+      return res.json({ success: true, tenant: provisionedTenant });
+    } catch (err: any) {
+      try {
+        const now = new Date().toISOString();
+        await db.collection('tenants').doc(tenantId).set({
+          provisioningStatus: 'failed',
+          provisioningError: err?.message || 'Tenant provisioning transaction failed.',
+          lastProvisioningAttemptAt: now,
+          updatedAt: now,
+        }, { merge: true });
+      } catch {}
+      const statusCode = err?.statusCode || (err?.message?.includes('not found') ? 404 : 400);
+      return res.status(statusCode).json({ error: err?.message || 'Tenant provisioning failed.' });
+    }
+  });
+
+  app.post('/api/platform/tenants/:tenantId/retry-provisioning', ...platformAuth, async (req, res) => {
+    const db = getAdminDb();
+    if (!db) return res.status(503).json({ error: 'Platform service is not configured.' });
+    const tenantId = String(req.params.tenantId || '').trim();
+    const reason = String(req.body?.reason || '').trim();
+
+    if (!tenantId) return res.status(400).json({ error: 'Tenant ID is required.' });
+    if (!reason) return res.status(400).json({ error: 'An administrative reason is required for retrying tenant provisioning.' });
+
+    try {
+      let retriedTenant: any = null;
+      const now = new Date().toISOString();
+
+      await db.runTransaction(async (transaction: any) => {
+        const tenantRef = db.collection('tenants').doc(tenantId);
+        const tenantSnap = await transaction.get(tenantRef);
+        if (!tenantSnap.exists) throw Object.assign(new Error(`Tenant '${tenantId}' not found.`), { statusCode: 404 });
+
+        const tenantData = tenantSnap.data() as any;
+        if (tenantData.lifecycleStatus === 'cancelled') {
+          throw Object.assign(new Error('Cancelled tenants cannot be retried for provisioning.'), { statusCode: 409 });
+        }
+
+        const trialDays = tenantData.subscription?.trialEndsAt ? 14 : 0;
+        const targetLifecycle: TenantLifecycleStatus = (tenantData.subscription?.status === 'trialing' || trialDays > 0) ? 'trialing' : 'active';
+        const targetSubStatus: SubscriptionStatus = targetLifecycle === 'trialing' ? 'trialing' : 'active';
+
+        const ownerUid = tenantData.ownerUid || `user_${crypto.randomUUID().replace(/-/g, '').slice(0, 20)}`;
+        const ownerEmail = tenantData.ownerEmail || `owner_${ownerUid.slice(-8)}@example.com`;
+        const membershipId = `membership_${tenantId.slice(-8)}_${ownerUid.slice(-8)}`;
+        const staffId = `staff_${crypto.randomUUID().replace(/-/g, '').slice(0, 20)}`;
+        const billingEventId = `event_${crypto.randomUUID().replace(/-/g, '').slice(0, 20)}`;
+
+        const updatedSubscription = {
+          ...(tenantData.subscription || {}),
+          status: targetSubStatus,
+          updatedAt: now,
+        };
+
+        retriedTenant = {
+          ...tenantData,
+          lifecycleStatus: targetLifecycle,
+          provisioningStatus: 'completed',
+          provisioningError: null,
+          lastProvisioningAttemptAt: now,
+          onboardingCompletionPercent: 100,
+          subscription: updatedSubscription,
+          updatedAt: now,
+        };
+
+        const userRef = db.collection('users').doc(ownerUid);
+        const membershipRef = db.collection('tenant_memberships').doc(membershipId);
+        const staffRef = db.collection('staff').doc(staffId);
+        const metricsRef = db.collection('tenant_security_metrics').doc(tenantId);
+        const subRef = db.collection('subscription').doc(tenantId);
+        const billingRef = db.collection('billing_events').doc(billingEventId);
+
+        transaction.set(tenantRef, retriedTenant);
+        transaction.set(userRef, {
+          uid: ownerUid,
+          email: ownerEmail,
+          name: tenantData.ownerName || ownerEmail.split('@')[0],
+          tenantId,
+          role: 'Business Owner',
+          status: 'active',
+          createdAt: now,
+          updatedAt: now,
+        }, { merge: true });
+
+        const memberData = {
+          id: membershipId,
+          uid: ownerUid,
+          tenantId,
+          name: tenantData.ownerName || ownerEmail.split('@')[0],
+          email: ownerEmail,
+          role: 'Business Owner',
+          status: 'active',
+          permissionsOverride: DEFAULT_ROLE_PERMISSIONS['Business Owner'],
+          createdAt: now,
+          updatedAt: now,
+        };
+        transaction.set(membershipRef, memberData, { merge: true });
+        transaction.set(staffRef, memberData, { merge: true });
+
+        transaction.set(metricsRef, {
+          tenantId,
+          activeStaffCount: 1,
+          suspendedStaffCount: 0,
+          failedLoginAttempts: 0,
+          securityAlertsCount: 0,
+          lastAuditTimestamp: now,
+          createdAt: now,
+          updatedAt: now,
+        }, { merge: true });
+
+        transaction.set(subRef, { tenantId, ...updatedSubscription }, { merge: true });
+
+        const billingData = {
+          id: billingEventId,
+          tenantId,
+          type: 'provisioning_retried',
+          planId: updatedSubscription.planId || 'starter',
+          planName: updatedSubscription.planName || 'Starter',
+          interval: updatedSubscription.interval || 'monthly',
+          amount: updatedSubscription.price || 0,
+          currency: updatedSubscription.currency || 'USD',
+          status: targetSubStatus,
+          occurredAt: now,
+          description: `Retried tenant '${tenantData.name}' provisioning successfully.`,
+        };
+        transaction.set(billingRef, billingData);
+        transaction.set(db.collection('platform_billing_events').doc(billingEventId), billingData);
+
+        const audit = createAuthoritativeAuditRecord({
+          tenantId,
+          actorUid: req.user!.uid,
+          actorName: req.user!.email || req.user!.uid,
+          actorEmail: req.user!.email || null,
+          actorRole: 'Super Admin',
+          action: 'TENANT_PROVISIONING_RETRIED',
+          module: 'Platform Administration',
+          targetType: 'tenant',
+          targetId: tenantId,
+          targetName: tenantData.name,
+          previousState: { lifecycleStatus: tenantData.lifecycleStatus, provisioningStatus: tenantData.provisioningStatus, provisioningError: tenantData.provisioningError },
+          newState: { lifecycleStatus: targetLifecycle, provisioningStatus: 'completed', provisioningError: null },
+          reason,
+          result: 'success',
+          severity: 'critical',
+          details: `Retried tenant provisioning for '${tenantData.name}'. Reason: ${reason}`,
+          metadata: { platformAdmin: true },
+        });
+
+        await updateAuthoritativeSecurityMetrics(db, audit, transaction);
+        transaction.set(db.collection('audit_logs').doc(audit.id), audit);
+      });
+
+      return res.json({ success: true, tenant: retriedTenant });
+    } catch (err: any) {
+      const statusCode = err?.statusCode || (err?.message?.includes('not found') ? 404 : 400);
+      return res.status(statusCode).json({ error: err?.message || 'Tenant provisioning retry failed.' });
     }
   });
 

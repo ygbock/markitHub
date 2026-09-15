@@ -43,7 +43,7 @@ test('lifecycle transition matrix permits activation and suspension paths', () =
 });
 
 test('lifecycle transition matrix rejects invalid transitions', () => {
-  assert.throws(() => assertLifecycleTransition('provisioning', 'suspended'), /Invalid tenant lifecycle transition/);
+  assert.throws(() => assertLifecycleTransition('active', 'trialing'), /Invalid tenant lifecycle transition/);
   assert.throws(() => assertLifecycleTransition('cancelled', 'suspended'), /Invalid tenant lifecycle transition/);
   assert.throws(() => assertLifecycleTransition('active', 'active'), /already active/);
 });

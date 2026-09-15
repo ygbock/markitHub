@@ -248,7 +248,8 @@ test('Lifecycle Test 5: Lifecycle Transition State Machine Rules', () => {
   assert.throws(() => assertLifecycleTransition('cancelled', 'active'), /Invalid tenant lifecycle transition/);
   assert.throws(() => assertLifecycleTransition('cancelled', 'suspended'), /Invalid tenant lifecycle transition/);
   assert.throws(() => assertLifecycleTransition('cancelled', 'trialing'), /Invalid tenant lifecycle transition/);
-  assert.throws(() => assertLifecycleTransition('provisioning', 'suspended'), /Invalid tenant lifecycle transition/);
+  assert.doesNotThrow(() => assertLifecycleTransition('provisioning', 'suspended'));
+  assert.throws(() => assertLifecycleTransition('active', 'trialing'), /Invalid tenant lifecycle transition/);
   assert.throws(() => assertLifecycleTransition('active', 'active'), /already active/);
 });
 

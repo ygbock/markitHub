@@ -333,6 +333,7 @@ test('Integration Test 1.1: Provisioning defaults to Starter plan with active bi
       ownerUid: 'owner_apex_101',
       ownerEmail: 'owner@apex.com',
       trialDays: 0,
+      reason: 'Initial tenant provisioning for Apex Supermarket.',
     },
     superAdminToken,
   );
@@ -382,6 +383,7 @@ test('Integration Test 1.2: Provisioning with trial period sets trialing billing
       ownerEmail: 'owner@fresh.com',
       planId: 'growth',
       trialDays: 14,
+      reason: 'Provisioning trial account for Fresh Market & Bakery.',
     },
     superAdminToken,
   );
@@ -414,6 +416,7 @@ test('Integration Test 1.3: Provisioning validates owner UID existence and rejec
     {
       name: 'Ghost Store',
       ownerUid: 'invalid_firebase_uid_999',
+      reason: 'Validation test for invalid owner UID.',
     },
     superAdminToken,
   );
@@ -711,4 +714,306 @@ test('Integration Test 4.5: Suspended tenant members are blocked from tenant-fac
   assert.equal(evaluation.allowed, false);
   assert.equal(evaluation.statusCode, 403);
   assert.match(evaluation.error || '', /Tenant is suspended or unavailable/i);
+});
+
+// ============================================================================
+// SUITE 5: Tenant Provisioning & Onboarding Endpoints
+// ============================================================================
+
+let createdDraftTenantId: string;
+
+test('Integration Test 5.1: POST /api/platform/tenants with autoProvision=false creates tenant in provisioning state', async () => {
+  const res = await makeApiRequest(
+    'POST',
+    '/api/platform/tenants',
+    {
+      name: 'Draft Store POS',
+      ownerEmail: 'owner@draftstore.com',
+      ownerName: 'Alice Draft',
+      autoProvision: false,
+      reason: 'Creating draft tenant record before hardware installation.',
+    },
+    superAdminToken,
+  );
+
+  assert.equal(res.status, 201);
+  assert.equal(res.data.success, true);
+  assert.ok(res.data.tenant.id);
+  createdDraftTenantId = res.data.tenant.id;
+
+  const tenant = res.data.tenant;
+  assert.equal(tenant.name, 'Draft Store POS');
+  assert.equal(tenant.lifecycleStatus, 'provisioning');
+  assert.equal(tenant.provisioningStatus, 'pending');
+  assert.equal(tenant.onboardingCompletionPercent, 25);
+  assert.equal(tenant.lastProvisioningAttemptAt, null);
+
+  // Check 7 atomic Firestore documents
+  assert.ok(db.docs.get(`tenants/${createdDraftTenantId}`));
+  assert.ok(db.docs.get(`users/${tenant.ownerUid}`));
+  const member = Array.from(db.docs.entries()).find(([p, d]) => p.startsWith('tenant_memberships/') && d.tenantId === createdDraftTenantId)?.[1];
+  assert.ok(member);
+  assert.ok(db.docs.get(`tenant_security_metrics/${createdDraftTenantId}`));
+  assert.ok(db.docs.get(`subscription/${createdDraftTenantId}`));
+  const billingEvent = Array.from(db.docs.entries()).find(([p, d]) => p.startsWith('platform_billing_events/') && d.tenantId === createdDraftTenantId)?.[1];
+  assert.ok(billingEvent);
+  const auditDoc = Array.from(db.docs.entries()).find(([p, d]) => p.startsWith('audit_logs/') && d.tenantId === createdDraftTenantId)?.[1];
+  assert.ok(auditDoc);
+  assert.equal(auditDoc.reason, 'Creating draft tenant record before hardware installation.');
+});
+
+test('Integration Test 5.2: POST /api/platform/tenants validates required parameters', async () => {
+  // Missing name
+  const res1 = await makeApiRequest(
+    'POST',
+    '/api/platform/tenants',
+    { ownerEmail: 'test@example.com', reason: 'Valid reason' },
+    superAdminToken,
+  );
+  assert.equal(res1.status, 400);
+  assert.equal(res1.data.error, 'Tenant name is required.');
+
+  // Missing owner email/uid
+  const res2 = await makeApiRequest(
+    'POST',
+    '/api/platform/tenants',
+    { name: 'No Owner Store', reason: 'Valid reason' },
+    superAdminToken,
+  );
+  assert.equal(res2.status, 400);
+  assert.equal(res2.data.error, 'Owner email or Firebase UID is required for tenant provisioning.');
+
+  // Missing administrative reason
+  const res3 = await makeApiRequest(
+    'POST',
+    '/api/platform/tenants',
+    { name: 'No Reason Store', ownerEmail: 'test@example.com', reason: '  ' },
+    superAdminToken,
+  );
+  assert.equal(res3.status, 400);
+  assert.equal(res3.data.error, 'An administrative reason is required for tenant creation.');
+});
+
+test('Integration Test 5.3: POST /api/platform/tenants enforces idempotency protection', async () => {
+  const idempotencyKey = `idem_key_${Math.random().toString(36).substring(2, 10)}`;
+
+  const res1 = await makeApiRequest(
+    'POST',
+    '/api/platform/tenants',
+    {
+      name: 'Idempotent Market',
+      ownerEmail: 'idem@market.com',
+      reason: 'Testing initial creation with idempotency key.',
+    },
+    superAdminToken,
+    { 'Idempotency-Key': idempotencyKey },
+  );
+
+  assert.equal(res1.status, 201);
+  const tenantId = res1.data.tenant.id;
+
+  // Duplicate request with identical idempotency key
+  const res2 = await makeApiRequest(
+    'POST',
+    '/api/platform/tenants',
+    {
+      name: 'Idempotent Market Duplicate',
+      ownerEmail: 'idem@market.com',
+      reason: 'Retrying creation with same idempotency key.',
+    },
+    superAdminToken,
+    { 'Idempotency-Key': idempotencyKey },
+  );
+
+  assert.equal(res2.status, 200);
+  assert.equal(res2.data.replayed, true);
+  assert.equal(res2.data.tenant.id, tenantId);
+});
+
+test('Integration Test 5.4: GET /api/platform/tenants/:tenantId returns full tenant profile and onboarding metrics', async () => {
+  const res = await makeApiRequest(
+    'GET',
+    `/api/platform/tenants/${createdDraftTenantId}`,
+    undefined,
+    superAdminToken,
+  );
+
+  assert.equal(res.status, 200);
+  assert.equal(res.data.success, true);
+  const tenant = res.data.tenant;
+  assert.equal(tenant.id, createdDraftTenantId);
+  assert.ok(tenant.ownerUser);
+  assert.ok(tenant.securityMetrics);
+  assert.ok(tenant.onboarding);
+  assert.equal(tenant.onboarding.provisioningStatus, 'pending');
+  assert.equal(tenant.onboarding.completionPercent, 25);
+});
+
+test('Integration Test 5.5: GET /api/platform/tenants/:tenantId returns 404 for missing tenant', async () => {
+  const res = await makeApiRequest(
+    'GET',
+    '/api/platform/tenants/non_existent_tenant_99999',
+    undefined,
+    superAdminToken,
+  );
+
+  assert.equal(res.status, 404);
+  assert.match(res.data.error, /not found/i);
+});
+
+test('Integration Test 5.6: PATCH /api/platform/tenants/:tenantId/profile updates store profile and audits changes', async () => {
+  const res = await makeApiRequest(
+    'PATCH',
+    `/api/platform/tenants/${createdDraftTenantId}/profile`,
+    {
+      name: 'Draft Store POS Updated',
+      legalName: 'Draft Store Operations LLC',
+      supportEmail: 'support@draftstore.com',
+      supportPhone: '+1-555-0199',
+      reason: 'Updating legal name and support contacts prior to launch.',
+    },
+    superAdminToken,
+  );
+
+  assert.equal(res.status, 200);
+  assert.equal(res.data.success, true);
+  const tenant = res.data.tenant;
+  assert.equal(tenant.name, 'Draft Store POS Updated');
+  assert.equal(tenant.legalName, 'Draft Store Operations LLC');
+  assert.equal(tenant.store.supportEmail, 'support@draftstore.com');
+  assert.equal(tenant.store.supportPhone, '+1-555-0199');
+
+  // Verify audit record
+  const auditLogs = Array.from(db.docs.entries()).filter(([p]) => p.startsWith('audit_logs/'));
+  const profileAudit = auditLogs.find(
+    ([_, d]) => d.tenantId === createdDraftTenantId && d.action === 'TENANT_PROFILE_UPDATED',
+  )?.[1];
+
+  assert.ok(profileAudit);
+  assert.equal(profileAudit.reason, 'Updating legal name and support contacts prior to launch.');
+});
+
+test('Integration Test 5.7: PATCH /api/platform/tenants/:tenantId/profile requires mandatory reason', async () => {
+  const res = await makeApiRequest(
+    'PATCH',
+    `/api/platform/tenants/${createdDraftTenantId}/profile`,
+    {
+      name: 'Unauthorized Profile Change',
+      reason: '   ',
+    },
+    superAdminToken,
+  );
+
+  assert.equal(res.status, 400);
+  assert.equal(res.data.error, 'An administrative reason is required for profile updates.');
+});
+
+test('Integration Test 5.8: POST /api/platform/tenants/:tenantId/provision completes provisioning flow', async () => {
+  const res = await makeApiRequest(
+    'POST',
+    `/api/platform/tenants/${createdDraftTenantId}/provision`,
+    {
+      reason: 'Store onboarded and verified; completing tenant provisioning.',
+    },
+    superAdminToken,
+  );
+
+  assert.equal(res.status, 200);
+  assert.equal(res.data.success, true);
+  const tenant = res.data.tenant;
+  assert.equal(tenant.provisioningStatus, 'completed');
+  assert.equal(tenant.onboardingCompletionPercent, 100);
+  assert.ok(tenant.lastProvisioningAttemptAt);
+  assert.equal(tenant.provisioningError, null);
+  assert.equal(tenant.lifecycleStatus, 'trialing');
+
+  // Verify audit log
+  const auditLogs = Array.from(db.docs.entries()).filter(([p]) => p.startsWith('audit_logs/'));
+  const provAudit = auditLogs.find(
+    ([_, d]) => d.tenantId === createdDraftTenantId && d.action === 'TENANT_PROVISIONED',
+  )?.[1];
+
+  assert.ok(provAudit);
+  assert.equal(provAudit.reason, 'Store onboarded and verified; completing tenant provisioning.');
+});
+
+test('Integration Test 5.9: POST /api/platform/tenants/:tenantId/provision is idempotent for completed tenants', async () => {
+  const res = await makeApiRequest(
+    'POST',
+    `/api/platform/tenants/${createdDraftTenantId}/provision`,
+    {
+      reason: 'Repeating provisioning request for verified tenant.',
+    },
+    superAdminToken,
+  );
+
+  assert.equal(res.status, 200);
+  assert.equal(res.data.tenant.provisioningStatus, 'completed');
+});
+
+test('Integration Test 5.10: POST /api/platform/tenants/:tenantId/retry-provisioning resets provisioning state', async () => {
+  // Manually set provisioningStatus to failed for testing retry
+  const docPath = `tenants/${createdDraftTenantId}`;
+  const existing = db.docs.get(docPath);
+  db.docs.set(docPath, {
+    ...existing,
+    provisioningStatus: 'failed',
+    provisioningError: 'Simulated infrastructure timeout',
+  });
+
+  const res = await makeApiRequest(
+    'POST',
+    `/api/platform/tenants/${createdDraftTenantId}/retry-provisioning`,
+    {
+      reason: 'Retrying failed tenant provisioning after resolving network bottleneck.',
+    },
+    superAdminToken,
+  );
+
+  assert.equal(res.status, 200);
+  assert.equal(res.data.success, true);
+  const tenant = res.data.tenant;
+  assert.equal(tenant.provisioningStatus, 'completed');
+  assert.equal(tenant.provisioningError, null);
+  assert.equal(tenant.onboardingCompletionPercent, 100);
+
+  // Verify audit log
+  const auditLogs = Array.from(db.docs.entries()).filter(([p]) => p.startsWith('audit_logs/'));
+  const retryAudit = auditLogs.find(
+    ([_, d]) => d.tenantId === createdDraftTenantId && d.action === 'TENANT_PROVISIONING_RETRIED',
+  )?.[1];
+
+  assert.ok(retryAudit);
+  assert.equal(retryAudit.reason, 'Retrying failed tenant provisioning after resolving network bottleneck.');
+});
+
+test('Integration Test 5.11: Provisioning and retry endpoints reject cancelled tenants', async () => {
+  // Set tenant to cancelled
+  const docPath = `tenants/${createdDraftTenantId}`;
+  const existing = db.docs.get(docPath);
+  db.docs.set(docPath, {
+    ...existing,
+    lifecycleStatus: 'cancelled',
+    status: 'cancelled',
+  });
+
+  const res1 = await makeApiRequest(
+    'POST',
+    `/api/platform/tenants/${createdDraftTenantId}/provision`,
+    { reason: 'Attempting provisioning on cancelled tenant.' },
+    superAdminToken,
+  );
+
+  assert.equal(res1.status, 409);
+  assert.equal(res1.data.error, 'Cancelled tenants cannot be provisioned.');
+
+  const res2 = await makeApiRequest(
+    'POST',
+    `/api/platform/tenants/${createdDraftTenantId}/retry-provisioning`,
+    { reason: 'Attempting retry on cancelled tenant.' },
+    superAdminToken,
+  );
+
+  assert.equal(res2.status, 409);
+  assert.equal(res2.data.error, 'Cancelled tenants cannot be retried for provisioning.');
 });

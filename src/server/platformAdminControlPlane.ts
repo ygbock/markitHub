@@ -4,6 +4,16 @@ export type PlatformPlanStatus = 'active' | 'archived';
 export type BillingInterval = 'monthly' | 'annual';
 export type SubscriptionStatus = 'trialing' | 'active' | 'past_due' | 'suspended' | 'cancelled';
 export type TenantLifecycleStatus = 'provisioning' | 'trialing' | 'active' | 'suspended' | 'archived' | 'cancelled';
+export type ProvisioningStatus = 'pending' | 'in_progress' | 'completed' | 'failed';
+
+export interface OnboardingStats {
+  awaitingProvisioning: number;
+  provisioningInProgress: number;
+  provisioningFailures: number;
+  trialTenants: number;
+  activeTenants: number;
+  onboardingCompletionPercent: number;
+}
 
 export interface PlatformPlan {
   id: string;
@@ -134,7 +144,7 @@ export function assertLifecycleTransition(current: TenantLifecycleStatus, next: 
     });
   }
   const allowed: Record<TenantLifecycleStatus, TenantLifecycleStatus[]> = {
-    provisioning: ['trialing', 'active', 'archived', 'cancelled'],
+    provisioning: ['trialing', 'active', 'suspended', 'archived', 'cancelled'],
     trialing: ['active', 'suspended', 'archived', 'cancelled'],
     active: ['suspended', 'archived', 'cancelled'],
     suspended: ['active', 'archived', 'cancelled'],
@@ -157,7 +167,7 @@ export function assertLifecycleSubscriptionConsistency(
   subscriptionStatus: SubscriptionStatus,
 ): void {
   const allowed: Record<TenantLifecycleStatus, SubscriptionStatus[]> = {
-    provisioning: ['trialing', 'active'],
+    provisioning: ['trialing', 'active', 'suspended', 'cancelled'],
     trialing: ['trialing', 'active'],
     active: ['active', 'past_due'],
     suspended: ['suspended'],
@@ -172,6 +182,39 @@ export function assertLifecycleSubscriptionConsistency(
       { statusCode: 409, code: 'INVALID_TENANT_LIFECYCLE_TRANSITION' },
     );
   }
+}
+
+export function calculateOnboardingStats(tenants: any[]): OnboardingStats {
+  let awaitingProvisioning = 0;
+  let provisioningInProgress = 0;
+  let provisioningFailures = 0;
+  let trialTenants = 0;
+  let activeTenants = 0;
+  let totalPercent = 0;
+
+  for (const tenant of tenants) {
+    const lifecycle = tenant.lifecycleStatus || tenant.status;
+    const provStatus = tenant.provisioningStatus;
+
+    if (provStatus === 'failed') provisioningFailures++;
+    else if (provStatus === 'in_progress') provisioningInProgress++;
+    else if (provStatus === 'pending' || lifecycle === 'provisioning') awaitingProvisioning++;
+
+    if (lifecycle === 'trialing') trialTenants++;
+    if (lifecycle === 'active') activeTenants++;
+
+    totalPercent += Number(tenant.onboardingCompletionPercent ?? (lifecycle === 'active' ? 100 : lifecycle === 'trialing' ? 80 : 25));
+  }
+
+  const onboardingCompletionPercent = tenants.length > 0 ? Math.round(totalPercent / tenants.length) : 0;
+  return {
+    awaitingProvisioning,
+    provisioningInProgress,
+    provisioningFailures,
+    trialTenants,
+    activeTenants,
+    onboardingCompletionPercent,
+  };
 }
 
 export function lifecycleForSubscriptionStatus(status: SubscriptionStatus): TenantLifecycleStatus | null {
