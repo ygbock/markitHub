@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import {
   DEFAULT_PLATFORM_PLANS,
   assertLifecycleTransition,
+  assertLifecycleSubscriptionConsistency,
+  lifecycleForSubscriptionStatus,
   calculateSubscriptionRevenue,
   makeTenantSlug,
   normalizePlanInput,
@@ -90,4 +92,29 @@ test('archived plans remain representable but are not active defaults', () => {
 
 test('empty plan name is rejected', () => {
   assert.throws(() => normalizePlanInput({ id: 'bad', name: '   ' }), /Plan name is required/);
+});
+
+test('cancelled tenants are terminal', () => {
+  assert.throws(() => assertLifecycleTransition('cancelled', 'active'), /Invalid tenant lifecycle transition/);
+  assert.throws(() => assertLifecycleTransition('cancelled', 'trialing'), /Invalid tenant lifecycle transition/);
+});
+
+test('tenant and subscription lifecycle states must remain compatible', () => {
+  assert.doesNotThrow(() => assertLifecycleSubscriptionConsistency('provisioning', 'trialing'));
+  assert.doesNotThrow(() => assertLifecycleSubscriptionConsistency('trialing', 'active'));
+  assert.doesNotThrow(() => assertLifecycleSubscriptionConsistency('active', 'past_due'));
+  assert.doesNotThrow(() => assertLifecycleSubscriptionConsistency('suspended', 'suspended'));
+  assert.doesNotThrow(() => assertLifecycleSubscriptionConsistency('cancelled', 'cancelled'));
+
+  assert.throws(() => assertLifecycleSubscriptionConsistency('active', 'cancelled'), /Invalid tenant\/subscription state combination/);
+  assert.throws(() => assertLifecycleSubscriptionConsistency('suspended', 'active'), /Invalid tenant\/subscription state combination/);
+  assert.throws(() => assertLifecycleSubscriptionConsistency('cancelled', 'suspended'), /Invalid tenant\/subscription state combination/);
+});
+
+test('terminal subscription statuses map to operational lifecycle states', () => {
+  assert.equal(lifecycleForSubscriptionStatus('suspended'), 'suspended');
+  assert.equal(lifecycleForSubscriptionStatus('cancelled'), 'cancelled');
+  assert.equal(lifecycleForSubscriptionStatus('active'), null);
+  assert.equal(lifecycleForSubscriptionStatus('past_due'), null);
+  assert.equal(lifecycleForSubscriptionStatus('trialing'), null);
 });
