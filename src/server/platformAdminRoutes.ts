@@ -6,6 +6,8 @@ import { calculateUsagePercent, evaluateUsageLimit, usageLimitState, usageMeterI
 import {
   DEFAULT_PLATFORM_PLANS,
   assertLifecycleTransition,
+  assertLifecycleSubscriptionConsistency,
+  lifecycleForSubscriptionStatus,
   calculateSubscriptionRevenue,
   makeTenantSlug,
   normalizePlanInput,
@@ -431,6 +433,7 @@ export function registerPlatformAdminRoutes({
         const lifecycleStatus: TenantLifecycleStatus = trialDays > 0 ? 'trialing' : 'active';
         const subscriptionStatus: SubscriptionStatus = trialDays > 0 ? 'trialing' : 'active';
         const periodDays = interval === 'annual' ? 365 : 30;
+        assertLifecycleSubscriptionConsistency(nextLifecycle, status);
         const subscription: PlatformSubscription = {
           planId: plan.id,
           planName: plan.name,
@@ -545,9 +548,24 @@ export function registerPlatformAdminRoutes({
         if (!tenantSnap.exists) throw Object.assign(new Error(`Tenant '${tenantId}' not found.`), { statusCode: 404 });
         const data = tenantSnap.data() as any;
         const current = data.subscription || {};
+        const currentLifecycle = cleanLifecycleStatus(data.lifecycleStatus || data.status);
         const planId = tenantPlanId || String(current.planId || 'starter');
         const interval = cleanInterval(req.body?.billingInterval || current.interval);
         const status = cleanSubscriptionStatus(req.body?.status || current.status || 'active');
+        const requestedStatusChange = req.body?.status !== undefined && status !== cleanSubscriptionStatus(current.status || 'active');
+        const reason = String(req.body?.reason || '').trim();
+        const lifecycleFromSubscription = lifecycleForSubscriptionStatus(status);
+        let nextLifecycle = currentLifecycle;
+        if (lifecycleFromSubscription && lifecycleFromSubscription !== currentLifecycle) {
+          nextLifecycle = lifecycleFromSubscription;
+          assertLifecycleTransition(currentLifecycle, nextLifecycle);
+        } else if (requestedStatusChange && ['suspended', 'cancelled'].includes(currentLifecycle) && status === 'active') {
+          nextLifecycle = 'active';
+          assertLifecycleTransition(currentLifecycle, nextLifecycle);
+        }
+        if (requestedStatusChange && lifecycleFromSubscription && lifecycleFromSubscription !== currentLifecycle && !reason) {
+          throw Object.assign(new Error('A reason is required when a subscription status changes tenant lifecycle.'), { statusCode: 400 });
+        }
         const plan = resolvedPlan.plan;
         const now = new Date().toISOString();
         const subscription: PlatformSubscription = {
@@ -574,7 +592,8 @@ export function registerPlatformAdminRoutes({
           targetId: tenantId,
           targetName: String(data.name || data.businessName || tenantId),
           previousState: { planId: current.planId, planName: current.planName, status: current.status, interval: current.interval, price: current.price },
-          newState: { planId: plan.id, planName: plan.name, status, interval, price: subscription.price },
+          newState: { planId: plan.id, planName: plan.name, status, interval, price: subscription.price, lifecycleStatus: nextLifecycle },
+          reason: reason || undefined,
           result: 'success',
           severity: 'warning',
           details: `Subscription changed to ${plan.name} (${interval}).`,
@@ -584,7 +603,7 @@ export function registerPlatformAdminRoutes({
         const billingRef = db.collection('platform_billing_events').doc();
         await updateAuthoritativeSecurityMetrics(db, audit, transaction);
         if (!resolvedPlan.exists) transaction.set(db.collection('platform_plans').doc(plan.id), plan);
-        transaction.set(tenantRef, { subscription, updatedAt: now }, { merge: true });
+        transaction.set(tenantRef, { lifecycleStatus: nextLifecycle, status: nextLifecycle === 'suspended' || nextLifecycle === 'cancelled' ? 'suspended' : 'active', subscription, updatedAt: now }, { merge: true });
         transaction.set(auditRef, audit);
         transaction.set(billingRef, {
           tenantId,
