@@ -53,7 +53,7 @@ import {
   Cell,
 } from 'recharts';
 
-type Tab = 'overview' | 'alerts' | 'notifications' | 'analytics_revenue' | 'analytics_usage' | 'analytics_health' | 'tenants' | 'plans' | 'billing';
+type Tab = 'overview' | 'operations' | 'alerts' | 'notifications' | 'analytics_revenue' | 'analytics_usage' | 'analytics_health' | 'tenants' | 'plans' | 'billing';
 type TimeframeOption = 'today' | '7d' | '30d' | '90d' | '12m';
 
 interface Plan {
@@ -222,6 +222,7 @@ export default function SuperAdminDashboard() {
   const [usage, setUsage] = useState<UsageRow[]>([]);
   const [meteredUsage, setMeteredUsage] = useState<MeteredUsageRow[]>([]);
   const [billing, setBilling] = useState<BillingData | null>(null);
+  const [operations, setOperations] = useState<any | null>(null);
 
   const [analyticsOverview, setAnalyticsOverview] = useState<any | null>(null);
   const [analyticsTenants, setAnalyticsTenants] = useState<any[]>([]);
@@ -523,6 +524,7 @@ export default function SuperAdminDashboard() {
     setError(null);
     try {
       const [
+        operationsRes,
         dashboardRes,
         plansRes,
         tenantsRes,
@@ -541,6 +543,7 @@ export default function SuperAdminDashboard() {
         notificationPreferencesRes,
         escalationsRes,
       ] = await Promise.all([
+        apiFetch<any>('/api/platform/operations/overview'),
         apiFetch<DashboardData>('/api/platform/dashboard'),
         apiFetch<{ plans: Plan[] }>('/api/platform/plans'),
         apiFetch<{ tenants: Tenant[] }>('/api/platform/tenants?limit=100'),
@@ -559,6 +562,7 @@ export default function SuperAdminDashboard() {
         apiFetch<{ preferences: any }>('/api/platform/notification-preferences'),
         apiFetch<{ policies: any[] }>('/api/platform/escalation-policies'),
       ]);
+      setOperations(operationsRes);
       setDashboard(dashboardRes);
       setPlans(plansRes.plans || []);
       setTenants(tenantsRes.tenants || []);
@@ -703,6 +707,7 @@ export default function SuperAdminDashboard() {
 
   const tabs: Array<[Tab, string, React.ElementType]> = [
     ['overview', 'Overview', Gauge],
+    ['operations', 'Operations Center', ShieldCheck],
     ['alerts', 'Alerts & Incidents', ShieldAlert],
     ['notifications', 'Notifications & Escalations', Bell],
     ['analytics_revenue', 'Revenue Analytics', BadgeDollarSign],
@@ -783,6 +788,103 @@ export default function SuperAdminDashboard() {
         </div>
       ) : (
         <>
+          {tab === 'operations' && (
+            <div className="space-y-6">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+                <div>
+                  <h2 className="flex items-center gap-2 text-xl font-black text-slate-900">
+                    <ShieldCheck className="h-6 w-6 text-indigo-600" /> Platform Operations Center
+                  </h2>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Unified operational view across tenant lifecycle, provisioning, billing, usage, alerts, notifications, and SLA escalation.
+                  </p>
+                </div>
+                <button onClick={loadAll} disabled={loading} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-60">
+                  <RefreshCw className={loading ? 'h-3.5 w-3.5 animate-spin' : 'h-3.5 w-3.5'} /> Refresh Operations
+                </button>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4 sm:grid-cols-4 lg:grid-cols-8">
+                {[
+                  ['Tenants', operations?.kpis?.tenants ?? 0, Building2],
+                  ['Provisioning', operations?.kpis?.provisioning ?? 0, UserPlus],
+                  ['Suspended', operations?.kpis?.suspended ?? 0, Ban],
+                  ['Past Due', operations?.kpis?.pastDue ?? 0, CreditCard],
+                  ['Usage Risk', operations?.kpis?.usageRisk ?? 0, Activity],
+                  ['Open Alerts', operations?.kpis?.openAlerts ?? 0, ShieldAlert],
+                  ['Unread', operations?.kpis?.unreadNotifications ?? 0, Bell],
+                  ['Escalated', operations?.kpis?.escalatedIncidents ?? 0, BellRing],
+                ].map(([label, value, Icon]) => (
+                  <div key={String(label)} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                    <div className="flex items-center justify-between text-slate-500">
+                      {React.createElement(Icon as React.ElementType, { className: 'h-4 w-4 text-indigo-600' })}
+                      <span className="text-[9px] font-black uppercase tracking-wider">{label}</span>
+                    </div>
+                    <div className="mt-2 text-2xl font-black text-slate-900">{String(value)}</div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="grid gap-6 lg:grid-cols-2">
+                <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                  <div className="mb-4 flex items-center justify-between">
+                    <div>
+                      <h3 className="text-sm font-black text-slate-900">Operational Exceptions</h3>
+                      <p className="text-xs text-slate-500">Queues requiring administrative attention.</p>
+                    </div>
+                    <Activity className="h-5 w-5 text-indigo-600" />
+                  </div>
+                  <div className="space-y-2">
+                    {(operations?.exceptions || []).map((item: any) => (
+                      <button key={item.key} onClick={() => item.tab && setTab(item.tab as Tab)} className="flex w-full items-center justify-between rounded-xl border border-slate-100 bg-slate-50 px-3 py-3 text-left hover:bg-slate-100">
+                        <span>
+                          <span className="block text-xs font-black text-slate-800">{item.label}</span>
+                          <span className="block text-[11px] text-slate-500">{item.description}</span>
+                        </span>
+                        <span className="rounded-full bg-white px-2.5 py-1 text-xs font-black text-slate-700 shadow-sm">{item.count}</span>
+                      </button>
+                    ))}
+                    {!operations?.exceptions?.length && <div className="rounded-xl bg-emerald-50 p-4 text-xs font-bold text-emerald-700">No operational exceptions reported.</div>}
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                  <div className="mb-4 flex items-center justify-between">
+                    <div>
+                      <h3 className="text-sm font-black text-slate-900">Recent Operational Activity</h3>
+                      <p className="text-xs text-slate-500">Correlated platform events from the authoritative audit stream.</p>
+                    </div>
+                    <Clock className="h-5 w-5 text-slate-500" />
+                  </div>
+                  <div className="space-y-2">
+                    {(operations?.recentActivity || []).map((event: any) => (
+                      <div key={event.id} className="flex items-center justify-between rounded-xl border border-slate-100 px-3 py-3">
+                        <div className="min-w-0">
+                          <div className="truncate text-xs font-black text-slate-800">{event.action}</div>
+                          <div className="truncate text-[11px] text-slate-500">{event.tenantName || event.tenantId || 'Platform'} · {event.module || 'Platform'}</div>
+                        </div>
+                        <div className="ml-3 shrink-0 text-[10px] font-semibold text-slate-400">{dateLabel(event.timestamp)}</div>
+                      </div>
+                    ))}
+                    {!operations?.recentActivity?.length && <div className="rounded-xl bg-slate-50 p-4 text-xs text-slate-500">No recent operational activity.</div>}
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-indigo-100 bg-indigo-50/50 p-5">
+                <div className="flex items-start gap-3">
+                  <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-indigo-600" />
+                  <div>
+                    <h3 className="text-sm font-black text-slate-900">Control-plane correlation</h3>
+                    <p className="mt-1 text-xs leading-5 text-slate-600">
+                      Use the existing tenant, billing, usage, alert, and notification views to execute authorized actions. Mutations remain server-authoritative and continue to require the existing lifecycle guards, audit justification, and atomicity controls.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
           {tab === 'alerts' && (
             <div className="space-y-6">
               {/* Header & Controls */}
