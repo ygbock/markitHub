@@ -603,7 +603,7 @@ export function registerPlatformAdminRoutes({
         const billingRef = db.collection('platform_billing_events').doc();
         await updateAuthoritativeSecurityMetrics(db, audit, transaction);
         if (!resolvedPlan.exists) transaction.set(db.collection('platform_plans').doc(plan.id), plan);
-        transaction.set(tenantRef, { lifecycleStatus: nextLifecycle, status: nextLifecycle === 'suspended' || nextLifecycle === 'cancelled' ? 'suspended' : 'active', subscription, updatedAt: now }, { merge: true });
+        transaction.set(tenantRef, { lifecycleStatus: nextLifecycle, status: nextLifecycle === 'suspended' ? 'suspended' : nextLifecycle === 'cancelled' ? 'cancelled' : 'active', subscription, updatedAt: now }, { merge: true });
         transaction.set(auditRef, audit);
         transaction.set(billingRef, {
           tenantId,
@@ -648,7 +648,7 @@ export function registerPlatformAdminRoutes({
         const currentLifecycle = cleanLifecycleStatus(data.lifecycleStatus || data.status);
         assertLifecycleTransition(currentLifecycle, nextLifecycle);
         const now = new Date().toISOString();
-        const operationalStatus = nextLifecycle === 'suspended' || nextLifecycle === 'cancelled' ? 'suspended' : 'active';
+        const operationalStatus = nextLifecycle === 'suspended' ? 'suspended' : nextLifecycle === 'cancelled' ? 'cancelled' : 'active';
         const subscription = { ...(data.subscription || {}) };
         if (nextLifecycle === 'suspended') subscription.status = 'suspended';
         if (nextLifecycle === 'cancelled') subscription.status = 'cancelled';
