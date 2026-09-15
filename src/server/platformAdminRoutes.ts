@@ -433,7 +433,7 @@ export function registerPlatformAdminRoutes({
         const lifecycleStatus: TenantLifecycleStatus = trialDays > 0 ? 'trialing' : 'active';
         const subscriptionStatus: SubscriptionStatus = trialDays > 0 ? 'trialing' : 'active';
         const periodDays = interval === 'annual' ? 365 : 30;
-        assertLifecycleSubscriptionConsistency(nextLifecycle, status);
+        assertLifecycleSubscriptionConsistency(lifecycleStatus, subscriptionStatus);
         const subscription: PlatformSubscription = {
           planId: plan.id,
           planName: plan.name,
@@ -652,7 +652,11 @@ export function registerPlatformAdminRoutes({
         const subscription = { ...(data.subscription || {}) };
         if (nextLifecycle === 'suspended') subscription.status = 'suspended';
         if (nextLifecycle === 'cancelled') subscription.status = 'cancelled';
-        if (nextLifecycle === 'active' && ['suspended', 'cancelled'].includes(subscription.status)) subscription.status = 'active';
+        if (nextLifecycle === 'active') subscription.status = 'active';
+        if (nextLifecycle === 'trialing' && !['trialing', 'active'].includes(String(subscription.status || ''))) {
+          subscription.status = 'trialing';
+        }
+        assertLifecycleSubscriptionConsistency(nextLifecycle, cleanSubscriptionStatus(subscription.status));
 
         const audit = createAuthoritativeAuditRecord({
           tenantId,
