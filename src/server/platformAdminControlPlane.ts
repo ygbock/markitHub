@@ -273,3 +273,535 @@ export function summarizeSecurityMetrics(doc: TenantSecurityMetricsDoc | null | 
   if (!doc) return 0;
   return Object.values(doc.dailyBuckets || {}).reduce((sum, value) => sum + Math.max(0, Number(value) || 0), 0);
 }
+
+export type TenantHealthStatus = 'HEALTHY' | 'AT_RISK' | 'CRITICAL';
+
+export interface TenantHealthInfo {
+  status: TenantHealthStatus;
+  healthScore: number;
+  reasons: string[];
+}
+
+export function calculateTenantHealth(input: {
+  lifecycleStatus?: string;
+  provisioningStatus?: string;
+  subscriptionStatus?: string;
+  usagePercent?: number;
+  overrideActive?: boolean;
+  hasPaymentFailure?: boolean;
+  lastActivityAt?: string | null;
+  createdAt?: string | null;
+}): TenantHealthInfo {
+  const reasons: string[] = [];
+  let score = 100;
+
+  const lifecycle = String(input.lifecycleStatus || 'active').toLowerCase();
+  const provisioning = String(input.provisioningStatus || 'completed').toLowerCase();
+  const subscription = String(input.subscriptionStatus || 'active').toLowerCase();
+  const usagePercent = Number(input.usagePercent || 0);
+  const overrideActive = Boolean(input.overrideActive);
+  const hasPaymentFailure = Boolean(input.hasPaymentFailure);
+
+  if (provisioning === 'failed') {
+    score -= 100;
+    reasons.push('Provisioning pipeline failure');
+  }
+  if (lifecycle === 'cancelled') {
+    score -= 100;
+    reasons.push('Tenant account cancelled');
+  }
+  if (lifecycle === 'archived') {
+    score -= 80;
+    reasons.push('Tenant account archived');
+  }
+  if (lifecycle === 'suspended' || subscription === 'suspended') {
+    score -= 75;
+    reasons.push('Tenant account or subscription suspended');
+  }
+  if (subscription === 'cancelled') {
+    score -= 90;
+    reasons.push('Subscription cancelled');
+  }
+  if (subscription === 'past_due' || hasPaymentFailure) {
+    score -= 40;
+    reasons.push('Subscription payment past due / failed');
+  }
+
+  if (usagePercent >= 100 && !overrideActive) {
+    score -= 50;
+    reasons.push('Monthly order limit exceeded (100%+)');
+  } else if (usagePercent >= 100 && overrideActive) {
+    score -= 15;
+    reasons.push('Monthly order limit exceeded with active override');
+  } else if (usagePercent >= 80) {
+    score -= 20;
+    reasons.push('Monthly order usage near limit (80%+)');
+  }
+
+  if (lifecycle === 'provisioning' && provisioning === 'pending') {
+    score -= 15;
+    reasons.push('Tenant onboarding provisioning pending completion');
+  }
+
+  const lastActive = input.lastActivityAt || input.createdAt;
+  if (lastActive) {
+    const activeMs = Date.now() - new Date(lastActive).getTime();
+    const daysInactive = activeMs / (1000 * 60 * 60 * 24);
+    if (daysInactive > 30 && lifecycle !== 'cancelled' && lifecycle !== 'archived') {
+      score -= 15;
+      reasons.push('No recorded tenant activity in past 30 days');
+    }
+  }
+
+  const healthScore = Math.max(0, Math.min(100, Math.round(score)));
+
+  let status: TenantHealthStatus = 'HEALTHY';
+  if (
+    provisioning === 'failed' ||
+    lifecycle === 'cancelled' ||
+    lifecycle === 'archived' ||
+    lifecycle === 'suspended' ||
+    subscription === 'suspended' ||
+    subscription === 'cancelled' ||
+    subscription === 'past_due' ||
+    (usagePercent >= 100 && !overrideActive) ||
+    healthScore < 50
+  ) {
+    status = 'CRITICAL';
+  } else if (healthScore < 90 || usagePercent >= 80 || lifecycle === 'provisioning' || hasPaymentFailure) {
+    status = 'AT_RISK';
+  }
+
+  if (reasons.length === 0) {
+    reasons.push('All platform health signals nominal');
+  }
+
+  return {
+    status,
+    healthScore,
+    reasons,
+  };
+}
+
+export interface TimeframeConfig {
+  key: string;
+  label: string;
+  days: number;
+  startDate: string;
+  previousStartDate: string;
+  bucketCount: number;
+  bucketInterval: 'day' | 'week' | 'month';
+}
+
+export function parseAnalyticsTimeframe(input?: string): TimeframeConfig {
+  const raw = String(input || '30d').trim().toLowerCase();
+  let days = 30;
+  let key = '30d';
+  let label = '30 Days';
+
+  if (raw === 'today' || raw === '1d' || raw === '1 day') {
+    days = 1;
+    key = 'today';
+    label = 'Today';
+  } else if (raw === '7d' || raw === '7 days' || raw === '7') {
+    days = 7;
+    key = '7d';
+    label = '7 Days';
+  } else if (raw === '30d' || raw === '30 days' || raw === '30') {
+    days = 30;
+    key = '30d';
+    label = '30 Days';
+  } else if (raw === '90d' || raw === '90 days' || raw === '90') {
+    days = 90;
+    key = '90d';
+    label = '90 Days';
+  } else if (raw === '12m' || raw === '12 months' || raw === '1y' || raw === '365d') {
+    days = 365;
+    key = '12m';
+    label = '12 Months';
+  }
+
+  const now = new Date();
+  const start = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
+  const prevStart = new Date(now.getTime() - days * 2 * 24 * 60 * 60 * 1000);
+
+  const bucketCount = days === 1 ? 24 : days === 7 ? 7 : days === 30 ? 30 : days === 90 ? 12 : 12;
+  const bucketInterval = days === 1 ? 'day' : days <= 30 ? 'day' : days <= 90 ? 'week' : 'month';
+
+  return {
+    key,
+    label,
+    days,
+    startDate: start.toISOString(),
+    previousStartDate: prevStart.toISOString(),
+    bucketCount,
+    bucketInterval,
+  };
+}
+
+export interface PlatformAnalyticsBundle {
+  timeframe: TimeframeConfig;
+  kpis: {
+    totalTenants: number;
+    activeTenants: number;
+    trialingTenants: number;
+    suspendedTenants: number;
+    cancelledTenants: number;
+    archivedTenants: number;
+    provisioningTenants: number;
+    newTenantsInPeriod: number;
+    tenantGrowthRatePercent: number;
+    activeSubscriptions: number;
+    mrr: number;
+    arr: number;
+    estimatedRunRate: number;
+    trialToPaidConversionRatePercent: number;
+    churnRatePercent: number;
+    failedSubscriptions: number;
+    ordersInPeriod: number;
+    platformOrderVolume: number;
+    usageWarnings: number;
+    usageViolations: number;
+    activeOverrides: number;
+    provisioningFailures: number;
+  };
+  healthSummary: {
+    healthy: number;
+    atRisk: number;
+    critical: number;
+    healthyPercent: number;
+    atRiskPercent: number;
+    criticalPercent: number;
+  };
+  revenueSummary: {
+    mrr: number;
+    arr: number;
+    estimatedRunRate: number;
+    revenueByPlan: Array<{
+      planId: string;
+      planName: string;
+      monthlyPrice: number;
+      annualPrice: number;
+      activeCount: number;
+      trialCount: number;
+      mrr: number;
+      arr: number;
+      totalMonthlyValue: number;
+    }>;
+  };
+  usageSummary: {
+    platformOrderVolume: number;
+    averageUtilizationPercent: number;
+    usageWarnings: number;
+    usageViolations: number;
+    activeOverrides: number;
+  };
+  timeSeries: Array<{
+    date: string;
+    label: string;
+    newTenants: number;
+    cumulativeTenants: number;
+    mrr: number;
+    orders: number;
+    healthy: number;
+    atRisk: number;
+    critical: number;
+  }>;
+}
+
+export function computePlatformAnalytics(
+  rawTenants: any[],
+  plans: PlatformPlan[],
+  timeframeInput?: string,
+  usageMetersMap: Record<string, any> = {},
+): PlatformAnalyticsBundle {
+  const timeframe = parseAnalyticsTimeframe(timeframeInput);
+  const startDateMs = new Date(timeframe.startDate).getTime();
+  const prevStartDateMs = new Date(timeframe.previousStartDate).getTime();
+
+  let totalTenants = 0;
+  let activeTenants = 0;
+  let trialingTenants = 0;
+  let suspendedTenants = 0;
+  let cancelledTenants = 0;
+  let archivedTenants = 0;
+  let provisioningTenants = 0;
+
+  let newTenantsInPeriod = 0;
+  let previousTenantsInPeriod = 0;
+
+  let activeSubscriptions = 0;
+  let trialSubscriptions = 0;
+  let pastDueSubscriptions = 0;
+  let failedSubscriptions = 0;
+
+  let mrr = 0;
+  let arr = 0;
+
+  let platformOrderVolume = 0;
+  let totalUtilizationSum = 0;
+  let activeOrTrialCountForUsage = 0;
+
+  let usageWarnings = 0;
+  let usageViolations = 0;
+  let activeOverrides = 0;
+  let provisioningFailures = 0;
+
+  let healthyCount = 0;
+  let atRiskCount = 0;
+  let criticalCount = 0;
+
+  const planStatsMap = new Map<string, {
+    planId: string;
+    planName: string;
+    monthlyPrice: number;
+    annualPrice: number;
+    activeCount: number;
+    trialCount: number;
+    mrr: number;
+    arr: number;
+    totalMonthlyValue: number;
+  }>();
+
+  for (const plan of plans) {
+    planStatsMap.set(plan.id, {
+      planId: plan.id,
+      planName: plan.name,
+      monthlyPrice: plan.monthlyPrice,
+      annualPrice: plan.annualPrice,
+      activeCount: 0,
+      trialCount: 0,
+      mrr: 0,
+      arr: 0,
+      totalMonthlyValue: 0,
+    });
+  }
+
+  for (const tenant of rawTenants) {
+    totalTenants++;
+
+    const lifecycle = String(tenant.lifecycleStatus || tenant.status || 'active').toLowerCase();
+    const provisioningStatus = String(tenant.provisioningStatus || 'completed').toLowerCase();
+    const sub = tenant.subscription || {};
+    const subStatus = String(sub.status || 'active').toLowerCase();
+    const planId = String(sub.planId || 'starter').toLowerCase();
+    const interval = String(sub.interval || 'monthly').toLowerCase();
+    const price = Number(sub.price ?? 0);
+
+    if (lifecycle === 'active') activeTenants++;
+    else if (lifecycle === 'trialing') trialingTenants++;
+    else if (lifecycle === 'suspended') suspendedTenants++;
+    else if (lifecycle === 'cancelled') cancelledTenants++;
+    else if (lifecycle === 'archived') archivedTenants++;
+    else if (lifecycle === 'provisioning') provisioningTenants++;
+
+    if (provisioningStatus === 'failed') provisioningFailures++;
+
+    const createdMs = tenant.createdAt ? new Date(tenant.createdAt).getTime() : 0;
+    if (createdMs >= startDateMs) {
+      newTenantsInPeriod++;
+    } else if (createdMs >= prevStartDateMs) {
+      previousTenantsInPeriod++;
+    }
+
+    if (subStatus === 'active') {
+      activeSubscriptions++;
+      if (interval === 'monthly') mrr += price;
+      else arr += price;
+    } else if (subStatus === 'trialing') {
+      trialSubscriptions++;
+    } else if (subStatus === 'past_due') {
+      pastDueSubscriptions++;
+      failedSubscriptions++;
+    } else if (subStatus === 'suspended' || subStatus === 'cancelled') {
+      failedSubscriptions++;
+    }
+
+    const planStat = planStatsMap.get(planId) || {
+      planId,
+      planName: String(sub.planName || planId),
+      monthlyPrice: price,
+      annualPrice: price * 10,
+      activeCount: 0,
+      trialCount: 0,
+      mrr: 0,
+      arr: 0,
+      totalMonthlyValue: 0,
+    };
+
+    if (subStatus === 'active') {
+      planStat.activeCount++;
+      if (interval === 'monthly') {
+        planStat.mrr += price;
+        planStat.totalMonthlyValue += price;
+      } else {
+        planStat.arr += price;
+        planStat.totalMonthlyValue += price / 12;
+      }
+    } else if (subStatus === 'trialing') {
+      planStat.trialCount++;
+    }
+    planStatsMap.set(planId, planStat);
+
+    const meter = usageMetersMap[tenant.id] || tenant.meter || {};
+    const matchedPlan = plans.find(p => p.id === planId);
+    const orderLimit = Math.max(1, Number(matchedPlan?.limits?.ordersMonthly || 2500));
+    const usedOrders = Math.max(0, Math.floor(Number(meter.ordersMonthly || meter.orders || 0)));
+    const overrideActive = Boolean(meter.overrideMonthlyOrders || sub.overrideMonthlyOrders || tenant.overrideMonthlyOrders);
+
+    platformOrderVolume += usedOrders;
+
+    const usagePercent = Math.round((usedOrders / orderLimit) * 100);
+
+    if (lifecycle === 'active' || lifecycle === 'trialing') {
+      totalUtilizationSum += usagePercent;
+      activeOrTrialCountForUsage++;
+    }
+
+    if (usagePercent >= 100 && !overrideActive) {
+      usageViolations++;
+    } else if (usagePercent >= 80 && usagePercent < 100) {
+      usageWarnings++;
+    }
+
+    if (overrideActive) {
+      activeOverrides++;
+    }
+
+    const health = calculateTenantHealth({
+      lifecycleStatus: lifecycle,
+      provisioningStatus,
+      subscriptionStatus: subStatus,
+      usagePercent,
+      overrideActive,
+      hasPaymentFailure: subStatus === 'past_due',
+      lastActivityAt: tenant.updatedAt || tenant.createdAt,
+      createdAt: tenant.createdAt,
+    });
+
+    if (health.status === 'HEALTHY') healthyCount++;
+    else if (health.status === 'AT_RISK') atRiskCount++;
+    else criticalCount++;
+  }
+
+  const tenantGrowthRatePercent = previousTenantsInPeriod > 0
+    ? Math.round(((newTenantsInPeriod - previousTenantsInPeriod) / previousTenantsInPeriod) * 1000) / 10
+    : newTenantsInPeriod > 0 ? 100 : 0;
+
+  const estimatedRunRate = mrr + (arr / 12);
+  const trialToPaidConversionRatePercent = (activeTenants + trialingTenants) > 0
+    ? Math.round((activeTenants / (activeTenants + trialingTenants)) * 1000) / 10
+    : 0;
+
+  const churnRatePercent = totalTenants > 0
+    ? Math.round(((cancelledTenants + suspendedTenants) / totalTenants) * 1000) / 10
+    : 0;
+
+  const averageUtilizationPercent = activeOrTrialCountForUsage > 0
+    ? Math.round(totalUtilizationSum / activeOrTrialCountForUsage)
+    : 0;
+
+  const healthyPercent = totalTenants > 0 ? Math.round((healthyCount / totalTenants) * 100) : 0;
+  const atRiskPercent = totalTenants > 0 ? Math.round((atRiskCount / totalTenants) * 100) : 0;
+  const criticalPercent = totalTenants > 0 ? Math.round((criticalCount / totalTenants) * 100) : 0;
+
+  const timeSeries: PlatformAnalyticsBundle['timeSeries'] = [];
+  const nowMs = Date.now();
+  const bucketDays = timeframe.days / timeframe.bucketCount;
+
+  for (let i = timeframe.bucketCount - 1; i >= 0; i--) {
+    const bucketStartMs = nowMs - (i + 1) * bucketDays * 24 * 60 * 60 * 1000;
+    const bucketEndMs = nowMs - i * bucketDays * 24 * 60 * 60 * 1000;
+    const bucketDateObj = new Date(bucketEndMs);
+
+    const label = timeframe.bucketInterval === 'day'
+      ? bucketDateObj.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+      : timeframe.bucketInterval === 'week'
+      ? `W${Math.ceil(bucketDateObj.getDate() / 7)} ${bucketDateObj.toLocaleDateString(undefined, { month: 'short' })}`
+      : bucketDateObj.toLocaleDateString(undefined, { month: 'short', year: '2-digit' });
+
+    let newCount = 0;
+    let cumCount = 0;
+    let bucketOrders = 0;
+
+    for (const t of rawTenants) {
+      const cMs = t.createdAt ? new Date(t.createdAt).getTime() : 0;
+      if (cMs >= bucketStartMs && cMs <= bucketEndMs) {
+        newCount++;
+      }
+      if (cMs <= bucketEndMs) {
+        cumCount++;
+      }
+      const m = usageMetersMap[t.id] || t.meter || {};
+      bucketOrders += Math.round((Number(m.ordersMonthly || m.orders || 0)) / timeframe.bucketCount);
+    }
+
+    const estimatedBucketMrr = Math.round(mrr * (cumCount / Math.max(1, totalTenants)));
+    const bHealthy = Math.round(healthyCount * (cumCount / Math.max(1, totalTenants)));
+    const bAtRisk = Math.round(atRiskCount * (cumCount / Math.max(1, totalTenants)));
+    const bCritical = Math.round(criticalCount * (cumCount / Math.max(1, totalTenants)));
+
+    timeSeries.push({
+      date: bucketDateObj.toISOString().split('T')[0],
+      label,
+      newTenants: newCount,
+      cumulativeTenants: cumCount,
+      mrr: estimatedBucketMrr,
+      orders: bucketOrders,
+      healthy: bHealthy,
+      atRisk: bAtRisk,
+      critical: bCritical,
+    });
+  }
+
+  return {
+    timeframe,
+    kpis: {
+      totalTenants,
+      activeTenants,
+      trialingTenants,
+      suspendedTenants,
+      cancelledTenants,
+      archivedTenants,
+      provisioningTenants,
+      newTenantsInPeriod,
+      tenantGrowthRatePercent,
+      activeSubscriptions,
+      mrr,
+      arr,
+      estimatedRunRate,
+      trialToPaidConversionRatePercent,
+      churnRatePercent,
+      failedSubscriptions,
+      ordersInPeriod: platformOrderVolume,
+      platformOrderVolume,
+      usageWarnings,
+      usageViolations,
+      activeOverrides,
+      provisioningFailures,
+    },
+    healthSummary: {
+      healthy: healthyCount,
+      atRisk: atRiskCount,
+      critical: criticalCount,
+      healthyPercent,
+      atRiskPercent,
+      criticalPercent,
+    },
+    revenueSummary: {
+      mrr,
+      arr,
+      estimatedRunRate,
+      revenueByPlan: Array.from(planStatsMap.values()),
+    },
+    usageSummary: {
+      platformOrderVolume,
+      averageUtilizationPercent,
+      usageWarnings,
+      usageViolations,
+      activeOverrides,
+    },
+    timeSeries,
+  };
+}
+

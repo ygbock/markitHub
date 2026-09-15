@@ -9,6 +9,10 @@ import {
   assertLifecycleSubscriptionConsistency,
   lifecycleForSubscriptionStatus,
   calculateSubscriptionRevenue,
+  calculateTenantHealth,
+  parseAnalyticsTimeframe,
+  computePlatformAnalytics,
+  type TenantHealthStatus,
   makeTenantSlug,
   normalizePlanInput,
   type BillingInterval,
@@ -1699,6 +1703,295 @@ export function registerPlatformAdminRoutes({
       return res.json({ success: true, tenant: updatedTenant, overrideMonthlyOrders });
     } catch (err: any) {
       return res.status(err?.statusCode || 400).json({ error: err?.message || 'Usage override update failed.' });
+    }
+  });
+
+  async function fetchAnalyticsData(db: any) {
+    const [tenantSnap, planSnap] = await Promise.all([
+      db.collection('tenants').orderBy('updatedAt', 'desc').limit(500).get(),
+      db.collection('platform_plans').get(),
+    ]);
+
+    const storedPlans = planSnap.docs.map((doc: any) => ({ id: doc.id, ...doc.data() })) as PlatformPlan[];
+    const planById = new Map(storedPlans.map(p => [p.id, p]));
+    const now = new Date().toISOString();
+    for (const seed of DEFAULT_PLATFORM_PLANS) {
+      if (!planById.has(seed.id)) planById.set(seed.id, { ...seed, createdAt: now, updatedAt: now } as PlatformPlan);
+    }
+    const plans = Array.from(planById.values());
+
+    const period = usagePeriod();
+    const tenants = tenantSnap.docs.map((doc: any) => ({ id: doc.id, ...doc.data() }));
+
+    const usageMetersMap: Record<string, any> = {};
+    await Promise.all(
+      tenants.map(async (tenant: any) => {
+        try {
+          const meterSnap = await db.collection(USAGE_METER_COLLECTION).doc(usageMeterId(tenant.id, period)).get();
+          if (meterSnap && meterSnap.exists) {
+            usageMetersMap[tenant.id] = meterSnap.data();
+          }
+        } catch {}
+      })
+    );
+
+    return { tenants, plans, usageMetersMap };
+  }
+
+  // 1. GET /api/platform/analytics/overview
+  app.get('/api/platform/analytics/overview', ...platformAuth, async (req, res) => {
+    const db = getAdminDb();
+    if (!db) return res.status(503).json({ error: 'Platform service is not configured.' });
+    try {
+      const timeframe = String(req.query.timeframe || '30d');
+      const { tenants, plans, usageMetersMap } = await fetchAnalyticsData(db);
+      const analytics = computePlatformAnalytics(tenants, plans, timeframe, usageMetersMap);
+      return res.json({ success: true, ...analytics });
+    } catch (err: any) {
+      return res.status(500).json({ error: err?.message || 'Unable to load platform analytics overview.' });
+    }
+  });
+
+  // 2. GET /api/platform/analytics/tenants
+  app.get('/api/platform/analytics/tenants', ...platformAuth, async (req, res) => {
+    const db = getAdminDb();
+    if (!db) return res.status(503).json({ error: 'Platform service is not configured.' });
+    try {
+      const timeframe = String(req.query.timeframe || '30d');
+      const page = Math.max(1, Math.floor(Number(req.query.page || 1)));
+      const limit = Math.min(100, Math.max(1, Math.floor(Number(req.query.limit || req.query.pageSize || 20))));
+      const statusFilter = req.query.status || req.query.lifecycle ? String(req.query.status || req.query.lifecycle).toLowerCase() : '';
+      const healthFilter = req.query.health ? String(req.query.health).toUpperCase() : '';
+      const planIdFilter = req.query.planId ? String(req.query.planId).toLowerCase() : '';
+      const search = req.query.search ? String(req.query.search).trim().toLowerCase() : '';
+
+      const { tenants, plans, usageMetersMap } = await fetchAnalyticsData(db);
+
+      let tenantRows = tenants.map((data: any) => {
+        const sub = data.subscription || {};
+        const pId = String(sub.planId || 'starter').toLowerCase();
+        const plan = plans.find(p => p.id === pId) || plans[0];
+        const meter = usageMetersMap[data.id] || {};
+        const usedOrders = Math.max(0, Math.floor(Number(meter.ordersMonthly || 0)));
+        const limitOrders = Math.max(1, Math.floor(Number(plan.limits.ordersMonthly || 2500)));
+        const overrideActive = Boolean(meter.overrideMonthlyOrders || sub.overrideMonthlyOrders || data.overrideMonthlyOrders);
+        const usagePercent = Math.round((usedOrders / limitOrders) * 100);
+
+        const health = calculateTenantHealth({
+          lifecycleStatus: data.lifecycleStatus || data.status,
+          provisioningStatus: data.provisioningStatus,
+          subscriptionStatus: sub.status,
+          usagePercent,
+          overrideActive,
+          hasPaymentFailure: sub.status === 'past_due',
+          lastActivityAt: data.updatedAt || data.createdAt,
+          createdAt: data.createdAt,
+        });
+
+        return {
+          id: data.id,
+          name: String(data.name || data.businessName || data.id),
+          slug: data.slug ? String(data.slug) : makeTenantSlug(data.name || data.id),
+          ownerEmail: data.ownerEmail ? String(data.ownerEmail) : undefined,
+          lifecycleStatus: cleanLifecycleStatus(data.lifecycleStatus || data.status),
+          provisioningStatus: String(data.provisioningStatus || 'completed'),
+          subscription: {
+            planId: pId,
+            planName: String(sub.planName || plan.name),
+            status: cleanSubscriptionStatus(sub.status),
+            interval: cleanInterval(sub.interval),
+            price: Number(sub.price || plan.monthlyPrice),
+            currency: cleanCurrency(sub.currency),
+            currentPeriodEnd: sub.currentPeriodEnd ? String(sub.currentPeriodEnd) : undefined,
+          },
+          usage: {
+            ordersMonthly: usedOrders,
+            ordersLimit: limitOrders,
+            usagePercent,
+            isWarning: usagePercent >= 80 && usagePercent < 100,
+            isExceeded: usagePercent >= 100 && !overrideActive,
+            overrideActive,
+          },
+          health,
+          lastActivityAt: data.updatedAt || data.createdAt || new Date().toISOString(),
+          createdAt: data.createdAt || new Date().toISOString(),
+        };
+      });
+
+      if (search) {
+        tenantRows = tenantRows.filter(t =>
+          t.name.toLowerCase().includes(search) ||
+          t.id.toLowerCase().includes(search) ||
+          t.slug.toLowerCase().includes(search) ||
+          (t.ownerEmail && t.ownerEmail.toLowerCase().includes(search))
+        );
+      }
+      if (statusFilter) {
+        tenantRows = tenantRows.filter(t => t.lifecycleStatus === statusFilter);
+      }
+      if (healthFilter) {
+        tenantRows = tenantRows.filter(t => t.health.status === healthFilter);
+      }
+      if (planIdFilter) {
+        tenantRows = tenantRows.filter(t => t.subscription.planId === planIdFilter);
+      }
+
+      const totalItems = tenantRows.length;
+      const totalPages = Math.max(1, Math.ceil(totalItems / limit));
+      const paginatedTenants = tenantRows.slice((page - 1) * limit, page * limit);
+
+      const healthBreakdown = {
+        healthy: tenantRows.filter(t => t.health.status === 'HEALTHY').length,
+        atRisk: tenantRows.filter(t => t.health.status === 'AT_RISK').length,
+        critical: tenantRows.filter(t => t.health.status === 'CRITICAL').length,
+      };
+
+      return res.json({
+        success: true,
+        timeframe,
+        page,
+        limit,
+        totalItems,
+        totalPages,
+        tenants: paginatedTenants,
+        healthBreakdown,
+      });
+    } catch (err: any) {
+      return res.status(500).json({ error: err?.message || 'Unable to load tenant analytics.' });
+    }
+  });
+
+  // 3. GET /api/platform/analytics/revenue
+  app.get('/api/platform/analytics/revenue', ...platformAuth, async (req, res) => {
+    const db = getAdminDb();
+    if (!db) return res.status(503).json({ error: 'Platform service is not configured.' });
+    try {
+      const timeframe = String(req.query.timeframe || '30d');
+      const { tenants, plans, usageMetersMap } = await fetchAnalyticsData(db);
+      const bundle = computePlatformAnalytics(tenants, plans, timeframe, usageMetersMap);
+
+      return res.json({
+        success: true,
+        timeframe: bundle.timeframe,
+        summary: bundle.revenueSummary,
+        kpis: {
+          mrr: bundle.kpis.mrr,
+          arr: bundle.kpis.arr,
+          estimatedRunRate: bundle.kpis.estimatedRunRate,
+          activeSubscriptions: bundle.kpis.activeSubscriptions,
+          trialSubscriptions: bundle.kpis.trialingTenants,
+          failedSubscriptions: bundle.kpis.failedSubscriptions,
+        },
+        conversionMetrics: {
+          trialCount: bundle.kpis.trialingTenants,
+          activePaidCount: bundle.kpis.activeTenants,
+          trialToPaidConversionRatePercent: bundle.kpis.trialToPaidConversionRatePercent,
+          churnedCount: bundle.kpis.cancelledTenants + bundle.kpis.suspendedTenants,
+          churnRatePercent: bundle.kpis.churnRatePercent,
+          failedCount: bundle.kpis.failedSubscriptions,
+        },
+        revenueByPlan: bundle.revenueSummary.revenueByPlan,
+        revenueTrend: bundle.timeSeries.map(ts => ({ date: ts.date, label: ts.label, mrr: ts.mrr })),
+      });
+    } catch (err: any) {
+      return res.status(500).json({ error: err?.message || 'Unable to load platform revenue analytics.' });
+    }
+  });
+
+  // 4. GET /api/platform/analytics/usage
+  app.get('/api/platform/analytics/usage', ...platformAuth, async (req, res) => {
+    const db = getAdminDb();
+    if (!db) return res.status(503).json({ error: 'Platform service is not configured.' });
+    try {
+      const timeframe = String(req.query.timeframe || '30d');
+      const page = Math.max(1, Math.floor(Number(req.query.page || 1)));
+      const limit = Math.min(100, Math.max(1, Math.floor(Number(req.query.limit || req.query.pageSize || 20))));
+
+      const { tenants, plans, usageMetersMap } = await fetchAnalyticsData(db);
+      const bundle = computePlatformAnalytics(tenants, plans, timeframe, usageMetersMap);
+
+      const highUsageTenants = tenants
+        .map(t => {
+          const sub = t.subscription || {};
+          const pId = String(sub.planId || 'starter').toLowerCase();
+          const plan = plans.find(p => p.id === pId) || plans[0];
+          const meter = usageMetersMap[t.id] || {};
+          const usedOrders = Math.max(0, Math.floor(Number(meter.ordersMonthly || 0)));
+          const limitOrders = Math.max(1, Math.floor(Number(plan.limits.ordersMonthly || 2500)));
+          const overrideActive = Boolean(meter.overrideMonthlyOrders || sub.overrideMonthlyOrders || t.overrideMonthlyOrders);
+          const usagePercent = Math.round((usedOrders / limitOrders) * 100);
+          return {
+            id: t.id,
+            name: String(t.name || t.id),
+            planName: String(sub.planName || plan.name),
+            usedOrders,
+            limitOrders,
+            usagePercent,
+            overrideActive,
+            status: usagePercent >= 100 && !overrideActive ? 'EXCEEDED' : usagePercent >= 80 ? 'WARNING' : 'HEALTHY',
+          };
+        })
+        .filter(t => t.usagePercent >= 80 || t.overrideActive)
+        .sort((a, b) => b.usagePercent - a.usagePercent);
+
+      const paginatedHighUsage = highUsageTenants.slice((page - 1) * limit, page * limit);
+
+      return res.json({
+        success: true,
+        timeframe: bundle.timeframe,
+        overview: bundle.usageSummary,
+        highUsageTenants: paginatedHighUsage,
+        pagination: {
+          page,
+          limit,
+          totalItems: highUsageTenants.length,
+          totalPages: Math.max(1, Math.ceil(highUsageTenants.length / limit)),
+        },
+        usageTrend: bundle.timeSeries.map(ts => ({ date: ts.date, label: ts.label, orders: ts.orders })),
+      });
+    } catch (err: any) {
+      return res.status(500).json({ error: err?.message || 'Unable to load platform usage analytics.' });
+    }
+  });
+
+  // 5. GET /api/platform/analytics/growth
+  app.get('/api/platform/analytics/growth', ...platformAuth, async (req, res) => {
+    const db = getAdminDb();
+    if (!db) return res.status(503).json({ error: 'Platform service is not configured.' });
+    try {
+      const timeframe = String(req.query.timeframe || '30d');
+      const { tenants, plans, usageMetersMap } = await fetchAnalyticsData(db);
+      const bundle = computePlatformAnalytics(tenants, plans, timeframe, usageMetersMap);
+
+      const lifecycleDistribution = {
+        active: bundle.kpis.activeTenants,
+        trialing: bundle.kpis.trialingTenants,
+        suspended: bundle.kpis.suspendedTenants,
+        cancelled: bundle.kpis.cancelledTenants,
+        archived: bundle.kpis.archivedTenants,
+        provisioning: bundle.kpis.provisioningTenants,
+      };
+
+      return res.json({
+        success: true,
+        timeframe: bundle.timeframe,
+        summary: {
+          totalTenants: bundle.kpis.totalTenants,
+          newTenantsInPeriod: bundle.kpis.newTenantsInPeriod,
+          growthRatePercent: bundle.kpis.tenantGrowthRatePercent,
+          churnedTenantsInPeriod: bundle.kpis.cancelledTenants + bundle.kpis.suspendedTenants,
+          netGrowth: bundle.kpis.newTenantsInPeriod - (bundle.kpis.cancelledTenants + bundle.kpis.suspendedTenants),
+        },
+        lifecycleDistribution,
+        growthTrend: bundle.timeSeries.map(ts => ({
+          date: ts.date,
+          label: ts.label,
+          newTenants: ts.newTenants,
+          cumulativeTenants: ts.cumulativeTenants,
+        })),
+      });
+    } catch (err: any) {
+      return res.status(500).json({ error: err?.message || 'Unable to load platform growth analytics.' });
     }
   });
 }
