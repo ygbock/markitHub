@@ -3,6 +3,7 @@ import type { AuditLog } from '../types';
 import { createAuthoritativeAuditRecord } from './auditService';
 import { calculateTenantHealth, DEFAULT_PLATFORM_PLANS } from './platformAdminControlPlane';
 import { calculateUsagePercent, usageLimitState, usageMeterId, usagePeriod, USAGE_METER_COLLECTION } from './platformUsageMeter';
+import { createNotificationsFromAlert } from './platformNotificationControlPlane';
 
 export type PlatformAlertSeverity = 'CRITICAL' | 'WARNING' | 'INFO';
 
@@ -180,6 +181,11 @@ export async function createPlatformAlert(
   };
 
   await db.collection('platform_alerts').doc(alertId).set(newAlert);
+  try {
+    await createNotificationsFromAlert(db, newAlert);
+  } catch (err) {
+    console.error('Failed to create notifications for new alert:', err);
+  }
   return { alert: newAlert, isNew: true };
 }
 

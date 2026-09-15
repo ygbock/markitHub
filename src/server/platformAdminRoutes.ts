@@ -30,6 +30,17 @@ import {
   getPlatformAlertSummary,
   resolvePlatformAlert,
 } from './platformAlertControlPlane';
+import {
+  getEscalationPolicies,
+  getNotificationPreferences,
+  getNotificationSummary,
+  getPlatformNotifications,
+  markAllNotificationsAsRead,
+  markNotificationAsRead,
+  processAlertEscalations,
+  updateEscalationPolicy,
+  updateNotificationPreferences,
+} from './platformNotificationControlPlane';
 
 interface PlatformRouteDeps {
   app: Express;
@@ -2103,6 +2114,163 @@ export function registerPlatformAdminRoutes({
     } catch (err: any) {
       const status = err?.statusCode || 400;
       return res.status(status).json({ error: err?.message || 'Unable to dismiss alert.' });
+    }
+  });
+
+  // ==========================================
+  // NOTIFICATION & ESCALATION CONTROL PLANE
+  // ==========================================
+
+  // 1. GET /api/platform/notifications
+  app.get('/api/platform/notifications', ...platformAuth, async (req, res) => {
+    const db = getAdminDb();
+    if (!db) return res.status(503).json({ error: 'Platform service is not configured.' });
+    try {
+      const adminUid = (req as any).user?.uid || 'admin_1';
+      const unreadOnly = req.query.unreadOnly === 'true';
+      const severity = req.query.severity ? String(req.query.severity) : undefined;
+      const type = req.query.type ? String(req.query.type) : undefined;
+      const status = req.query.status ? String(req.query.status) : undefined;
+      const escalationState = req.query.escalationState ? String(req.query.escalationState) : undefined;
+      const tenantId = req.query.tenantId ? String(req.query.tenantId) : undefined;
+      const search = req.query.search ? String(req.query.search) : undefined;
+      const page = req.query.page ? parseInt(String(req.query.page), 10) : 1;
+      const limit = req.query.limit ? parseInt(String(req.query.limit), 10) : 50;
+
+      const result = await getPlatformNotifications(db, {
+        recipientUid: adminUid,
+        unreadOnly,
+        severity,
+        type,
+        status,
+        escalationState,
+        tenantId,
+        search,
+        page,
+        limit,
+      });
+
+      return res.json({ success: true, ...result });
+    } catch (err: any) {
+      return res.status(500).json({ error: err?.message || 'Unable to fetch platform notifications.' });
+    }
+  });
+
+  // 2. GET /api/platform/notifications/summary
+  app.get('/api/platform/notifications/summary', ...platformAuth, async (req, res) => {
+    const db = getAdminDb();
+    if (!db) return res.status(503).json({ error: 'Platform service is not configured.' });
+    try {
+      const adminUid = (req as any).user?.uid || 'admin_1';
+      // Automatically process any pending alert SLA escalations
+      await processAlertEscalations(db);
+      const summary = await getNotificationSummary(db, adminUid);
+      return res.json({ success: true, ...summary });
+    } catch (err: any) {
+      return res.status(500).json({ error: err?.message || 'Unable to fetch notification summary.' });
+    }
+  });
+
+  // 3. PATCH /api/platform/notifications/:id/read
+  app.patch('/api/platform/notifications/:id/read', ...platformAuth, async (req, res) => {
+    const db = getAdminDb();
+    if (!db) return res.status(503).json({ error: 'Platform service is not configured.' });
+    try {
+      const adminUid = (req as any).user?.uid || 'admin_1';
+      const notification = await markNotificationAsRead(db, req.params.id, adminUid);
+      return res.json({ success: true, notification });
+    } catch (err: any) {
+      const status = err?.statusCode || 400;
+      return res.status(status).json({ error: err?.message || 'Unable to mark notification as read.' });
+    }
+  });
+
+  // 4. PATCH /api/platform/notifications/read-all
+  app.patch('/api/platform/notifications/read-all', ...platformAuth, async (req, res) => {
+    const db = getAdminDb();
+    if (!db) return res.status(503).json({ error: 'Platform service is not configured.' });
+    try {
+      const adminUid = (req as any).user?.uid || 'admin_1';
+      const result = await markAllNotificationsAsRead(db, adminUid);
+      return res.json({ success: true, ...result });
+    } catch (err: any) {
+      return res.status(500).json({ error: err?.message || 'Unable to mark all notifications as read.' });
+    }
+  });
+
+  // 5. GET /api/platform/notification-preferences
+  app.get('/api/platform/notification-preferences', ...platformAuth, async (req, res) => {
+    const db = getAdminDb();
+    if (!db) return res.status(503).json({ error: 'Platform service is not configured.' });
+    try {
+      const adminUid = (req as any).user?.uid || 'admin_1';
+      const preferences = await getNotificationPreferences(db, adminUid);
+      return res.json({ success: true, preferences });
+    } catch (err: any) {
+      return res.status(500).json({ error: err?.message || 'Unable to fetch notification preferences.' });
+    }
+  });
+
+  // 6. PATCH /api/platform/notification-preferences
+  app.patch('/api/platform/notification-preferences', ...platformAuth, async (req, res) => {
+    const db = getAdminDb();
+    if (!db) return res.status(503).json({ error: 'Platform service is not configured.' });
+    try {
+      const adminUid = (req as any).user?.uid || 'admin_1';
+      const actor = {
+        uid: adminUid,
+        email: (req as any).user?.email || 'admin@markithub.internal',
+        role: (req as any).user?.role || 'Super Admin',
+      };
+      const { enabledChannels, severityPreferences, typePreferences, reason } = req.body || {};
+      const updated = await updateNotificationPreferences(
+        db,
+        adminUid,
+        { enabledChannels, severityPreferences, typePreferences },
+        actor,
+        reason
+      );
+      return res.json({ success: true, preferences: updated });
+    } catch (err: any) {
+      const status = err?.statusCode || 400;
+      return res.status(status).json({ error: err?.message || 'Unable to update notification preferences.' });
+    }
+  });
+
+  // 7. GET /api/platform/escalation-policies
+  app.get('/api/platform/escalation-policies', ...platformAuth, async (req, res) => {
+    const db = getAdminDb();
+    if (!db) return res.status(503).json({ error: 'Platform service is not configured.' });
+    try {
+      const policies = await getEscalationPolicies(db);
+      return res.json({ success: true, policies });
+    } catch (err: any) {
+      return res.status(500).json({ error: err?.message || 'Unable to fetch escalation policies.' });
+    }
+  });
+
+  // 8. PATCH /api/platform/escalation-policies/:id
+  app.patch('/api/platform/escalation-policies/:id', ...platformAuth, async (req, res) => {
+    const db = getAdminDb();
+    if (!db) return res.status(503).json({ error: 'Platform service is not configured.' });
+    try {
+      const actor = {
+        uid: (req as any).user?.uid || 'admin_1',
+        email: (req as any).user?.email || 'admin@markithub.internal',
+        role: (req as any).user?.role || 'Super Admin',
+      };
+      const { name, thresholdMinutes, enabled, action, reason } = req.body || {};
+      const updated = await updateEscalationPolicy(
+        db,
+        req.params.id,
+        { name, thresholdMinutes, enabled, action },
+        actor,
+        reason
+      );
+      return res.json({ success: true, policy: updated });
+    } catch (err: any) {
+      const status = err?.statusCode || 400;
+      return res.status(status).json({ error: err?.message || 'Unable to update escalation policy.' });
     }
   });
 }

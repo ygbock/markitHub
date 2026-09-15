@@ -5,7 +5,12 @@ import {
   ArrowUpRight,
   BadgeDollarSign,
   Ban,
+  Bell,
+  BellOff,
+  BellRing,
   Building2,
+  Check,
+  CheckCheck,
   CheckCircle2,
   ChevronRight,
   Clock,
@@ -20,12 +25,16 @@ import {
   Plus,
   RefreshCw,
   Search,
+  Send,
   Settings2,
   ShieldAlert,
   ShieldCheck,
+  Sliders,
   TrendingUp,
   UserPlus,
   Users,
+  Volume2,
+  VolumeX,
   X,
 } from 'lucide-react';
 import { getAuth } from 'firebase/auth';
@@ -44,7 +53,7 @@ import {
   Cell,
 } from 'recharts';
 
-type Tab = 'overview' | 'alerts' | 'analytics_revenue' | 'analytics_usage' | 'analytics_health' | 'tenants' | 'plans' | 'billing';
+type Tab = 'overview' | 'alerts' | 'notifications' | 'analytics_revenue' | 'analytics_usage' | 'analytics_health' | 'tenants' | 'plans' | 'billing';
 type TimeframeOption = 'today' | '7d' | '30d' | '90d' | '12m';
 
 interface Plan {
@@ -226,6 +235,24 @@ export default function SuperAdminDashboard() {
   const [alertSeverityFilter, setAlertSeverityFilter] = useState<'ALL' | 'CRITICAL' | 'WARNING' | 'INFO'>('ALL');
   const [alertStatusFilter, setAlertStatusFilter] = useState<'ALL' | 'OPEN' | 'ACKNOWLEDGED' | 'RESOLVED' | 'DISMISSED'>('ALL');
 
+  const [notifications, setNotifications] = useState<any[]>([]);
+  const [notificationSummary, setNotificationSummary] = useState<any | null>(null);
+  const [notificationPreferences, setNotificationPreferences] = useState<any | null>(null);
+  const [escalationPolicies, setEscalationPolicies] = useState<any[]>([]);
+  const [notificationSubTab, setNotificationSubTab] = useState<'feed' | 'preferences' | 'escalation'>('feed');
+  const [notificationSearch, setNotificationSearch] = useState('');
+  const [notificationUnreadFilter, setNotificationUnreadFilter] = useState(false);
+  const [notificationSeverityFilter, setNotificationSeverityFilter] = useState<string>('ALL');
+  const [notificationEscalationFilter, setNotificationEscalationFilter] = useState<string>('ALL');
+  
+  const [prefFormReason, setPrefFormReason] = useState('');
+  const [editingPolicyModal, setEditingPolicyModal] = useState<{
+    policy: any;
+    thresholdMinutes: number;
+    enabled: boolean;
+    reason: string;
+  } | null>(null);
+
   const [selectedAlert, setSelectedAlert] = useState<any | null>(null);
   const [selectedAlertDetail, setSelectedAlertDetail] = useState<any | null>(null);
   const [loadingAlertDetail, setLoadingAlertDetail] = useState(false);
@@ -362,6 +389,112 @@ export default function SuperAdminDashboard() {
     setAlertActionModal({ alert, action, reason: '' });
   };
 
+  const filteredNotifications = useMemo(() => {
+    return notifications.filter(n => {
+      if (notificationUnreadFilter && n.read) return false;
+      if (notificationSeverityFilter !== 'ALL' && n.severity !== notificationSeverityFilter) return false;
+      if (notificationEscalationFilter === 'ESCALATED' && n.escalationState !== 'ESCALATED') return false;
+      if (notificationEscalationFilter === 'STANDARD' && n.escalationState === 'ESCALATED') return false;
+      if (notificationSearch) {
+        const q = notificationSearch.toLowerCase();
+        const match =
+          n.title?.toLowerCase().includes(q) ||
+          n.message?.toLowerCase().includes(q) ||
+          n.tenantId?.toLowerCase().includes(q) ||
+          n.type?.toLowerCase().includes(q);
+        if (!match) return false;
+      }
+      return true;
+    });
+  }, [notifications, notificationUnreadFilter, notificationSeverityFilter, notificationEscalationFilter, notificationSearch]);
+
+  const handleMarkNotificationRead = async (notificationId: string) => {
+    setBusy(`ntf:read:${notificationId}`);
+    setError(null);
+    try {
+      await apiFetch(`/api/platform/notifications/${notificationId}/read`, { method: 'PATCH' });
+      setNotice('Notification marked as read.');
+      await loadAll();
+    } catch (err: any) {
+      setError(err?.message || 'Failed to mark notification as read.');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const handleMarkAllNotificationsRead = async () => {
+    setBusy('ntf:read_all');
+    setError(null);
+    try {
+      const res = await apiFetch<{ count: number }>('/api/platform/notifications/read-all', { method: 'PATCH' });
+      setNotice(`Marked ${res.count} notifications as read.`);
+      await loadAll();
+    } catch (err: any) {
+      setError(err?.message || 'Failed to mark all notifications as read.');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const handleSavePreferences = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!prefFormReason.trim()) {
+      setError('A mandatory administrative reason is required to update notification preferences.');
+      return;
+    }
+    if (!notificationPreferences) return;
+
+    setBusy('ntf:save_prefs');
+    setError(null);
+    try {
+      await apiFetch('/api/platform/notification-preferences', {
+        method: 'PATCH',
+        body: JSON.stringify({
+          enabledChannels: notificationPreferences.enabledChannels,
+          severityPreferences: notificationPreferences.severityPreferences,
+          typePreferences: notificationPreferences.typePreferences,
+          reason: prefFormReason.trim(),
+        }),
+      });
+      setNotice('Notification preferences successfully updated.');
+      setPrefFormReason('');
+      await loadAll();
+    } catch (err: any) {
+      setError(err?.message || 'Failed to update notification preferences.');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const handleSaveEscalationPolicy = async () => {
+    if (!editingPolicyModal) return;
+    const { policy, thresholdMinutes, enabled, reason } = editingPolicyModal;
+    if (!reason.trim()) {
+      setError('A mandatory administrative reason is required to update escalation SLA policies.');
+      return;
+    }
+
+    setBusy(`policy:save:${policy.policyId}`);
+    setError(null);
+    try {
+      await apiFetch(`/api/platform/escalation-policies/${policy.policyId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          thresholdMinutes,
+          enabled,
+          reason: reason.trim(),
+        }),
+      });
+      setNotice(`Escalation policy '${policy.name}' updated.`);
+      setEditingPolicyModal(null);
+      await loadAll();
+    } catch (err: any) {
+      setError(err?.message || 'Failed to update escalation policy.');
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const [provisionForm, setProvisionForm] = useState({
     name: '',
     ownerUid: '',
@@ -403,6 +536,10 @@ export default function SuperAdminDashboard() {
         growthRes,
         alertsRes,
         alertSummaryRes,
+        notificationsRes,
+        notificationSummaryRes,
+        notificationPreferencesRes,
+        escalationsRes,
       ] = await Promise.all([
         apiFetch<DashboardData>('/api/platform/dashboard'),
         apiFetch<{ plans: Plan[] }>('/api/platform/plans'),
@@ -417,6 +554,10 @@ export default function SuperAdminDashboard() {
         apiFetch<any>(`/api/platform/analytics/growth?timeframe=${timeframe}`),
         apiFetch<{ alerts: any[] }>('/api/platform/alerts?limit=100'),
         apiFetch<{ summary: any }>('/api/platform/alerts/summary'),
+        apiFetch<{ notifications: any[] }>('/api/platform/notifications?limit=100'),
+        apiFetch<any>('/api/platform/notifications/summary'),
+        apiFetch<{ preferences: any }>('/api/platform/notification-preferences'),
+        apiFetch<{ policies: any[] }>('/api/platform/escalation-policies'),
       ]);
       setDashboard(dashboardRes);
       setPlans(plansRes.plans || []);
@@ -433,6 +574,11 @@ export default function SuperAdminDashboard() {
 
       setAlerts(alertsRes.alerts || []);
       setAlertSummary(alertSummaryRes.summary || null);
+
+      setNotifications(notificationsRes.notifications || []);
+      setNotificationSummary(notificationSummaryRes || null);
+      setNotificationPreferences(notificationPreferencesRes.preferences || null);
+      setEscalationPolicies(escalationsRes.policies || []);
 
       if (!provisionForm.planId && plansRes.plans?.[0]) {
         setProvisionForm(prev => ({ ...prev, planId: plansRes.plans[0].id }));
@@ -558,6 +704,7 @@ export default function SuperAdminDashboard() {
   const tabs: Array<[Tab, string, React.ElementType]> = [
     ['overview', 'Overview', Gauge],
     ['alerts', 'Alerts & Incidents', ShieldAlert],
+    ['notifications', 'Notifications & Escalations', Bell],
     ['analytics_revenue', 'Revenue Analytics', BadgeDollarSign],
     ['analytics_usage', 'Usage Analytics', Activity],
     ['analytics_health', 'Tenant Health', HeartPulse],
@@ -849,6 +996,471 @@ export default function SuperAdminDashboard() {
                   </table>
                 </div>
               </div>
+            </div>
+          )}
+
+          {tab === 'notifications' && (
+            <div className="space-y-6">
+              {/* Notification KPI Summary Cards */}
+              <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+                <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                  <div className="flex items-center justify-between text-slate-500">
+                    <Bell className="h-5 w-5 text-indigo-600" />
+                    <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Unread Feed</span>
+                  </div>
+                  <div className="mt-3 text-2xl font-black text-slate-900">
+                    {notificationSummary?.unreadCount ?? 0}
+                  </div>
+                  <div className="mt-1 text-xs font-semibold text-slate-500">
+                    out of {notificationSummary?.totalCount ?? notifications.length} total notifications
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-rose-200 bg-rose-50/50 p-5 shadow-sm">
+                  <div className="flex items-center justify-between text-rose-700">
+                    <ShieldAlert className="h-5 w-5 text-rose-600" />
+                    <span className="text-[10px] font-black uppercase tracking-wider text-rose-600">Critical Unread</span>
+                  </div>
+                  <div className="mt-3 text-2xl font-black text-rose-900">
+                    {notificationSummary?.criticalUnreadCount ?? 0}
+                  </div>
+                  <div className="mt-1 text-xs font-semibold text-rose-700">
+                    Requires immediate operator response
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-amber-200 bg-amber-50/50 p-5 shadow-sm">
+                  <div className="flex items-center justify-between text-amber-700">
+                    <AlertTriangle className="h-5 w-5 text-amber-600" />
+                    <span className="text-[10px] font-black uppercase tracking-wider text-amber-600">Warning Unread</span>
+                  </div>
+                  <div className="mt-3 text-2xl font-black text-amber-900">
+                    {notificationSummary?.warningUnreadCount ?? 0}
+                  </div>
+                  <div className="mt-1 text-xs font-semibold text-amber-700">
+                    Approaching SLA / limits
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-purple-200 bg-purple-50/50 p-5 shadow-sm">
+                  <div className="flex items-center justify-between text-purple-700">
+                    <BellRing className="h-5 w-5 text-purple-600" />
+                    <span className="text-[10px] font-black uppercase tracking-wider text-purple-600">SLA Escalated</span>
+                  </div>
+                  <div className="mt-3 text-2xl font-black text-purple-900">
+                    {notificationSummary?.escalatedCount ?? 0}
+                  </div>
+                  <div className="mt-1 text-xs font-semibold text-purple-700">
+                    Exceeded acknowledgement window
+                  </div>
+                </div>
+              </div>
+
+              {/* Sub-Navigation Tabs */}
+              <div className="flex items-center gap-2 border-b border-slate-200 pb-3">
+                <button
+                  onClick={() => setNotificationSubTab('feed')}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all ${
+                    notificationSubTab === 'feed'
+                      ? 'bg-slate-900 text-white shadow-sm'
+                      : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+                  }`}
+                >
+                  <Bell className="h-3.5 w-3.5" />
+                  Notification Inbox
+                  {Boolean(notificationSummary?.unreadCount) && (
+                    <span className="ml-1 rounded-full bg-indigo-500 px-2 py-0.5 text-[10px] font-bold text-white">
+                      {notificationSummary?.unreadCount}
+                    </span>
+                  )}
+                </button>
+
+                <button
+                  onClick={() => setNotificationSubTab('preferences')}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all ${
+                    notificationSubTab === 'preferences'
+                      ? 'bg-slate-900 text-white shadow-sm'
+                      : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+                  }`}
+                >
+                  <Sliders className="h-3.5 w-3.5" />
+                  Channel Preferences
+                </button>
+
+                <button
+                  onClick={() => setNotificationSubTab('escalation')}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all ${
+                    notificationSubTab === 'escalation'
+                      ? 'bg-slate-900 text-white shadow-sm'
+                      : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+                  }`}
+                >
+                  <Clock className="h-3.5 w-3.5" />
+                  Escalation SLA Policies
+                </button>
+              </div>
+
+              {/* Sub-Tab 1: Inbox Feed */}
+              {notificationSubTab === 'feed' && (
+                <div className="rounded-3xl border border-slate-200 bg-white shadow-sm p-6 space-y-4">
+                  <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-100 pb-4">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        onClick={() => setNotificationUnreadFilter(!notificationUnreadFilter)}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border ${
+                          notificationUnreadFilter
+                            ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                            : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                        }`}
+                      >
+                        {notificationUnreadFilter ? 'Showing Unread Only' : 'All Read & Unread'}
+                      </button>
+
+                      <select
+                        value={notificationSeverityFilter}
+                        onChange={e => setNotificationSeverityFilter(e.target.value)}
+                        className="px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-50 border border-slate-200 text-slate-700"
+                      >
+                        <option value="ALL">All Severities</option>
+                        <option value="CRITICAL">Critical Only</option>
+                        <option value="WARNING">Warning Only</option>
+                        <option value="INFO">Informational Only</option>
+                      </select>
+
+                      <select
+                        value={notificationEscalationFilter}
+                        onChange={e => setNotificationEscalationFilter(e.target.value)}
+                        className="px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-50 border border-slate-200 text-slate-700"
+                      >
+                        <option value="ALL">All States</option>
+                        <option value="ESCALATED">Escalated Only</option>
+                        <option value="STANDARD">Standard Only</option>
+                      </select>
+                    </div>
+
+                    <div className="flex items-center gap-3">
+                      <div className="relative min-w-[220px]">
+                        <Search className="h-4 w-4 absolute left-3 top-2.5 text-slate-400" />
+                        <input
+                          type="text"
+                          placeholder="Search notifications..."
+                          value={notificationSearch}
+                          onChange={e => setNotificationSearch(e.target.value)}
+                          className="w-full pl-9 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium"
+                        />
+                      </div>
+
+                      <button
+                        disabled={busy === 'ntf:read_all' || !notificationSummary?.unreadCount}
+                        onClick={handleMarkAllNotificationsRead}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-100 text-slate-700 hover:bg-slate-200 disabled:opacity-50 transition"
+                      >
+                        {busy === 'ntf:read_all' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCheck className="h-3.5 w-3.5" />}
+                        Mark All Read
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Notification List */}
+                  <div className="divide-y divide-slate-100">
+                    {filteredNotifications.length === 0 ? (
+                      <div className="py-12 text-center text-slate-400 font-medium text-xs">
+                        No notifications match the selected criteria.
+                      </div>
+                    ) : (
+                      filteredNotifications.map(n => (
+                        <div
+                          key={n.notificationId}
+                          className={`p-4 transition-colors flex flex-col md:flex-row md:items-center justify-between gap-4 rounded-2xl ${
+                            !n.read ? 'bg-indigo-50/30 font-medium' : 'hover:bg-slate-50/60'
+                          }`}
+                        >
+                          <div className="flex items-start gap-3">
+                            <div
+                              className={`p-2.5 rounded-2xl mt-0.5 ${
+                                n.severity === 'CRITICAL'
+                                  ? 'bg-rose-100 text-rose-700'
+                                  : n.severity === 'WARNING'
+                                  ? 'bg-amber-100 text-amber-700'
+                                  : 'bg-blue-100 text-blue-700'
+                              }`}
+                            >
+                              {n.severity === 'CRITICAL' ? (
+                                <ShieldAlert className="h-5 w-5" />
+                              ) : n.severity === 'WARNING' ? (
+                                <AlertTriangle className="h-5 w-5" />
+                              ) : (
+                                <Bell className="h-5 w-5" />
+                              )}
+                            </div>
+
+                            <div>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <h3 className="text-sm font-bold text-slate-900">{n.title}</h3>
+                                {!n.read && (
+                                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-indigo-600 text-white">
+                                    New
+                                  </span>
+                                )}
+                                {n.escalationState === 'ESCALATED' && (
+                                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-purple-600 text-white">
+                                    Escalated
+                                  </span>
+                                )}
+                                <span className="text-[10px] font-mono text-slate-400">
+                                  {n.tenantId ? `Tenant: ${n.tenantId}` : 'Platform'}
+                                </span>
+                              </div>
+                              <p className="mt-1 text-xs text-slate-600 leading-relaxed">{n.message}</p>
+                              <div className="mt-2 flex flex-wrap items-center gap-3 text-[10px] text-slate-400">
+                                <span>{dateLabel(n.createdAt)}</span>
+                                <span>•</span>
+                                <span>Status: <strong className="text-slate-600">{n.deliveryStatus}</strong></span>
+                                <span>•</span>
+                                <span>Type: <strong className="text-slate-600">{n.type}</strong></span>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-2 self-end md:self-center">
+                            {n.alertId && (
+                              <button
+                                onClick={() => {
+                                  setTab('alerts');
+                                  setAlertSearch(n.alertId);
+                                }}
+                                className="px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-100 text-slate-700 hover:bg-slate-200 transition"
+                              >
+                                View Alert
+                              </button>
+                            )}
+
+                            {!n.read && (
+                              <button
+                                disabled={busy === `ntf:read:${n.notificationId}`}
+                                onClick={() => handleMarkNotificationRead(n.notificationId)}
+                                className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold bg-indigo-50 text-indigo-700 hover:bg-indigo-100 transition"
+                              >
+                                {busy === `ntf:read:${n.notificationId}` ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                ) : (
+                                  <Check className="h-3.5 w-3.5" />
+                                )}
+                                Mark Read
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Sub-Tab 2: Notification Preferences */}
+              {notificationSubTab === 'preferences' && notificationPreferences && (
+                <div className="rounded-3xl border border-slate-200 bg-white shadow-sm p-6 max-w-3xl space-y-6">
+                  <div>
+                    <h2 className="text-lg font-black text-slate-900">Super Admin Notification Preferences</h2>
+                    <p className="mt-1 text-xs text-slate-500">
+                      Configure server-authoritative dispatch channels and severity filtering rules for platform operational events.
+                    </p>
+                  </div>
+
+                  <form onSubmit={handleSavePreferences} className="space-y-6">
+                    {/* Delivery Channels */}
+                    <div className="space-y-3">
+                      <h3 className="text-xs font-black uppercase tracking-wider text-slate-400">Delivery Channels</h3>
+                      
+                      <label className="flex items-center justify-between p-4 rounded-2xl border border-slate-200 hover:bg-slate-50 cursor-pointer">
+                        <div className="flex items-center gap-3">
+                          <Bell className="h-5 w-5 text-indigo-600" />
+                          <div>
+                            <div className="text-xs font-bold text-slate-900">In-App Control Plane Notifications</div>
+                            <div className="text-[11px] text-slate-500">Display alerts in the Super Admin dashboard inbox.</div>
+                          </div>
+                        </div>
+                        <input
+                          type="checkbox"
+                          checked={notificationPreferences.enabledChannels?.inApp ?? true}
+                          onChange={e => setNotificationPreferences((prev: any) => ({
+                            ...prev,
+                            enabledChannels: { ...prev.enabledChannels, inApp: e.target.checked }
+                          }))}
+                          className="h-4 w-4 rounded text-indigo-600 focus:ring-indigo-500"
+                        />
+                      </label>
+
+                      <label className="flex items-center justify-between p-4 rounded-2xl border border-slate-200 hover:bg-slate-50 cursor-pointer">
+                        <div className="flex items-center gap-3">
+                          <Send className="h-5 w-5 text-indigo-600" />
+                          <div>
+                            <div className="text-xs font-bold text-slate-900">Email Dispatches</div>
+                            <div className="text-[11px] text-slate-500">Send high-priority notification emails to administrator address.</div>
+                          </div>
+                        </div>
+                        <input
+                          type="checkbox"
+                          checked={notificationPreferences.enabledChannels?.email ?? true}
+                          onChange={e => setNotificationPreferences((prev: any) => ({
+                            ...prev,
+                            enabledChannels: { ...prev.enabledChannels, email: e.target.checked }
+                          }))}
+                          className="h-4 w-4 rounded text-indigo-600 focus:ring-indigo-500"
+                        />
+                      </label>
+
+                      <label className="flex items-center justify-between p-4 rounded-2xl border border-slate-200 hover:bg-slate-50 cursor-pointer">
+                        <div className="flex items-center gap-3">
+                          <Activity className="h-5 w-5 text-indigo-600" />
+                          <div>
+                            <div className="text-xs font-bold text-slate-900">Webhook Event Dispatches</div>
+                            <div className="text-[11px] text-slate-500">Dispatch event payloads to configured external operator webhooks.</div>
+                          </div>
+                        </div>
+                        <input
+                          type="checkbox"
+                          checked={notificationPreferences.enabledChannels?.webhook ?? false}
+                          onChange={e => setNotificationPreferences((prev: any) => ({
+                            ...prev,
+                            enabledChannels: { ...prev.enabledChannels, webhook: e.target.checked }
+                          }))}
+                          className="h-4 w-4 rounded text-indigo-600 focus:ring-indigo-500"
+                        />
+                      </label>
+                    </div>
+
+                    {/* Severity Filters */}
+                    <div className="space-y-3">
+                      <h3 className="text-xs font-black uppercase tracking-wider text-slate-400">Severity Thresholds</h3>
+                      
+                      <label className="flex items-center justify-between p-4 rounded-2xl border border-slate-200 hover:bg-slate-50 cursor-pointer">
+                        <div>
+                          <div className="text-xs font-bold text-rose-700 uppercase">🔴 Critical Severity Alerts</div>
+                          <div className="text-[11px] text-slate-500">Provisioning failures, payment failures, security anomalies, unexpected suspensions.</div>
+                        </div>
+                        <input
+                          type="checkbox"
+                          checked={notificationPreferences.severityPreferences?.CRITICAL ?? true}
+                          onChange={e => setNotificationPreferences((prev: any) => ({
+                            ...prev,
+                            severityPreferences: { ...prev.severityPreferences, CRITICAL: e.target.checked }
+                          }))}
+                          className="h-4 w-4 rounded text-indigo-600 focus:ring-indigo-500"
+                        />
+                      </label>
+
+                      <label className="flex items-center justify-between p-4 rounded-2xl border border-slate-200 hover:bg-slate-50 cursor-pointer">
+                        <div>
+                          <div className="text-xs font-bold text-amber-700 uppercase">🟠 Warning Severity Alerts</div>
+                          <div className="text-[11px] text-slate-500">Usage limits approaching 90%, trials nearing expiration, past due billing.</div>
+                        </div>
+                        <input
+                          type="checkbox"
+                          checked={notificationPreferences.severityPreferences?.WARNING ?? true}
+                          onChange={e => setNotificationPreferences((prev: any) => ({
+                            ...prev,
+                            severityPreferences: { ...prev.severityPreferences, WARNING: e.target.checked }
+                          }))}
+                          className="h-4 w-4 rounded text-indigo-600 focus:ring-indigo-500"
+                        />
+                      </label>
+
+                      <label className="flex items-center justify-between p-4 rounded-2xl border border-slate-200 hover:bg-slate-50 cursor-pointer">
+                        <div>
+                          <div className="text-xs font-bold text-blue-700 uppercase">🔵 Informational Severity Alerts</div>
+                          <div className="text-[11px] text-slate-500">New tenant activations, plan tier upgrades, usage limit override toggles.</div>
+                        </div>
+                        <input
+                          type="checkbox"
+                          checked={notificationPreferences.severityPreferences?.INFO ?? true}
+                          onChange={e => setNotificationPreferences((prev: any) => ({
+                            ...prev,
+                            severityPreferences: { ...prev.severityPreferences, INFO: e.target.checked }
+                          }))}
+                          className="h-4 w-4 rounded text-indigo-600 focus:ring-indigo-500"
+                        />
+                      </label>
+                    </div>
+
+                    {/* Mandatory Reason Input */}
+                    <div className="space-y-1.5">
+                      <label className="block text-xs font-bold text-slate-700">
+                        Mandatory Audit Reason <span className="text-rose-500">*</span>
+                      </label>
+                      <textarea
+                        rows={2}
+                        required
+                        value={prefFormReason}
+                        onChange={e => setPrefFormReason(e.target.value)}
+                        placeholder="Provide justification for updating channel notification preferences..."
+                        className="w-full rounded-xl border border-slate-200 p-3 text-xs outline-none focus:border-indigo-500"
+                      />
+                    </div>
+
+                    <div className="flex justify-end">
+                      <button
+                        type="submit"
+                        disabled={!prefFormReason.trim() || busy === 'ntf:save_prefs'}
+                        className="flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 text-xs font-black text-white hover:bg-indigo-700 disabled:opacity-50 transition"
+                      >
+                        {busy === 'ntf:save_prefs' && <Loader2 className="h-4 w-4 animate-spin" />}
+                        Save Notification Preferences
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              )}
+
+              {/* Sub-Tab 3: Escalation Policies */}
+              {notificationSubTab === 'escalation' && (
+                <div className="rounded-3xl border border-slate-200 bg-white shadow-sm p-6 space-y-6">
+                  <div>
+                    <h2 className="text-lg font-black text-slate-900">Incident Escalation SLA Policies</h2>
+                    <p className="mt-1 text-xs text-slate-500">
+                      Configure server-authoritative response windows for unacknowledged incidents before triggering escalations.
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {escalationPolicies.map(p => (
+                      <div key={p.policyId} className="rounded-2xl border border-slate-200 p-5 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <span
+                            className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase ${
+                              p.severity === 'CRITICAL' ? 'bg-rose-100 text-rose-800' : 'bg-amber-100 text-amber-800'
+                            }`}
+                          >
+                            {p.severity} SLA
+                          </span>
+                          <span className={`text-xs font-bold ${p.enabled ? 'text-emerald-600' : 'text-slate-400'}`}>
+                            {p.enabled ? 'Active SLA' : 'Disabled'}
+                          </span>
+                        </div>
+
+                        <h3 className="text-sm font-bold text-slate-900">{p.name}</h3>
+                        <p className="text-xs text-slate-500">
+                          Unresolved alerts trigger automated escalation after <strong>{p.thresholdMinutes} minutes</strong>.
+                        </p>
+
+                        <div className="pt-2 flex justify-end">
+                          <button
+                            onClick={() => setEditingPolicyModal({
+                              policy: p,
+                              thresholdMinutes: p.thresholdMinutes,
+                              enabled: p.enabled,
+                              reason: '',
+                            })}
+                            className="px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-100 text-slate-700 hover:bg-slate-200 transition"
+                          >
+                            Configure SLA Threshold
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -1960,6 +2572,89 @@ export default function SuperAdminDashboard() {
               >
                 {busy?.startsWith('alert:') && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
                 Confirm {alertActionModal.action}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Escalation SLA Policy Modal */}
+      {editingPolicyModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4">
+          <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <h3 className="text-sm font-black text-slate-900">
+                Configure {editingPolicyModal.policy.name}
+              </h3>
+              <button
+                onClick={() => setEditingPolicyModal(null)}
+                className="p-1 text-slate-400 hover:text-slate-600 rounded-full"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="text-xs font-bold text-slate-700 block mb-1">
+                  Escalation Threshold (Minutes)
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  value={editingPolicyModal.thresholdMinutes}
+                  onChange={e => setEditingPolicyModal({
+                    ...editingPolicyModal,
+                    thresholdMinutes: Math.max(1, parseInt(e.target.value) || 1)
+                  })}
+                  className="w-full p-2.5 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 font-bold"
+                />
+                <p className="text-[10px] text-slate-400 mt-1">
+                  Unresolved alerts exceeding this duration will automatically trigger escalation notifications.
+                </p>
+              </div>
+
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={editingPolicyModal.enabled}
+                  onChange={e => setEditingPolicyModal({
+                    ...editingPolicyModal,
+                    enabled: e.target.checked
+                  })}
+                  className="h-4 w-4 rounded text-indigo-600 focus:ring-indigo-500"
+                />
+                <span className="text-xs font-bold text-slate-800">Enable Automated Escalation Policy</span>
+              </label>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-700 block">
+                  Mandatory Administrative Justification <span className="text-rose-600">*</span>
+                </label>
+                <textarea
+                  rows={3}
+                  placeholder="Provide justification for modifying SLA policy settings..."
+                  value={editingPolicyModal.reason}
+                  onChange={e => setEditingPolicyModal({ ...editingPolicyModal, reason: e.target.value })}
+                  className="w-full p-2.5 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 border-t border-slate-100 pt-3">
+              <button
+                onClick={() => setEditingPolicyModal(null)}
+                className="px-3.5 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl"
+              >
+                Cancel
+              </button>
+              <button
+                disabled={!editingPolicyModal.reason.trim() || Boolean(busy?.startsWith('policy:'))}
+                onClick={handleSaveEscalationPolicy}
+                className="inline-flex items-center gap-2 px-4 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 rounded-xl shadow-sm"
+              >
+                {busy?.startsWith('policy:') && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                Save SLA Policy
               </button>
             </div>
           </div>
