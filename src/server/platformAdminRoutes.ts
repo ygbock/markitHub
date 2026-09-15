@@ -94,6 +94,116 @@ export function registerPlatformAdminRoutes({
 }: PlatformRouteDeps): void {
   const platformAuth = [requireServerAuth, requirePlatformAdmin];
 
+  app.get('/api/platform/operations/overview', ...platformAuth, async (_req, res) => {
+    const db = getAdminDb();
+    if (!db) return res.status(503).json({ error: 'Platform service is not configured.' });
+
+    try {
+      const bounded = async (collection: string, queryBuilder?: (q: any) => any) => {
+        let q = db.collection(collection);
+        if (queryBuilder) q = queryBuilder(q);
+        return q.limit(500).get();
+      };
+
+      const [
+        tenantsSnap,
+        provisioningSnap,
+        suspendedSnap,
+        pastDueSnap,
+        usageSnap,
+        alertsSnap,
+        notificationsSnap,
+        auditSnap,
+      ] = await Promise.all([
+        bounded('tenants'),
+        bounded('tenants', q => q.where('lifecycleStatus', '==', 'provisioning')),
+        bounded('tenants', q => q.where('lifecycleStatus', '==', 'suspended')),
+        bounded('tenants', q => q.where('subscription.status', '==', 'past_due')),
+        bounded('tenant_usage_meters'),
+        bounded('platform_alerts', q => q.where('status', 'in', ['OPEN', 'ACKNOWLEDGED'])),
+        bounded('platform_notifications', q => q.where('read', '==', false)),
+        db.collection('audit_logs').orderBy('timestamp', 'desc').limit(25).get(),
+      ]);
+
+      const usageDocs = usageSnap.docs.map((d: any) => d.data() as any);
+      const usageRisk = usageDocs.filter((m: any) =>
+        String(m?.ordersMonthly?.state || m?.usageState || '').toLowerCase() === 'warning' ||
+        String(m?.ordersMonthly?.state || m?.usageState || '').toLowerCase() === 'exceeded'
+      ).length;
+
+      const alerts = alertsSnap.docs.map((d: any) => d.data() as any);
+      const escalatedIncidents = alerts.filter((a: any) => a?.metadata?.escalated === true).length;
+
+      const recentActivity = auditSnap.docs.map((d: any) => {
+        const a = d.data() as any;
+        return {
+          id: d.id,
+          action: String(a.action || ''),
+          tenantId: String(a.tenantId || ''),
+          tenantName: a.tenantName ? String(a.tenantName) : undefined,
+          module: a.module ? String(a.module) : undefined,
+          timestamp: String(a.timestamp || ''),
+        };
+      });
+
+      return res.json({
+        success: true,
+        generatedAt: new Date().toISOString(),
+        kpis: {
+          tenants: tenantsSnap.size,
+          provisioning: provisioningSnap.size,
+          suspended: suspendedSnap.size,
+          pastDue: pastDueSnap.size,
+          usageRisk,
+          openAlerts: alertsSnap.size,
+          unreadNotifications: notificationsSnap.size,
+          escalatedIncidents,
+        },
+        exceptions: [
+          {
+            key: 'provisioning',
+            label: 'Provisioning queue',
+            description: 'Tenants still in provisioning state',
+            count: provisioningSnap.size,
+            tab: 'tenants',
+          },
+          {
+            key: 'past_due',
+            label: 'Billing exceptions',
+            description: 'Tenants with past-due subscriptions',
+            count: pastDueSnap.size,
+            tab: 'billing',
+          },
+          {
+            key: 'usage_risk',
+            label: 'Usage risk',
+            description: 'Tenants approaching or exceeding metered limits',
+            count: usageRisk,
+            tab: 'analytics_usage',
+          },
+          {
+            key: 'incidents',
+            label: 'Open incidents',
+            description: 'Open or acknowledged platform alerts',
+            count: alertsSnap.size,
+            tab: 'alerts',
+          },
+          {
+            key: 'escalations',
+            label: 'SLA escalations',
+            description: 'Open incidents already escalated',
+            count: escalatedIncidents,
+            tab: 'notifications',
+          },
+        ],
+        recentActivity,
+      });
+    } catch (err: any) {
+      return res.status(500).json({ error: err?.message || 'Unable to load platform operations overview.' });
+    }
+  });
+
+
   app.get('/api/platform/dashboard', ...platformAuth, async (_req, res) => {
     const db = getAdminDb();
     if (!db) return res.status(503).json({ error: 'Platform service is not configured.' });
