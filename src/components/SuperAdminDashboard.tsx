@@ -17,6 +17,8 @@ import {
   Cpu,
   CreditCard,
   DollarSign,
+  FastForward,
+  FileText,
   Filter,
   Gauge,
   HeartPulse,
@@ -56,6 +58,7 @@ import {
 } from 'recharts';
 import PlatformGovernanceSection from './PlatformGovernanceSection';
 import PlatformAccessControlSection from './PlatformAccessControlSection';
+import PlatformAuditSection from './PlatformAuditSection';
 
 type Tab =
   | 'overview'
@@ -69,7 +72,8 @@ type Tab =
   | 'plans'
   | 'billing'
   | 'governance'
-  | 'access_control';
+  | 'access_control'
+  | 'audit_compliance';
 type TimeframeOption = 'today' | '7d' | '30d' | '90d' | '12m';
 
 interface Plan {

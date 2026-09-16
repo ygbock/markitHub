@@ -1130,6 +1130,10 @@ export interface AuditLog {
   targetStaffId?: string;
   targetStaffName?: string;
   metadata?: Record<string, unknown>;
+  correlationId?: string;
+  requestId?: string;
+  category?: string;
+  integrityHash?: string;
 }
 
 export interface AuditFilterParams {

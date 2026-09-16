@@ -77,6 +77,20 @@ import {
   type PlatformRole,
   type CallerContext,
 } from './platformIdentityControlPlane';
+import {
+  listPlatformAuditEvents,
+  getPlatformAuditEvent,
+  getPlatformAuditSummary,
+  verifyAuditIntegrity,
+  correlatePlatformAuditEvents,
+  exportPlatformAuditEvents,
+  generateComplianceReport,
+  type PlatformAuditEvent,
+  type AuditFilterParams,
+  type PlatformAuditSummary,
+  type IntegrityVerificationResult,
+  type ComplianceReport,
+} from './platformAuditControlPlane';
 
 interface PlatformRouteDeps {
   app: Express;
@@ -2925,6 +2939,161 @@ export function registerPlatformAdminRoutes({
       return res.json({ success: true, expiredCount });
     } catch (err: any) {
       return res.status(500).json({ error: err?.message || 'Failed to sweep expired break-glass access.' });
+    }
+  });
+
+  // =========================================================================
+  // Super Admin Audit, Compliance & Governance Control Plane
+  // =========================================================================
+
+  // 1. GET /api/platform/audit/summary
+  app.get('/api/platform/audit/summary', ...platformPerm('audit.view'), async (_req, res) => {
+    const db = getAdminDb();
+    if (!db) return res.status(503).json({ error: 'Platform service is not configured.' });
+    try {
+      const summary = await getPlatformAuditSummary(db);
+      return res.json({ success: true, summary });
+    } catch (err: any) {
+      return res.status(500).json({ error: err?.message || 'Failed to get platform audit summary.' });
+    }
+  });
+
+  // 2. GET /api/platform/audit/compliance-report
+  app.get('/api/platform/audit/compliance-report', ...platformPerm('audit.view'), async (req: any, res) => {
+    const db = getAdminDb();
+    if (!db) return res.status(503).json({ error: 'Platform service is not configured.' });
+    try {
+      const { startDate, endDate, tenantId } = req.query || {};
+      const report = await generateComplianceReport(db, {
+        startDate: startDate ? String(startDate) : undefined,
+        endDate: endDate ? String(endDate) : undefined,
+        tenantId: tenantId ? String(tenantId) : undefined,
+      });
+      return res.json({ success: true, report });
+    } catch (err: any) {
+      return res.status(500).json({ error: err?.message || 'Failed to generate compliance report.' });
+    }
+  });
+
+  // 3. POST /api/platform/audit/export
+  app.post('/api/platform/audit/export', ...platformPerm('audit.export'), async (req: any, res) => {
+    const db = getAdminDb();
+    if (!db) return res.status(503).json({ error: 'Platform service is not configured.' });
+    try {
+      const caller = extractCallerContext(req);
+      const { filters = {}, format, reason } = req.body || {};
+      const result = await exportPlatformAuditEvents(db, filters, caller, reason);
+
+      if (format === 'csv' || req.headers.accept?.includes('text/csv')) {
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        res.setHeader('Content-Disposition', `attachment; filename="platform-audit-export-${Date.now()}.csv"`);
+        return res.send(result.csv);
+      }
+
+      return res.json({
+        success: true,
+        csv: result.csv,
+        count: result.count,
+        exportAuditId: result.exportAuditId,
+      });
+    } catch (err: any) {
+      const status = err?.statusCode || 500;
+      return res.status(status).json({ error: err?.message || 'Failed to export platform audit records.' });
+    }
+  });
+
+  // 4. POST /api/platform/audit/correlate
+  app.post('/api/platform/audit/correlate', ...platformPerm('audit.view'), async (req: any, res) => {
+    const db = getAdminDb();
+    if (!db) return res.status(503).json({ error: 'Platform service is not configured.' });
+    try {
+      const result = await correlatePlatformAuditEvents(db, req.body || {});
+      return res.json({ success: true, ...result });
+    } catch (err: any) {
+      return res.status(500).json({ error: err?.message || 'Failed to correlate audit events.' });
+    }
+  });
+
+  // 5. GET /api/platform/audit
+  app.get('/api/platform/audit', ...platformPerm('audit.view'), async (req: any, res) => {
+    const db = getAdminDb();
+    if (!db) return res.status(503).json({ error: 'Platform service is not configured.' });
+    try {
+      const {
+        page,
+        limit,
+        pageSize,
+        actorUid,
+        actorEmail,
+        action,
+        module: auditModule,
+        severity,
+        result: auditResult,
+        category,
+        tenantId,
+        targetType,
+        targetId,
+        startDate,
+        endDate,
+        correlationId,
+        requestId,
+        search,
+      } = req.query || {};
+
+      const filters: AuditFilterParams = {
+        page: page ? Number(page) : undefined,
+        limit: limit ? Number(limit) : undefined,
+        pageSize: pageSize ? Number(pageSize) : undefined,
+        actorUid: actorUid ? String(actorUid) : undefined,
+        actorEmail: actorEmail ? String(actorEmail) : undefined,
+        action: action ? String(action) : undefined,
+        module: auditModule ? String(auditModule) : undefined,
+        severity: severity ? (String(severity) as any) : undefined,
+        result: auditResult ? (String(auditResult) as any) : undefined,
+        category: category ? (String(category) as any) : undefined,
+        tenantId: tenantId ? String(tenantId) : undefined,
+        targetType: targetType ? String(targetType) : undefined,
+        targetId: targetId ? String(targetId) : undefined,
+        startDate: startDate ? String(startDate) : undefined,
+        endDate: endDate ? String(endDate) : undefined,
+        correlationId: correlationId ? String(correlationId) : undefined,
+        requestId: requestId ? String(requestId) : undefined,
+        search: search ? String(search) : undefined,
+      };
+
+      const result = await listPlatformAuditEvents(db, filters);
+      return res.json({ success: true, ...result });
+    } catch (err: any) {
+      return res.status(500).json({ error: err?.message || 'Failed to list platform audit events.' });
+    }
+  });
+
+  // 6. GET /api/platform/audit/:id
+  app.get('/api/platform/audit/:id', ...platformPerm('audit.view'), async (req: any, res) => {
+    const db = getAdminDb();
+    if (!db) return res.status(503).json({ error: 'Platform service is not configured.' });
+    try {
+      const event = await getPlatformAuditEvent(db, req.params.id);
+      if (!event) {
+        return res.status(404).json({ error: `Audit record '${req.params.id}' not found.` });
+      }
+      return res.json({ success: true, event });
+    } catch (err: any) {
+      return res.status(500).json({ error: err?.message || 'Failed to get audit record.' });
+    }
+  });
+
+  // 7. POST /api/platform/audit/:id/verify-integrity
+  app.post('/api/platform/audit/:id/verify-integrity', ...platformPerm('audit.verify'), async (req: any, res) => {
+    const db = getAdminDb();
+    if (!db) return res.status(503).json({ error: 'Platform service is not configured.' });
+    try {
+      const caller = extractCallerContext(req);
+      const result = await verifyAuditIntegrity(db, req.params.id, caller);
+      return res.json({ success: true, ...result });
+    } catch (err: any) {
+      const status = err?.statusCode || 500;
+      return res.status(status).json({ error: err?.message || 'Failed to verify audit integrity.' });
     }
   });
 }

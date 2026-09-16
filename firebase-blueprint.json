@@ -68,7 +68,7 @@
     },
     "auditLog": {
       "title": "AuditLog",
-      "description": "Security audit ledger item",
+      "description": "Security audit ledger item and tamper-evident platform audit event",
       "type": "object",
       "properties": {
         "id": { "type": "string" },
@@ -77,9 +77,24 @@
         "role": { "type": "string" },
         "action": { "type": "string" },
         "module": { "type": "string" },
-        "details": { "type": "string" }
+        "details": { "type": "string" },
+        "tenantId": { "type": "string" },
+        "actorUid": { "type": "string" },
+        "actorEmail": { "type": "string" },
+        "actorRole": { "type": "string" },
+        "targetType": { "type": "string" },
+        "targetId": { "type": "string" },
+        "targetName": { "type": "string" },
+        "reason": { "type": "string" },
+        "result": { "type": "string" },
+        "severity": { "type": "string" },
+        "correlationId": { "type": "string" },
+        "requestId": { "type": "string" },
+        "source": { "type": "string" },
+        "category": { "type": "string" },
+        "integrityHash": { "type": "string" }
       },
-      "required": ["id", "timestamp", "staffName", "role", "action", "module", "details"]
+      "required": ["id", "timestamp", "action", "module", "details"]
     },
     "settings": {
       "title": "SystemSettings",

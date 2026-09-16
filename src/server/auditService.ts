@@ -153,7 +153,7 @@ export function createAuthoritativeAuditRecord(params: AuthoritativeAuditParams)
     }
   }
 
-  return {
+  const record: AuditLog = {
     id: `audit_${Date.now()}_${crypto.randomUUID().slice(0, 8)}`,
     timestamp: now,
     staffName: actorName,
@@ -178,6 +178,24 @@ export function createAuthoritativeAuditRecord(params: AuthoritativeAuditParams)
     targetStaffName: params.targetType === 'staff' ? params.targetName : undefined,
     metadata: sanitizedMeta,
   };
+
+  const canonicalFields = [
+    record.id,
+    record.timestamp,
+    record.actorUid || '',
+    record.action || '',
+    record.module || '',
+    record.result || 'success',
+    record.severity || 'info',
+    record.reason || '',
+    record.tenantId || '',
+    record.targetType || '',
+    record.targetId || '',
+    (record.metadata as any)?.correlationId || '',
+  ];
+  (record as any).integrityHash = crypto.createHash('sha256').update(canonicalFields.join('||'), 'utf8').digest('hex');
+
+  return record;
 }
 
 /**

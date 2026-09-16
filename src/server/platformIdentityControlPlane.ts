@@ -127,6 +127,9 @@ export const PLATFORM_PERMISSIONS: readonly PlatformPermissionDef[] = [
   { key: 'break_glass.grant', domain: 'security', label: 'Grant Break-Glass Elevation', description: 'Authorize emergency elevated permissions with mandatory TTL' },
   { key: 'break_glass.revoke', domain: 'security', label: 'Revoke Break-Glass Elevation', description: 'Immediately revoke active emergency elevated permissions' },
   { key: 'audit.view', domain: 'security', label: 'View Audit Trail', description: 'Inspect authoritative platform audit trails and telemetry logs' },
+  { key: 'audit.export', domain: 'security', label: 'Export Audit Records', description: 'Generate sanitized CSV compliance exports with formula-injection protection' },
+  { key: 'audit.verify', domain: 'security', label: 'Verify Audit Integrity', description: 'Run cryptographic tamper-evidence verification on immutable audit records' },
+  { key: 'audit.security', domain: 'security', label: 'Audit Security & Compliance', description: 'Inspect compliance reports, retention policies, and security alerts' },
 ] as const;
 
 export const ALL_PLATFORM_PERMISSION_KEYS: string[] = PLATFORM_PERMISSIONS.map(p => p.key);
@@ -182,6 +185,9 @@ export const ROLE_DEFAULT_PERMISSIONS: Record<PlatformRole, readonly string[]> =
     'break_glass.revoke',
     'governance.view',
     'audit.view',
+    'audit.export',
+    'audit.verify',
+    'audit.security',
   ],
 };
 
@@ -279,7 +285,22 @@ export function hasPlatformPermission(
 ): boolean {
   if (admin.status === 'suspended') return false;
   const effective = computeEffectivePermissions(admin, now);
-  return effective.includes(requiredPermission);
+  if (effective.includes(requiredPermission)) return true;
+
+  // Permission alias resolution for platform audit domain
+  const aliases: Record<string, string[]> = {
+    'audit.view': ['platform.audit.read'],
+    'platform.audit.read': ['audit.view'],
+    'audit.export': ['platform.audit.export'],
+    'platform.audit.export': ['audit.export'],
+    'audit.verify': ['platform.audit.verify'],
+    'platform.audit.verify': ['audit.verify'],
+    'audit.security': ['platform.audit.security'],
+    'platform.audit.security': ['audit.security'],
+  };
+
+  const equivs = aliases[requiredPermission] || [];
+  return equivs.some((p) => effective.includes(p));
 }
 
 export function assertNotSelfPrivilegeEscalation(
