@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { createAuthoritativeAuditRecord } from './auditService';
 import {
   computeAuditIntegrityHash,
   normalizeAuditEvent,
@@ -99,4 +100,24 @@ test('audit categorization distinguishes automated, security, and admin events',
   assert.equal(categorizeAuditEvent({ action: 'BREAK_GLASS_GRANTED', module: 'Platform Identity & Access' }), 'SECURITY_EVENT');
   assert.equal(categorizeAuditEvent({ action: 'SCHEDULED_HEALTH_SWEEP', module: 'Operations', source: 'scheduler' }), 'AUTOMATED_ACTION');
   assert.equal(categorizeAuditEvent({ action: 'PLATFORM_ADMIN_UPDATED', module: 'Platform Identity & Access' }), 'ADMIN_ACTION');
+});
+
+test('authoritative audit records produce v2 hashes that normalize back to VALID', () => {
+  const record = createAuthoritativeAuditRecord({
+    tenantId: 'tenant_1',
+    actorUid: 'admin_1',
+    actorName: 'Admin',
+    actorEmail: 'admin@example.com',
+    actorRole: 'SUPER_ADMIN',
+    action: 'BREAK_GLASS_GRANTED',
+    module: 'Platform Identity & Access',
+    targetType: 'platform_administrator',
+    targetId: 'admin_2',
+    reason: 'Emergency operational recovery',
+    details: 'Emergency elevation granted.',
+    metadata: { correlationId: 'corr_1', requestId: 'req_1' },
+  });
+  assert.equal(record.integrityVersion, 2);
+  const normalized = normalizeAuditEvent({ id: record.id, data: () => record });
+  assert.equal(normalized.integrityStatus, 'VALID');
 });
