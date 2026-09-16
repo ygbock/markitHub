@@ -67,6 +67,34 @@ export function sanitizeAuditMetadata(data: unknown, depth = 0): unknown {
   return sanitized;
 }
 
+function inferAuditCategoryForRecord(params: {
+  action: string;
+  module: string;
+  actorUid: string;
+  actorRole: string;
+}): 'ADMIN_ACTION' | 'SECURITY_EVENT' | 'SYSTEM_ACTION' | 'AUTOMATED_ACTION' {
+  const actionUpper = String(params.action || '').toUpperCase();
+  const moduleUpper = String(params.module || '').toUpperCase();
+  if (
+    actionUpper.includes('BREAK_GLASS') ||
+    actionUpper.includes('SECURITY') ||
+    actionUpper.includes('AUTH') ||
+    actionUpper.includes('DENIED') ||
+    actionUpper.includes('INTEGRITY') ||
+    actionUpper.includes('TAMPER') ||
+    actionUpper.includes('ATTACK') ||
+    moduleUpper.includes('SECURITY')
+  ) return 'SECURITY_EVENT';
+  if (
+    actionUpper.startsWith('SCHEDULED_') ||
+    actionUpper.startsWith('SWEEP_') ||
+    actionUpper.startsWith('AUTO_') ||
+    params.actorRole === 'SYSTEM'
+  ) return 'AUTOMATED_ACTION';
+  if (actionUpper.startsWith('SYSTEM_') || params.actorUid === 'system') return 'SYSTEM_ACTION';
+  return 'ADMIN_ACTION';
+}
+
 export interface AuthoritativeAuditParams {
   tenantId: string;
   actorUid: string;
@@ -230,6 +258,9 @@ export function createAuthoritativeAuditRecord(params: AuthoritativeAuditParams)
     targetStaffId: params.targetType === 'staff' ? params.targetId : undefined,
     targetStaffName: params.targetType === 'staff' ? params.targetName : undefined,
     metadata: sanitizedMeta,
+    correlationId: typeof (sanitizedMeta as any)?.correlationId === 'string' ? (sanitizedMeta as any).correlationId : undefined,
+    requestId: typeof (sanitizedMeta as any)?.requestId === 'string' ? (sanitizedMeta as any).requestId : undefined,
+    category: inferAuditCategoryForRecord({ action: params.action, module: params.module, actorUid: params.actorUid, actorRole }),
   };
 
   // Version 2 signs the complete security-relevant event payload.
