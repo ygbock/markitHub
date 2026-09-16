@@ -131,6 +131,59 @@ export function inferAuditSeverity(action: string, result?: AuditResult): AuditS
 /**
  * Constructs a server-authoritative audit log entry with complete schema invariants.
  */
+/**
+ * Canonicalizes nested audit payloads with deterministic object-key ordering.
+ * Used by both audit creation and verification so the integrity signature covers
+ * the security-relevant event payload rather than only a small subset of fields.
+ */
+function canonicalizeAuditValue(value: unknown): unknown {
+  if (value === null || value === undefined) return value;
+  if (Array.isArray(value)) return value.map(canonicalizeAuditValue);
+  if (typeof value === 'object') {
+    return Object.keys(value as Record<string, unknown>)
+      .sort()
+      .reduce((acc, key) => {
+        acc[key] = canonicalizeAuditValue((value as Record<string, unknown>)[key]);
+        return acc;
+      }, {} as Record<string, unknown>);
+  }
+  return value;
+}
+
+/**
+ * Computes the v2 SHA-256 integrity signature for an audit record.
+ * The integrityVersion marker is intentionally excluded from the payload.
+ */
+export function computeAuditIntegrityHashV2(record: Partial<AuditLog>): string {
+  const canonicalPayload = {
+    id: record.id || '',
+    timestamp: record.timestamp || '',
+    tenantId: record.tenantId || '',
+    actorUid: record.actorUid || '',
+    actorEmail: record.actorEmail || '',
+    actorName: record.actorName || record.staffName || '',
+    actorRole: record.actorRole || record.role || '',
+    action: record.action || '',
+    module: record.module || '',
+    targetType: record.targetType || '',
+    targetId: record.targetId || '',
+    targetName: record.targetName || '',
+    reason: record.reason || '',
+    result: record.result || 'success',
+    severity: record.severity || 'info',
+    details: record.details || '',
+    previousState: record.previousState ?? null,
+    newState: record.newState ?? null,
+    metadata: record.metadata ?? {},
+    correlationId: record.correlationId || '',
+    requestId: record.requestId || '',
+    category: record.category || '',
+  };
+  return crypto.createHash('sha256')
+    .update(JSON.stringify(canonicalizeAuditValue(canonicalPayload)), 'utf8')
+    .digest('hex');
+}
+
 export function createAuthoritativeAuditRecord(params: AuthoritativeAuditParams): AuditLog {
   const result: AuditResult = params.result || 'success';
   const severity: AuditSeverity = params.severity || inferAuditSeverity(params.action, result);
@@ -179,21 +232,10 @@ export function createAuthoritativeAuditRecord(params: AuthoritativeAuditParams)
     metadata: sanitizedMeta,
   };
 
-  const canonicalFields = [
-    record.id,
-    record.timestamp,
-    record.actorUid || '',
-    record.action || '',
-    record.module || '',
-    record.result || 'success',
-    record.severity || 'info',
-    record.reason || '',
-    record.tenantId || '',
-    record.targetType || '',
-    record.targetId || '',
-    (record.metadata as any)?.correlationId || '',
-  ];
-  (record as any).integrityHash = crypto.createHash('sha256').update(canonicalFields.join('||'), 'utf8').digest('hex');
+  // Version 2 signs the complete security-relevant event payload.
+  // Keep the version explicit so pre-existing v1 signatures remain verifiable.
+  (record as any).integrityVersion = 2;
+  (record as any).integrityHash = computeAuditIntegrityHashV2(record);
 
   return record;
 }
