@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import {
   computeAuditIntegrityHash,
   normalizeAuditEvent,
@@ -78,7 +79,6 @@ test('legacy v1 audit signatures remain verifiable after v2 rollout', () => {
     original.targetId,
     original.correlationId,
   ];
-  const { createHash } = require('node:crypto');
   const integrityHash = createHash('sha256').update(legacyFields.join('||'), 'utf8').digest('hex');
   const event = normalizeAuditEvent({
     id: original.id,
