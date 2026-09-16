@@ -27,6 +27,7 @@ import DashboardOverview from './components/DashboardOverview';
 import InventoryModule from './components/InventoryModule';
 import POSModule from './components/POSModule';
 import ECommerceStorefront from './components/ECommerceStorefront';
+import LoginPage from './components/LoginPage';
 import { TenantProvider } from './context/TenantContext';
 import CRMModule from './components/CRMModule';
 import InvoiceModule from './components/InvoiceModule';
@@ -47,7 +48,7 @@ import { getOrderDeliveryTelemetry, flagOrderAsDelivered, buildAdminRefundNotifi
 import { 
   LayoutDashboard, Package, Smartphone, ShieldCheck, 
   Users, FileText, ShoppingBag, Terminal, Network, WifiOff, RefreshCw, Coins, Menu, MessageSquare,
-  Bell, AlertTriangle, Clock 
+  Bell, AlertTriangle, Clock, LogIn, LogOut
 } from 'lucide-react';
 
 export default function App() {
@@ -65,13 +66,44 @@ export default function App() {
   const [activeCustomer, setActiveCustomer] = useState<Customer | null>(INITIAL_CUSTOMERS[0]); // Sarah Connor
 
   // Navigation states
-  const [currentView, setCurrentView] = useState<'Admin' | 'ECommerce'>(() => {
-    if (typeof window !== 'undefined' && window.location.pathname.startsWith('/store')) {
-      return 'ECommerce';
+  const [currentView, setCurrentView] = useState<'Admin' | 'ECommerce' | 'Login'>(() => {
+    if (typeof window !== 'undefined') {
+      const path = window.location.pathname;
+      if (path === '/login' || path.startsWith('/login/')) {
+        return 'Login';
+      }
+      if (path.startsWith('/store')) {
+        return 'ECommerce';
+      }
     }
     return 'Admin';
   });
   const [adminSubTab, setAdminSubTab] = useState<AdminSubTab>('Dashboard');
+
+  const navigateToView = (view: 'Admin' | 'ECommerce' | 'Login') => {
+    setCurrentView(view);
+    if (typeof window !== 'undefined') {
+      const targetPath = view === 'Login' ? '/login' : view === 'ECommerce' ? '/store' : '/app';
+      if (window.location.pathname !== targetPath) {
+        window.history.pushState(null, '', targetPath);
+      }
+    }
+  };
+
+  useEffect(() => {
+    const handlePopState = () => {
+      const path = window.location.pathname;
+      if (path === '/login' || path.startsWith('/login/')) {
+        setCurrentView('Login');
+      } else if (path.startsWith('/store')) {
+        setCurrentView('ECommerce');
+      } else if (path === '/app' || path.startsWith('/admin')) {
+        setCurrentView('Admin');
+      }
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
 
   // Platform Control Plane is a separate application surface from the tenant
   // workspace. The URL is the explicit context boundary; tenant state and
@@ -1498,7 +1530,7 @@ export default function App() {
 
             {/* Global View Switcher (Admin <-> Storefront) */}
             <button
-              onClick={() => setCurrentView(currentView === 'Admin' ? 'ECommerce' : 'Admin')}
+              onClick={() => navigateToView(currentView === 'Admin' ? 'ECommerce' : 'Admin')}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white text-xs font-bold shadow-md shadow-indigo-900/30 transition-all cursor-pointer"
               id="header-mode-switch-btn"
             >
@@ -1513,6 +1545,17 @@ export default function App() {
                   <span className="hidden sm:inline">Admin Terminal</span>
                 </>
               )}
+            </button>
+
+            {/* Lock / Sign Out to Login */}
+            <button
+              onClick={() => navigateToView('Login')}
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 text-slate-300 hover:text-white text-xs font-bold transition-all cursor-pointer border border-white/10"
+              title="Lock Terminal & Switch Operator"
+              id="header-lock-btn"
+            >
+              <LogOut className="w-3.5 h-3.5 text-rose-400" />
+              <span className="hidden sm:inline">Lock</span>
             </button>
 
             {/* Active Staff Member Profile Badge */}
@@ -1537,14 +1580,29 @@ export default function App() {
 
       {/* Main viewport area */}
       <div className="flex-1" id="main-content-stage">
-        {currentView === 'Admin' ? (
+        {currentView === 'Login' ? (
+          <LoginPage
+            staffMembers={staffMembers}
+            customers={customers}
+            onStaffLogin={(staff) => {
+              setActiveStaff(staff);
+              navigateToView('Admin');
+              createAuditRecord('STAFF_LOGIN', 'USERS', `Staff member ${staff.name} authenticated via login portal.`);
+            }}
+            onCustomerLogin={(customer) => {
+              setActiveCustomer(customer);
+              navigateToView('ECommerce');
+            }}
+            onBackToStore={() => navigateToView('ECommerce')}
+          />
+        ) : currentView === 'Admin' ? (
           /* Admin Side: Static/Fixed Sidebar Layout with responsive main area */
           <div className="min-h-screen bg-slate-50 relative" id="admin-workspace-layout">
             
             {/* Enhanced Static/Fixed Sidebar Component */}
             <EnhancedSidebar
               currentView={currentView}
-              onSwitchView={setCurrentView}
+              onSwitchView={navigateToView}
               adminSubTab={adminSubTab}
               eCommerceActiveTab={eCommerceActiveTab}
               onSelectECommerceTab={(tab) => setECommerceActiveTab(tab)}
@@ -1769,8 +1827,7 @@ export default function App() {
               activeCustomer={activeCustomer}
               onLoginCustomer={handleLoginCustomer}
               onRegisterCustomer={handleAddCustomer}
-              onSwitchToAdmin={() => setCurrentView('Admin')}
-              onOpenLogin={() => setCurrentView('Login')}
+              onOpenLogin={() => navigateToView('Login')}
               homepageConfig={homepageConfig}
               reviews={reviews}
               onAddReview={handleAddReview}

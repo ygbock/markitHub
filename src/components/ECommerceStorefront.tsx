@@ -55,6 +55,7 @@ interface ECommerceStorefrontProps {
   activeCustomer: Customer | null;
   onLoginCustomer: (customerId: string) => void;
   onRegisterCustomer: (customer: Customer) => void;
+  onOpenLogin?: () => void;
   onSwitchToAdmin?: () => void;
   homepageConfig?: StorefrontHomepageConfig;
   reviews?: ProductReview[];
@@ -116,6 +117,7 @@ export default function ECommerceStorefront({
   activeCustomer,
   onLoginCustomer,
   onRegisterCustomer,
+  onOpenLogin,
   onSwitchToAdmin,
   homepageConfig: externalHomepageConfig,
   reviews,
@@ -900,6 +902,7 @@ export default function ECommerceStorefront({
           setActiveTab('home');
           setSearchTerm('');
         }}
+        onOpenLogin={onOpenLogin}
         onSwitchToAdmin={onSwitchToAdmin}
         selectedCategory={filters.category || ''}
         onSelectCategory={cat => {

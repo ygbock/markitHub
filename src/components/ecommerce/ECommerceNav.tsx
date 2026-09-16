@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { Customer, CartItem, Product, Order } from '../../types';
 import { 
   ShoppingBag, Search, Heart, User, Sparkles, Terminal, 
-  Menu, X, Tag, Zap, ShieldCheck, Bell, Truck, Gauge
+  Menu, X, Tag, Zap, ShieldCheck, Bell, Truck, Gauge, LogIn
 } from 'lucide-react';
 import { useCurrency } from '../../context/CurrencyContext';
 import SearchAutocomplete from './SearchAutocomplete';
@@ -24,13 +24,15 @@ interface ECommerceNavProps {
   onOpenAccount: (tab?: string) => void;
   onOpenOrderTracking?: (orderId?: string) => void;
   onGoHome: () => void;
+  onOpenLogin?: () => void;
   onSwitchToAdmin?: () => void;
   selectedCategory: string;
   onSelectCategory: (cat: string) => void;
   categories: string[];
   onOpenDealOfTheDay?: () => void;
   onOpenStorefrontManagement?: () => void;
-  isStorefrontManagementActive?: boolean;}
+  isStorefrontManagementActive?: boolean;
+}
 
 export default function ECommerceNav({
   products = [],
@@ -47,13 +49,15 @@ export default function ECommerceNav({
   onOpenAccount,
   onOpenOrderTracking,
   onGoHome,
+  onOpenLogin,
   onSwitchToAdmin,
   selectedCategory,
   onSelectCategory,
   categories,
   onOpenDealOfTheDay,
   onOpenStorefrontManagement,
-  isStorefrontManagementActive,}: ECommerceNavProps) {
+  isStorefrontManagementActive,
+}: ECommerceNavProps) {
   const { currentCurrency } = useCurrency();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isSearchExpandedMobile, setIsSearchExpandedMobile] = useState(false);
@@ -283,13 +287,16 @@ export default function ECommerceNav({
               <span className="text-xs font-bold text-slate-900 hidden lg:inline">Cart</span>
             </button>
 
-            {/* Staff/Admin access is entered through the dedicated login page. */}
+            {/* Storefront Login Button */}
             {(onOpenLogin || onSwitchToAdmin) && (
-              <button type="button"
+              <button
+                type="button"
                 onClick={() => (onOpenLogin ? onOpenLogin() : onSwitchToAdmin?.())}
-                className="hidden lg:inline-flex items-center gap-1.5 px-3 py-2 bg-slate-900 hover:bg-slate-800 active:scale-95 text-white rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer ml-1"
-                title="Staff & Admin Login" id="ecom-btn-login">
-                <User className="w-3.5 h-3.5 text-indigo-400" />
+                className="hidden lg:inline-flex items-center gap-1.5 px-3 py-2 bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white rounded-xl text-xs font-bold transition-all shadow-xs shadow-indigo-600/30 cursor-pointer ml-1"
+                title="Sign In / Login"
+                id="ecom-btn-login"
+              >
+                <LogIn className="w-3.5 h-3.5" />
                 <span>Login</span>
               </button>
             )}
@@ -550,12 +557,18 @@ export default function ECommerceNav({
 
           {(onOpenLogin || onSwitchToAdmin) && (
             <div className="pt-2 border-t border-slate-100">
-              <button type="button"
-                onClick={() => { if (onOpenLogin) onOpenLogin(); else onSwitchToAdmin?.(); setMobileMenuOpen(false); }}
-                className="w-full py-3 bg-slate-900 active:bg-slate-800 text-white rounded-2xl text-xs font-bold flex items-center justify-center gap-2 shadow-sm cursor-pointer"
-                id="ecom-btn-login-mobile">
-                <User className="w-4 h-4 text-indigo-400" />
-                <span>Staff & Admin Login</span>
+              <button
+                type="button"
+                onClick={() => {
+                  if (onOpenLogin) onOpenLogin();
+                  else onSwitchToAdmin?.();
+                  setMobileMenuOpen(false);
+                }}
+                className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white rounded-2xl text-xs font-bold flex items-center justify-center gap-2 shadow-sm cursor-pointer"
+                id="ecom-btn-login-mobile"
+              >
+                <LogIn className="w-4 h-4" />
+                <span>Sign In / Login</span>
               </button>
             </div>
           )}

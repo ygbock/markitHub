@@ -13,8 +13,8 @@ import { useCurrency } from '../context/CurrencyContext';
 export type AdminSubTab = 'Dashboard' | 'Inventory' | 'POS' | 'CRM' | 'Invoices' | 'Reports' | 'Security' | 'Platform' | 'Settings' | 'StorefrontManagement' | 'Reviews';
 
 interface EnhancedSidebarProps {
-  currentView: 'Admin' | 'ECommerce';
-  onSwitchView: (view: 'Admin' | 'ECommerce') => void;
+  currentView: 'Admin' | 'ECommerce' | 'Login';
+  onSwitchView: (view: 'Admin' | 'ECommerce' | 'Login') => void;
   adminSubTab: AdminSubTab;
   onSelectSubTab: (tab: AdminSubTab) => void;
   eCommerceActiveTab: EcommerceAdminTab;
