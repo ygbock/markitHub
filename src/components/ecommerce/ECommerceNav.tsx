@@ -283,17 +283,14 @@ export default function ECommerceNav({
               <span className="text-xs font-bold text-slate-900 hidden lg:inline">Cart</span>
             </button>
 
-            {/* Switch to Staff Admin Workspace */}
-            {onSwitchToAdmin && (
-              <button
-                type="button"
-                onClick={onSwitchToAdmin}
+            {/* Staff/Admin access is entered through the dedicated login page. */}
+            {(onOpenLogin || onSwitchToAdmin) && (
+              <button type="button"
+                onClick={() => (onOpenLogin ? onOpenLogin() : onSwitchToAdmin?.())}
                 className="hidden lg:inline-flex items-center gap-1.5 px-3 py-2 bg-slate-900 hover:bg-slate-800 active:scale-95 text-white rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer ml-1"
-                title="Return to POS & Business Administration"
-                id="ecom-btn-admin-console"
-              >
-                <Terminal className="w-3.5 h-3.5 text-indigo-400" />
-                <span>Admin</span>
+                title="Staff & Admin Login" id="ecom-btn-login">
+                <User className="w-3.5 h-3.5 text-indigo-400" />
+                <span>Login</span>
               </button>
             )}
           </div>
@@ -551,15 +548,14 @@ export default function ECommerceNav({
             </div>
           </div>
 
-          {onSwitchToAdmin && (
+          {(onOpenLogin || onSwitchToAdmin) && (
             <div className="pt-2 border-t border-slate-100">
-              <button
-                type="button"
-                onClick={() => { onSwitchToAdmin(); setMobileMenuOpen(false); }}
+              <button type="button"
+                onClick={() => { if (onOpenLogin) onOpenLogin(); else onSwitchToAdmin?.(); setMobileMenuOpen(false); }}
                 className="w-full py-3 bg-slate-900 active:bg-slate-800 text-white rounded-2xl text-xs font-bold flex items-center justify-center gap-2 shadow-sm cursor-pointer"
-              >
-                <Terminal className="w-4 h-4 text-indigo-400" />
-                <span>Open Staff Admin Console</span>
+                id="ecom-btn-login-mobile">
+                <User className="w-4 h-4 text-indigo-400" />
+                <span>Staff & Admin Login</span>
               </button>
             </div>
           )}
