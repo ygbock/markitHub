@@ -1549,8 +1549,12 @@ export default function App() {
               eCommerceActiveTab={eCommerceActiveTab}
               onSelectECommerceTab={(tab) => setECommerceActiveTab(tab)}
               onSelectSubTab={(tab) => {
-                setAdminSubTab(tab);
                 setIsMobileSidebarOpen(false);
+                if (tab === 'Platform') {
+                  window.location.href = '/platform';
+                  return;
+                }
+                setAdminSubTab(tab);
               }}
               activeStaff={activeStaff}
               dbStatus={deviceOffline ? 'offline' : dbStatus}
@@ -1696,9 +1700,7 @@ export default function App() {
                   />
                 )}
 
-                {adminSubTab === 'Platform' && activeStaff.role === 'Super Admin' && (
-                  <SuperAdminDashboard />
-                )}
+
 
                 {adminSubTab === 'Security' && (
                   <SecurityModule
