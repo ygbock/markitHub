@@ -1770,6 +1770,7 @@ export default function App() {
               onLoginCustomer={handleLoginCustomer}
               onRegisterCustomer={handleAddCustomer}
               onSwitchToAdmin={() => setCurrentView('Admin')}
+              onOpenLogin={() => setCurrentView('Login')}
               homepageConfig={homepageConfig}
               reviews={reviews}
               onAddReview={handleAddReview}
