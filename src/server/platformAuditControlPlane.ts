@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { sanitizeAuditMetadata, MAX_AUDIT_LOG_FETCH } from './auditService';
+import { sanitizeAuditMetadata, MAX_AUDIT_LOG_FETCH, computeAuditIntegrityHashV2 } from './auditService';
 import { createPlatformAlert } from './platformAlertControlPlane';
 import type { CallerContext } from './platformIdentityControlPlane';
 
@@ -35,6 +35,7 @@ export interface PlatformAuditEvent {
   requestId?: string;
   source?: string;
   integrityHash?: string;
+  integrityVersion?: 1 | 2;
   integrityStatus?: AuditIntegrityStatus;
   verifiedAt?: string;
 }
@@ -129,7 +130,7 @@ export interface ComplianceReport {
 /**
  * Computes a deterministic SHA-256 integrity hash over canonical authoritative audit attributes.
  */
-export function computeAuditIntegrityHash(record: Partial<PlatformAuditEvent>): string {
+function computeLegacyAuditIntegrityHash(record: Partial<PlatformAuditEvent>): string {
   const canonicalFields = [
     record.id || record.auditId || '',
     record.timestamp || '',
@@ -144,8 +145,15 @@ export function computeAuditIntegrityHash(record: Partial<PlatformAuditEvent>): 
     record.targetId || '',
     record.correlationId || '',
   ];
-  const canonicalString = canonicalFields.join('||');
-  return crypto.createHash('sha256').update(canonicalString, 'utf8').digest('hex');
+  return crypto.createHash('sha256').update(canonicalFields.join('||'), 'utf8').digest('hex');
+}
+
+/**
+ * Computes the current (v2) platform audit integrity signature.
+ * Legacy v1 records are still verifiable through normalizeAuditEvent/verifyAuditIntegrity.
+ */
+export function computeAuditIntegrityHash(record: Partial<PlatformAuditEvent>): string {
+  return computeAuditIntegrityHashV2(record as any);
 }
 
 /**
@@ -244,11 +252,14 @@ export function normalizeAuditEvent(doc: any): PlatformAuditEvent {
     requestId: data.requestId || data.metadata?.requestId,
     source: data.source || (data.metadata?.source as string) || 'console',
     integrityHash: data.integrityHash,
+    integrityVersion: data.integrityVersion === 2 ? 2 : data.integrityHash ? 1 : undefined,
     verifiedAt: data.verifiedAt,
   };
 
   if (event.integrityHash) {
-    const expected = computeAuditIntegrityHash(event);
+    const expected = event.integrityVersion === 2
+      ? computeAuditIntegrityHash(event)
+      : computeLegacyAuditIntegrityHash(event);
     event.integrityStatus = expected === event.integrityHash ? 'VALID' : 'INVALID';
   } else {
     event.integrityStatus = 'UNVERIFIED';
@@ -282,7 +293,9 @@ export async function verifyAuditIntegrity(
   }
 
   const event = normalizeAuditEvent(docSnap);
-  const calculatedHash = computeAuditIntegrityHash(event);
+  const calculatedHash = event.integrityVersion === 2
+    ? computeAuditIntegrityHash(event)
+    : computeLegacyAuditIntegrityHash(event);
   const storedHash = event.integrityHash;
   const verifiedAt = new Date().toISOString();
 
@@ -717,7 +730,7 @@ export async function exportPlatformAuditEvents(
   const { events } = await listPlatformAuditEvents(db, {
     ...filters,
     page: 1,
-    limit: 1000,
+    limit: MAX_AUDIT_LOG_FETCH,
   });
 
   const headers = [
