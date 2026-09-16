@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { sanitizeAuditMetadata, MAX_AUDIT_LOG_FETCH, computeAuditIntegrityHashV2 } from './auditService';
+import { sanitizeAuditMetadata, MAX_AUDIT_LOG_FETCH, computeAuditIntegrityHashV2, recordAuditEvent } from './auditService';
 import { createPlatformAlert } from './platformAlertControlPlane';
 import type { CallerContext } from './platformIdentityControlPlane';
 
@@ -364,7 +364,7 @@ export async function verifyAuditIntegrity(
         },
       };
       violationRecord.integrityHash = computeAuditIntegrityHash(violationRecord);
-      await db.collection('audit_logs').doc(violationId).set(violationRecord);
+      await recordAuditEvent(db, violationRecord as any);
     } catch {
       // Non-blocking violation log
     }
@@ -727,6 +727,14 @@ export async function exportPlatformAuditEvents(
   }
 
   // Fetch filtered events up to safe boundary
+  const exportReason = String(reason || '').trim().replace(/<[^>]*>?/gm, '');
+  if (exportReason.length < 3) {
+    const error: any = new Error('Audit export justification reason is mandatory and must be at least 3 characters.');
+    error.statusCode = 400;
+    throw error;
+  }
+  const safeExportReason = exportReason.slice(0, 500);
+
   const { events } = await listPlatformAuditEvents(db, {
     ...filters,
     page: 1,
@@ -798,7 +806,7 @@ export async function exportPlatformAuditEvents(
     severity: 'info',
     result: 'success',
     category: 'ADMIN_ACTION',
-    reason,
+    reason: safeExportReason,
     details: `Exported ${events.length} audit records to CSV by ${caller.email || caller.uid}. Filters: ${JSON.stringify(filters)}.`,
     correlationId,
     metadata: {
