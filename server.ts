@@ -110,7 +110,9 @@ declare global {
   }
 }
 
-const PORT = 3000;
+// Cloud Run (and AI Studio publishing) supplies PORT at runtime.
+// Keep 3000 as the local-development fallback.
+const PORT = Number.parseInt(process.env.PORT || '3000', 10);
 const HOST = '0.0.0.0';
 
 // Initialize Gemini SDK with telemetry header
