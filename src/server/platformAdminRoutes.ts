@@ -53,6 +53,30 @@ import {
   publishPlatformConfig,
   rollbackPlatformConfig,
 } from './platformGovernanceControlPlane';
+import {
+  PLATFORM_ROLES,
+  ALL_PLATFORM_PERMISSION_KEYS,
+  computeEffectivePermissions,
+  hasPlatformPermission,
+  getRolePermissionMatrix,
+  findPlatformAdminByUid,
+  bootstrapInitialSuperAdminIfEmpty,
+  listPlatformAdministrators,
+  getPlatformAdministrator,
+  createPlatformAdministrator,
+  updatePlatformAdminProfile,
+  assignPlatformAdminRole,
+  updatePlatformAdminPermissions,
+  updatePlatformAdminStatus,
+  deletePlatformAdministrator,
+  grantBreakGlassElevation,
+  revokeBreakGlassElevation,
+  sweepExpiredBreakGlass,
+  getAdministratorActivityHistory,
+  type PlatformAdministrator,
+  type PlatformRole,
+  type CallerContext,
+} from './platformIdentityControlPlane';
 
 interface PlatformRouteDeps {
   app: Express;
@@ -104,6 +128,95 @@ export function registerPlatformAdminRoutes({
   getAdminDb,
   getAdminAuth,
 }: PlatformRouteDeps): void {
+  const requirePlatformPermission = (requiredPermission: string): RequestHandler => {
+    return async (req: any, res: any, next: any) => {
+      const db = getAdminDb();
+      if (!db) return res.status(503).json({ error: 'Platform service is not configured.' });
+
+      const callerUser = req.user;
+      if (!callerUser || !callerUser.uid) {
+        return res.status(401).json({ error: 'Authentication is required.' });
+      }
+
+      // Explicit separation: Reject tenant-only claims (e.g. store owner / tenant staff)
+      const claims = callerUser.claims || {};
+      const isTenantOnly = Boolean(claims.tenantId) && claims.platformAdmin !== true;
+      if (isTenantOnly) {
+        return res.status(403).json({ error: 'Platform administrator authorization required. Tenant-level RBAC is prohibited on platform routes.' });
+      }
+
+      try {
+        let admin = await findPlatformAdminByUid(db, callerUser.uid);
+        if (!admin) {
+          admin = await bootstrapInitialSuperAdminIfEmpty(db, {
+            uid: callerUser.uid,
+            email: callerUser.email || claims.email || null,
+            name: callerUser.name || claims.name,
+            role: claims.role,
+            platformAdmin: claims.platformAdmin === true,
+          });
+        }
+
+        if (!admin) {
+          if (claims.platformAdmin === true && claims.role === 'Super Admin') {
+            req.platformAdmin = {
+              id: callerUser.uid,
+              uid: callerUser.uid,
+              email: callerUser.email || 'admin@markithub.internal',
+              name: 'Super Administrator',
+              status: 'active',
+              role: 'SUPER_ADMIN',
+              delegatedPermissions: [...ALL_PLATFORM_PERMISSION_KEYS],
+              version: 1,
+            };
+            req.platformPermissions = [...ALL_PLATFORM_PERMISSION_KEYS];
+            return next();
+          }
+
+          return res.status(403).json({ error: 'Platform administrator authorization required.' });
+        }
+
+        if (admin.status === 'suspended') {
+          return res.status(403).json({ error: 'Platform administrator account is suspended.' });
+        }
+
+        const now = new Date();
+        const effectivePerms = computeEffectivePermissions(admin, now);
+        const hasPerm = hasPlatformPermission(admin, requiredPermission, now);
+
+        if (!hasPerm) {
+          return res.status(403).json({
+            error: `Insufficient platform permissions. Required: '${requiredPermission}' (Current role: ${admin.role}).`,
+            requiredPermission,
+            currentRole: admin.role,
+          });
+        }
+
+        req.platformAdmin = admin;
+        req.platformPermissions = effectivePerms;
+        return next();
+      } catch (err: any) {
+        return res.status(500).json({ error: err?.message || 'Platform authorization verification failed.' });
+      }
+    };
+  };
+
+  const platformPerm = (perm: string) => [requireServerAuth, requirePlatformPermission(perm)];
+
+  function extractCallerContext(req: any): CallerContext {
+    const admin = req.platformAdmin;
+    const user = req.user || {};
+    const claims = user.claims || {};
+    return {
+      uid: admin?.uid || user.uid || 'admin_1',
+      email: admin?.email || user.email || claims.email || 'admin@markithub.internal',
+      name: admin?.name || user.name || claims.name || 'Platform Administrator',
+      role: admin?.role || claims.role || 'SUPER_ADMIN',
+      permissions: req.platformPermissions || (admin ? computeEffectivePermissions(admin) : [...ALL_PLATFORM_PERMISSION_KEYS]),
+      platformAdmin: true,
+    };
+  }
+
   const platformAuth = [requireServerAuth, requirePlatformAdmin];
 
   app.get('/api/platform/operations/overview', ...platformAuth, async (_req, res) => {
@@ -2566,6 +2679,252 @@ export function registerPlatformAdminRoutes({
     } catch (err: any) {
       const status = err?.statusCode || 400;
       return res.status(status).json({ error: err?.message || 'Unable to update escalation policy.' });
+    }
+  });
+
+  // =========================================================================
+  // PLATFORM IDENTITY, ACCESS & DELEGATED ADMINISTRATION ENDPOINTS
+  // =========================================================================
+
+  // 1. GET /api/platform/administrators/roles/matrix
+  app.get('/api/platform/administrators/roles/matrix', ...platformPerm('admins.view'), async (_req, res) => {
+    return res.json({
+      success: true,
+      matrix: getRolePermissionMatrix(),
+    });
+  });
+
+  // 2. GET /api/platform/administrators/me/context
+  app.get('/api/platform/administrators/me/context', ...platformPerm('admins.view'), async (req: any, res) => {
+    const admin = req.platformAdmin;
+    return res.json({
+      success: true,
+      administrator: admin,
+      effectivePermissions: req.platformPermissions || [],
+    });
+  });
+
+  // 3. GET /api/platform/administrators
+  app.get('/api/platform/administrators', ...platformPerm('admins.view'), async (req, res) => {
+    const db = getAdminDb();
+    if (!db) return res.status(503).json({ error: 'Platform service is not configured.' });
+    try {
+      const { status, role, search } = req.query || {};
+      const result = await listPlatformAdministrators(db, {
+        status: status ? String(status) : undefined,
+        role: role ? String(role) : undefined,
+        search: search ? String(search) : undefined,
+      });
+      return res.json({ success: true, ...result });
+    } catch (err: any) {
+      return res.status(500).json({ error: err?.message || 'Failed to list platform administrators.' });
+    }
+  });
+
+  // 4. GET /api/platform/administrators/:id
+  app.get('/api/platform/administrators/:id', ...platformPerm('admins.view'), async (req, res) => {
+    const db = getAdminDb();
+    if (!db) return res.status(503).json({ error: 'Platform service is not configured.' });
+    try {
+      const admin = await getPlatformAdministrator(db, req.params.id);
+      if (!admin) {
+        return res.status(404).json({ error: `Platform administrator '${req.params.id}' not found.` });
+      }
+      return res.json({ success: true, administrator: admin });
+    } catch (err: any) {
+      return res.status(500).json({ error: err?.message || 'Failed to get platform administrator.' });
+    }
+  });
+
+  // 5. GET /api/platform/administrators/:id/history
+  app.get('/api/platform/administrators/:id/history', ...platformPerm('admins.view'), async (req, res) => {
+    const db = getAdminDb();
+    if (!db) return res.status(503).json({ error: 'Platform service is not configured.' });
+    try {
+      const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 50));
+      const history = await getAdministratorActivityHistory(db, req.params.id, limit);
+      return res.json({ success: true, history });
+    } catch (err: any) {
+      return res.status(500).json({ error: err?.message || 'Failed to get administrator activity history.' });
+    }
+  });
+
+  // 6. POST /api/platform/administrators
+  app.post('/api/platform/administrators', ...platformPerm('admins.manage'), async (req: any, res) => {
+    const db = getAdminDb();
+    if (!db) return res.status(503).json({ error: 'Platform service is not configured.' });
+    try {
+      const caller = extractCallerContext(req);
+      const newAdmin = await createPlatformAdministrator(db, caller, req.body || {});
+      return res.status(201).json({ success: true, administrator: newAdmin });
+    } catch (err: any) {
+      const status = err?.statusCode || 400;
+      return res.status(status).json({ error: err?.message || 'Failed to create platform administrator.' });
+    }
+  });
+
+  // 7. PATCH /api/platform/administrators/:id/profile
+  app.patch('/api/platform/administrators/:id/profile', ...platformPerm('admins.manage'), async (req: any, res) => {
+    const db = getAdminDb();
+    if (!db) return res.status(503).json({ error: 'Platform service is not configured.' });
+    try {
+      const caller = extractCallerContext(req);
+      const updated = await updatePlatformAdminProfile(db, caller, req.params.id, req.body || {});
+      return res.json({ success: true, administrator: updated });
+    } catch (err: any) {
+      const status = err?.statusCode || 400;
+      return res.status(status).json({ error: err?.message || 'Failed to update administrator profile.' });
+    }
+  });
+
+  // 8. PATCH /api/platform/administrators/:id/role
+  app.patch('/api/platform/administrators/:id/role', ...platformPerm('admins.roles'), async (req: any, res) => {
+    const db = getAdminDb();
+    if (!db) return res.status(503).json({ error: 'Platform service is not configured.' });
+    try {
+      const caller = extractCallerContext(req);
+      const { role, justification, expectedVersion } = req.body || {};
+      const updated = await assignPlatformAdminRole(
+        db,
+        caller,
+        req.params.id,
+        role,
+        justification,
+        expectedVersion !== undefined ? Number(expectedVersion) : undefined
+      );
+      return res.json({ success: true, administrator: updated });
+    } catch (err: any) {
+      const status = err?.statusCode || 400;
+      return res.status(status).json({ error: err?.message || 'Failed to assign platform administrator role.' });
+    }
+  });
+
+  // 9. PATCH /api/platform/administrators/:id/permissions
+  app.patch('/api/platform/administrators/:id/permissions', ...platformPerm('admins.permissions'), async (req: any, res) => {
+    const db = getAdminDb();
+    if (!db) return res.status(503).json({ error: 'Platform service is not configured.' });
+    try {
+      const caller = extractCallerContext(req);
+      const { delegatedPermissions, justification, expectedVersion } = req.body || {};
+      const updated = await updatePlatformAdminPermissions(
+        db,
+        caller,
+        req.params.id,
+        delegatedPermissions,
+        justification,
+        expectedVersion !== undefined ? Number(expectedVersion) : undefined
+      );
+      return res.json({ success: true, administrator: updated });
+    } catch (err: any) {
+      const status = err?.statusCode || 400;
+      return res.status(status).json({ error: err?.message || 'Failed to update delegated permissions.' });
+    }
+  });
+
+  // 10. PATCH /api/platform/administrators/:id/status
+  app.patch('/api/platform/administrators/:id/status', ...platformPerm('admins.suspend'), async (req: any, res) => {
+    const db = getAdminDb();
+    if (!db) return res.status(503).json({ error: 'Platform service is not configured.' });
+    try {
+      const caller = extractCallerContext(req);
+      const { status, justification, expectedVersion } = req.body || {};
+      const updated = await updatePlatformAdminStatus(
+        db,
+        caller,
+        req.params.id,
+        status,
+        justification,
+        expectedVersion !== undefined ? Number(expectedVersion) : undefined
+      );
+      return res.json({ success: true, administrator: updated });
+    } catch (err: any) {
+      const status = err?.statusCode || 400;
+      return res.status(status).json({ error: err?.message || 'Failed to update administrator status.' });
+    }
+  });
+
+  // 11. DELETE /api/platform/administrators/:id
+  app.delete('/api/platform/administrators/:id', ...platformPerm('admins.delete'), async (req: any, res) => {
+    const db = getAdminDb();
+    if (!db) return res.status(503).json({ error: 'Platform service is not configured.' });
+    try {
+      const caller = extractCallerContext(req);
+      const justification = req.body?.justification || req.query?.justification;
+      const expectedVersion = req.body?.expectedVersion !== undefined
+        ? Number(req.body.expectedVersion)
+        : (req.query?.expectedVersion !== undefined ? Number(req.query.expectedVersion) : undefined);
+
+      const result = await deletePlatformAdministrator(db, caller, req.params.id, justification, expectedVersion);
+      return res.json({ success: true, ...result });
+    } catch (err: any) {
+      const status = err?.statusCode || 400;
+      return res.status(status).json({ error: err?.message || 'Failed to remove platform administrator.' });
+    }
+  });
+
+  // 12. POST /api/platform/administrators/:id/break-glass
+  app.post('/api/platform/administrators/:id/break-glass', ...platformPerm('break_glass.grant'), async (req: any, res) => {
+    const db = getAdminDb();
+    if (!db) return res.status(503).json({ error: 'Platform service is not configured.' });
+    try {
+      const caller = extractCallerContext(req);
+      const updated = await grantBreakGlassElevation(db, caller, req.params.id, req.body || {});
+      return res.json({ success: true, administrator: updated });
+    } catch (err: any) {
+      const status = err?.statusCode || 400;
+      return res.status(status).json({ error: err?.message || 'Failed to grant break-glass elevation.' });
+    }
+  });
+
+  // 13. DELETE /api/platform/administrators/:id/break-glass
+  app.delete('/api/platform/administrators/:id/break-glass', ...platformPerm('break_glass.revoke'), async (req: any, res) => {
+    const db = getAdminDb();
+    if (!db) return res.status(503).json({ error: 'Platform service is not configured.' });
+    try {
+      const caller = extractCallerContext(req);
+      const justification = req.body?.justification || req.query?.justification;
+      const expectedVersion = req.body?.expectedVersion !== undefined
+        ? Number(req.body.expectedVersion)
+        : (req.query?.expectedVersion !== undefined ? Number(req.query.expectedVersion) : undefined);
+
+      const updated = await revokeBreakGlassElevation(db, caller, req.params.id, justification, expectedVersion);
+      return res.json({ success: true, administrator: updated });
+    } catch (err: any) {
+      const status = err?.statusCode || 400;
+      return res.status(status).json({ error: err?.message || 'Failed to revoke break-glass elevation.' });
+    }
+  });
+
+  // 14. POST /api/platform/administrators/:id/break-glass/revoke
+  app.post('/api/platform/administrators/:id/break-glass/revoke', ...platformPerm('break_glass.revoke'), async (req: any, res) => {
+    const db = getAdminDb();
+    if (!db) return res.status(503).json({ error: 'Platform service is not configured.' });
+    try {
+      const caller = extractCallerContext(req);
+      const { justification, expectedVersion } = req.body || {};
+      const updated = await revokeBreakGlassElevation(
+        db,
+        caller,
+        req.params.id,
+        justification,
+        expectedVersion !== undefined ? Number(expectedVersion) : undefined
+      );
+      return res.json({ success: true, administrator: updated });
+    } catch (err: any) {
+      const status = err?.statusCode || 400;
+      return res.status(status).json({ error: err?.message || 'Failed to revoke break-glass elevation.' });
+    }
+  });
+
+  // 15. POST /api/platform/administrators/break-glass/sweep
+  app.post('/api/platform/administrators/break-glass/sweep', ...platformPerm('break_glass.revoke'), async (_req, res) => {
+    const db = getAdminDb();
+    if (!db) return res.status(503).json({ error: 'Platform service is not configured.' });
+    try {
+      const expiredCount = await sweepExpiredBreakGlass(db);
+      return res.json({ success: true, expiredCount });
+    } catch (err: any) {
+      return res.status(500).json({ error: err?.message || 'Failed to sweep expired break-glass access.' });
     }
   });
 }

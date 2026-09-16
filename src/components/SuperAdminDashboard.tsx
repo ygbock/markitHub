@@ -55,6 +55,7 @@ import {
   Cell,
 } from 'recharts';
 import PlatformGovernanceSection from './PlatformGovernanceSection';
+import PlatformAccessControlSection from './PlatformAccessControlSection';
 
 type Tab =
   | 'overview'
@@ -67,7 +68,8 @@ type Tab =
   | 'tenants'
   | 'plans'
   | 'billing'
-  | 'governance';
+  | 'governance'
+  | 'access_control';
 type TimeframeOption = 'today' | '7d' | '30d' | '90d' | '12m';
 
 interface Plan {
@@ -751,6 +753,7 @@ export default function SuperAdminDashboard() {
     ['plans', 'Plans & Pricing', Layers3],
     ['billing', 'Billing Events', CreditCard],
     ['governance', 'Platform Governance', Settings2],
+    ['access_control', 'Platform Access & Identity', Users],
   ];
 
   return (
@@ -2629,6 +2632,10 @@ export default function SuperAdminDashboard() {
 
           {tab === 'governance' && (
             <PlatformGovernanceSection />
+          )}
+
+          {tab === 'access_control' && (
+            <PlatformAccessControlSection />
           )}
         </>
       )}

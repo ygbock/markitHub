@@ -48,6 +48,7 @@ import {
   createOwnershipTransferAuditRecord,
 } from './src/server/tenantOwnershipAuth';
 import { assertPlatformAdmin } from './src/server/platformAdminAuth';
+import { findPlatformAdminByUid } from './src/server/platformIdentityControlPlane';
 import { registerPlatformAdminRoutes } from './src/server/platformAdminRoutes';
 import { startPlatformScheduler, stopPlatformScheduler } from './src/server/platformScheduler';
 import { addUsageEventToTransaction, evaluateUsageLimit, usagePeriod, usageMeterId, USAGE_METER_COLLECTION } from './src/server/platformUsageMeter';
@@ -631,11 +632,22 @@ async function startServer() {
   // PLATFORM SUPER ADMIN CONTROL PLANE
   // =========================================================================
   const requirePlatformAdmin = async (req: any, res: any, next: any) => {
+    const db = getAdminDb();
+    if (db && req.user?.uid) {
+      try {
+        const admin = await findPlatformAdminByUid(db, req.user.uid);
+        if (admin && admin.status === 'active') {
+          return next();
+        }
+      } catch {
+        // Fall back to assertPlatformAdmin claims check
+      }
+    }
     try {
       assertPlatformAdmin(req.user?.claims);
       return next();
     } catch (err: any) {
-      return res.status(err?.statusCode || 403).json({ error: err?.message || 'Platform Super Admin access is required.' });
+      return res.status(err?.statusCode || 403).json({ error: err?.message || 'Platform administrator access is required.' });
     }
   };
 

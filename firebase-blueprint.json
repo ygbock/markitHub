@@ -162,9 +162,31 @@
         "updatedAt": { "type": "string" }
       },
       "required": ["id", "ownerUid", "status", "createdAt", "updatedAt"]
+    },
+    "platformAdministrator": {
+      "title": "PlatformAdministrator",
+      "description": "Platform administrator identity with role, status, delegated permissions, and break-glass elevation",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "name": { "type": "string" },
+        "role": { "type": "string" },
+        "status": { "type": "string" },
+        "delegatedPermissions": { "type": "array" },
+        "version": { "type": "number" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "uid", "email", "name", "role", "status", "version", "createdAt", "updatedAt"]
     }
   },
   "firestore": {
+    "/platform_administrators/{adminId}": {
+      "schema": "platformAdministrator",
+      "description": "Platform administrator directory, roles, permissions, and break-glass states"
+    },
     "/tenants/{tenantId}": {
       "schema": "tenant",
       "description": "Store canonical tenant ownership, status, and metadata"
