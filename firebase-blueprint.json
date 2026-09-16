@@ -92,7 +92,8 @@
         "requestId": { "type": "string" },
         "source": { "type": "string" },
         "category": { "type": "string" },
-        "integrityHash": { "type": "string" }
+        "integrityHash": { "type": "string" },
+        "integrityVersion": { "type": "integer" }
       },
       "required": ["id", "timestamp", "action", "module", "details"]
     },
