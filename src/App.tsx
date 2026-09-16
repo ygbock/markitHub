@@ -73,6 +73,12 @@ export default function App() {
   });
   const [adminSubTab, setAdminSubTab] = useState<AdminSubTab>('Dashboard');
 
+  // Platform Control Plane is a separate application surface from the tenant
+  // workspace. The URL is the explicit context boundary; tenant state and
+  // navigation must never be reused to render the Super Admin portal.
+  const isPlatformRoute = typeof window !== 'undefined' &&
+    (window.location.pathname === '/platform' || window.location.pathname.startsWith('/platform/'));
+
   // Central System Settings state
   const [systemSettings, setSystemSettings] = useState<SystemSettings>(DEFAULT_SETTINGS);
 
@@ -153,6 +159,10 @@ export default function App() {
 
   // Live Firestore database synchronization with fallback to local storage
   useEffect(() => {
+    // The platform portal has its own server-authoritative data model and must
+    // not initialize tenant Firestore subscriptions while it is active.
+    if (isPlatformRoute) return;
+
     // 1. Check local cache first for instant boot
     const savedProds = localStorage.getItem('nexus_products');
     const savedCats = localStorage.getItem('nexus_categories');
@@ -269,7 +279,7 @@ export default function App() {
       unsubCategories();
       unsubReviews();
     };
-  }, []);
+  }, [isPlatformRoute]);
 
   // Payment completion is authoritative from the server/webhook.
   // Never mark an order paid or decrement inventory from a browser redirect.
@@ -1343,6 +1353,60 @@ export default function App() {
       saveReviewToDB(target).catch(() => {});
     }
   };
+
+  if (isPlatformRoute) {
+    const isSuperAdmin = activeStaff.role === 'Super Admin';
+
+    if (!isSuperAdmin) {
+      return (
+        <div className="min-h-screen bg-slate-950 text-white flex items-center justify-center p-6">
+          <div className="w-full max-w-lg rounded-3xl border border-white/10 bg-white/5 p-8 text-center shadow-2xl">
+            <ShieldCheck className="mx-auto h-10 w-10 text-rose-300" />
+            <h1 className="mt-4 text-2xl font-black">Platform Control Plane</h1>
+            <p className="mt-2 text-sm text-slate-400">
+              This portal is restricted to platform-level administrators. Tenant users remain in the tenant application.
+            </p>
+            <button
+              onClick={() => { window.location.href = '/app'; }}
+              className="mt-6 rounded-xl bg-white px-4 py-2.5 text-sm font-bold text-slate-950"
+            >
+              Return to Tenant Application
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="min-h-screen bg-slate-100 text-slate-900" id="platform-control-plane-root">
+        <header className="sticky top-0 z-40 border-b border-white/10 bg-slate-950 px-4 py-3 text-white shadow-xl">
+          <div className="mx-auto flex max-w-[1600px] items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-600 font-black">M</div>
+              <div>
+                <div className="text-xs font-black uppercase tracking-[0.16em] text-indigo-300">MikitHub</div>
+                <div className="text-sm font-black">Platform Control Plane</div>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="hidden rounded-full border border-emerald-400/20 bg-emerald-500/10 px-3 py-1.5 text-[10px] font-black uppercase tracking-wider text-emerald-300 sm:inline-flex">
+                Super Admin
+              </span>
+              <button
+                onClick={() => { window.location.href = '/app'; }}
+                className="rounded-xl border border-white/10 bg-white/10 px-3 py-2 text-xs font-bold hover:bg-white/15"
+              >
+                Tenant Application
+              </button>
+            </div>
+          </div>
+        </header>
+        <main className="mx-auto max-w-[1600px] p-4 sm:p-6 lg:p-8">
+          <SuperAdminDashboard />
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div className="bg-slate-50 min-h-screen text-slate-800 flex flex-col justify-between" id="applet-viewport-root">
