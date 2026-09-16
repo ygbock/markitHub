@@ -1134,6 +1134,7 @@ export interface AuditLog {
   requestId?: string;
   category?: string;
   integrityHash?: string;
+  integrityVersion?: 1 | 2;
 }
 
 export interface AuditFilterParams {
