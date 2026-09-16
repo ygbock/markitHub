@@ -40,6 +40,8 @@ import {
   Volume2,
   VolumeX,
   X,
+  Menu,
+  LogOut,
 } from 'lucide-react';
 import { getAuth } from 'firebase/auth';
 import {
@@ -745,8 +747,8 @@ export default function SuperAdminDashboard() {
     { label: 'Audit Events', value: dashboard.metrics.recentAuditCount, icon: ShieldCheck },
   ] : [];
 
-  const tabs: Array<[Tab, string, React.ElementType]> = [
-    ['overview', 'Overview', Gauge],
+  const platformNav: Array<[Tab, string, React.ElementType]> = [
+    ['overview', 'Dashboard', Gauge],
     ['operations', 'Operations Center', ShieldCheck],
     ['alerts', 'Alerts & Incidents', ShieldAlert],
     ['notifications', 'Notifications & Escalations', Bell],
@@ -758,58 +760,65 @@ export default function SuperAdminDashboard() {
     ['billing', 'Billing Events', CreditCard],
     ['governance', 'Platform Governance', Settings2],
     ['access_control', 'Platform Access & Identity', Users],
+    ['audit_compliance', 'Audit & Compliance', FileText],
   ];
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   return (
-    <section id="super-admin-dashboard" className="space-y-6 pb-12">
-      <div className="overflow-hidden rounded-[2rem] bg-slate-950 text-white shadow-xl">
-        <div className="p-6 sm:p-8">
-          <div className="flex flex-col gap-6 xl:flex-row xl:items-end xl:justify-between">
-            <div>
-              <div className="inline-flex items-center gap-2 rounded-full border border-indigo-400/20 bg-indigo-500/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-indigo-300">
-                <ShieldCheck className="h-3.5 w-3.5" /> Platform Control Plane
+    <section id="super-admin-dashboard" className="min-h-[calc(100vh-2rem)] bg-slate-100 text-slate-900">
+      <div className="flex min-h-[calc(100vh-2rem)] overflow-hidden rounded-[2rem] border border-slate-200 bg-white shadow-xl">
+        <aside className={`fixed inset-y-0 left-0 z-50 w-72 transform bg-slate-950 text-white transition-transform lg:relative lg:translate-x-0 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+          <div className="flex h-full flex-col">
+            <div className="border-b border-white/10 p-5">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-[10px] font-black uppercase tracking-[0.18em] text-indigo-300">MikitHub</div>
+                  <div className="mt-1 text-lg font-black">Platform Control Plane</div>
+                </div>
+                <button className="rounded-lg p-2 hover:bg-white/10 lg:hidden" onClick={() => setSidebarOpen(false)} aria-label="Close navigation"><X className="h-5 w-5" /></button>
               </div>
-              <h1 className="mt-3 text-2xl font-black tracking-tight sm:text-3xl">Super Admin Operations & Analytics</h1>
-              <p className="mt-2 max-w-2xl text-sm text-slate-400">
-                Server-authoritative platform analytics, MRR/revenue tracking, operational usage meters, tenant health scores, and lifecycle controls.
-              </p>
             </div>
-            <div className="flex flex-wrap items-center gap-3">
-              <div className="flex items-center rounded-xl border border-white/10 bg-white/5 p-1">
-                {[
-                  ['today', 'Today'],
-                  ['7d', '7 Days'],
-                  ['30d', '30 Days'],
-                  ['90d', '90 Days'],
-                  ['12m', '12 Months'],
-                ].map(([val, label]) => (
-                  <button
-                    key={val}
-                    onClick={() => setTimeframe(val as TimeframeOption)}
-                    className={`rounded-lg px-3 py-1.5 text-xs font-black transition ${
-                      timeframe === val ? 'bg-indigo-600 text-white shadow' : 'text-slate-300 hover:bg-white/10'
-                    }`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-              <button onClick={loadAll} disabled={loading} className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/10 px-4 py-2.5 text-sm font-bold hover:bg-white/15 disabled:opacity-60">
-                <RefreshCw className={loading ? 'h-4 w-4 animate-spin' : 'h-4 w-4'} /> Refresh
+            <nav className="flex-1 space-y-1 overflow-y-auto p-3">
+              {platformNav.map(([id, label, Icon]) => (
+                <button key={id} onClick={() => { setTab(id); setSidebarOpen(false); }} className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm font-bold transition ${tab === id ? 'bg-white text-slate-950 shadow' : 'text-slate-300 hover:bg-white/10 hover:text-white'}`}>
+                  <Icon className="h-4 w-4 shrink-0" /> <span>{label}</span>
+                </button>
+              ))}
+            </nav>
+            <div className="border-t border-white/10 p-3">
+              <button onClick={() => { window.location.href = '/app'; }} className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-sm font-bold text-slate-300 hover:bg-white/10 hover:text-white">
+                <LogOut className="h-4 w-4" /> Tenant Application
               </button>
             </div>
           </div>
+        </aside>
 
-          <div className="mt-7 flex gap-1 overflow-x-auto rounded-2xl border border-white/10 bg-white/5 p-1.5">
-            {tabs.map(([id, label, Icon]) => (
-              <button key={id} onClick={() => setTab(id)} className={`flex shrink-0 items-center gap-2 rounded-xl px-4 py-2.5 text-xs font-bold transition ${tab === id ? 'bg-white text-slate-950 shadow' : 'text-slate-300 hover:bg-white/10'}`}>
-                <Icon className="h-4 w-4" /> {label}
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
+        {sidebarOpen && <button className="fixed inset-0 z-40 bg-black/50 lg:hidden" onClick={() => setSidebarOpen(false)} aria-label="Close navigation overlay" />}
 
+        <div className="min-w-0 flex-1">
+          <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 px-4 py-4 backdrop-blur sm:px-6">
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <button className="rounded-xl border border-slate-200 p-2 lg:hidden" onClick={() => setSidebarOpen(true)} aria-label="Open navigation"><Menu className="h-5 w-5" /></button>
+                <div>
+                  <div className="text-xs font-black uppercase tracking-wider text-indigo-600">Super Admin</div>
+                  <h1 className="text-xl font-black tracking-tight">{platformNav.find(([id]) => id === tab)?.[1] || 'Dashboard'}</h1>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="hidden rounded-full bg-emerald-50 px-3 py-1.5 text-[10px] font-black uppercase tracking-wider text-emerald-700 sm:block">Platform Access</div>
+                <div className="flex items-center rounded-xl bg-slate-100 p-1">
+                  {[
+                    ['today', 'Today'], ['7d', '7 Days'], ['30d', '30 Days'], ['90d', '90 Days'], ['12m', '12 Months'],
+                  ].map(([val, label]) => (
+                    <button key={val} onClick={() => setTimeframe(val as TimeframeOption)} className={`rounded-lg px-2.5 py-1.5 text-[10px] font-black transition ${timeframe === val ? 'bg-white text-slate-950 shadow' : 'text-slate-500 hover:text-slate-900'}`}>{label}</button>
+                  ))}
+                </div>
+                <button onClick={loadAll} disabled={loading} className="inline-flex items-center gap-2 rounded-xl bg-slate-950 px-3 py-2.5 text-xs font-bold text-white disabled:opacity-60"><RefreshCw className={loading ? 'h-4 w-4 animate-spin' : 'h-4 w-4'} /> <span className="hidden sm:inline">Refresh</span></button>
+              </div>
+            </div>
+          </header>
+          <main className="p-4 sm:p-6 lg:p-8">
       {notice && (
         <div className="flex items-center justify-between rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
           <span><strong>Success:</strong> {notice}</span>
@@ -2939,6 +2948,10 @@ export default function SuperAdminDashboard() {
           </div>
         </div>
       )}
+    </section>
+          </main>
+        </div>
+      </div>
     </section>
   );
 }
