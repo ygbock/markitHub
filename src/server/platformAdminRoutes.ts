@@ -2959,7 +2959,7 @@ export function registerPlatformAdminRoutes({
   });
 
   // 2. GET /api/platform/audit/compliance-report
-  app.get('/api/platform/audit/compliance-report', ...platformPerm('audit.view'), async (req: any, res) => {
+  app.get('/api/platform/audit/compliance-report', ...platformPerm('audit.security'), async (req: any, res) => {
     const db = getAdminDb();
     if (!db) return res.status(503).json({ error: 'Platform service is not configured.' });
     try {
