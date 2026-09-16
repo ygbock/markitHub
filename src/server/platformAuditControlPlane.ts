@@ -363,6 +363,7 @@ export async function verifyAuditIntegrity(
           calculatedHash,
         },
       };
+      violationRecord.integrityVersion = 2;
       violationRecord.integrityHash = computeAuditIntegrityHash(violationRecord);
       await recordAuditEvent(db, violationRecord as any);
     } catch {
