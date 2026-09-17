@@ -1515,7 +1515,7 @@ export default function App() {
         />
       )}
 
-      {/* 2d. Business Onboarding Domain (/register/business, /business/onboarding) - Delegated directly to ShellResolver -> ShellOnboardingAdapter */}
+      {/* 2d. Business Onboarding Domain (/business/register, /business/onboarding) - Delegated authoritatively to ShellResolver -> ShellOnboardingAdapter */}
 
       {/* 2e. Customer Account Domain (/account/*) */}
       {activeDomain === 'CUSTOMER_ACCOUNT' && (

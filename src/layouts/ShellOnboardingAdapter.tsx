@@ -23,7 +23,7 @@ export type ShellOnboardingAdapterProps = ShellOnboardingAdapter;
 /**
  * ShellOnboardingAdapter Component
  *
- * 1. Wraps existing onboarding UI (reusing BusinessOnboardingShell).
+ * 1. Wraps existing onboarding UI (delegating to BusinessOnboardingShell).
  * 2. Preserves existing onboarding state, callbacks, and navigation.
  * 3. Translates canonical routing into onboarding context.
  */
@@ -59,6 +59,8 @@ export const ShellOnboardingAdapter: React.FC<ShellOnboardingAdapterProps> = ({
     onNavigate(path);
   };
 
+  // Robust custom children detection: excludes falsy values (false, null, undefined, boolean)
+  // that may be produced by conditional JSX rendering in App.tsx
   const hasCustomChildren = React.Children.toArray(children).length > 0;
 
   return (
@@ -76,4 +78,3 @@ export const ShellOnboardingAdapter: React.FC<ShellOnboardingAdapterProps> = ({
 };
 
 export default ShellOnboardingAdapter;
-

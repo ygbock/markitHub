@@ -122,9 +122,7 @@ export const ShellResolver: React.FC<ShellResolverProps> = ({
           onCancel={() => {
             onNavigate('/');
           }}
-        >
-          {children}
-        </ShellOnboardingAdapter>
+        />
       );
 
     case 'CUSTOMER_ACCOUNT':

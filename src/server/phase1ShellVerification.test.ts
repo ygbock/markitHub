@@ -452,13 +452,12 @@ test('Phase 1 Behavioral J: Allowed Shell Onboarding Adapter integration and con
   const adapterContractCheck: ShellOnboardingAdapter = {
     businessId: 'biz-test-123',
     mode: 'listing',
-    children: React.createElement('div', { id: 'onboarding-custom-child' }, 'Test Child'),
     onComplete: () => { completed = true; },
     onCancel: () => { cancelled = true; },
   };
   assert.equal(adapterContractCheck.businessId, 'biz-test-123');
   assert.equal(adapterContractCheck.mode, 'listing');
-  assert.ok(React.isValidElement(adapterContractCheck.children));
+  assert.equal(adapterContractCheck.children, undefined, 'children must be optional in reconciled contract');
   assert.equal(typeof adapterContractCheck.onComplete, 'function');
   assert.equal(typeof adapterContractCheck.onCancel, 'function');
 
@@ -472,19 +471,19 @@ test('Phase 1 Behavioral J: Allowed Shell Onboarding Adapter integration and con
 
   // 2. Behavioral verification: /business/onboarding and onboarding paths resolve through ShellOnboardingAdapter
   const onboardingPaths = ['/business/onboarding', '/business/register', '/register/business'];
-  for (const path of onboardingPaths) {
-    const domain = resolveDomainForPath(path);
-    assert.equal(domain, 'BUSINESS_ONBOARDING', `Route ${path} must map to BUSINESS_ONBOARDING domain`);
+  for (const p of onboardingPaths) {
+    const domain = resolveDomainForPath(p);
+    assert.equal(domain, 'BUSINESS_ONBOARDING', `Route ${p} must map to BUSINESS_ONBOARDING domain`);
 
     const resolved = ShellResolver({
-      currentPath: path,
-      onNavigate: (p) => { navigatedPath = p; },
+      currentPath: p,
+      onNavigate: (np) => { navigatedPath = np; },
     });
-    assert.ok(React.isValidElement(resolved), `ShellResolver must return a valid element for ${path}`);
-    assert.equal(resolved.type, ShellOnboardingAdapter, `Route ${path} must resolve to ShellOnboardingAdapter`);
-    
+    assert.ok(React.isValidElement(resolved), `ShellResolver must return a valid element for ${p}`);
+    assert.equal(resolved.type, ShellOnboardingAdapter, `Route ${p} must resolve to ShellOnboardingAdapter`);
+
     // CRITICAL: Verify no onboarding path resolves to TenantShell
-    assert.notEqual(resolved.type, TenantShell, `Route ${path} must NEVER resolve to TenantShell`);
+    assert.notEqual(resolved.type, TenantShell, `Route ${p} must NEVER resolve to TenantShell`);
   }
 
   // 3. Adapter delegation to existing BusinessOnboardingShell when owning onboarding content
@@ -544,4 +543,21 @@ test('Phase 1 Behavioral J: Allowed Shell Onboarding Adapter integration and con
   assert.ok(React.isValidElement(appRuntimeAdapter));
   assert.ok(React.isValidElement(appRuntimeAdapter.props.children));
   assert.equal(appRuntimeAdapter.props.children.type, BusinessOnboardingShell, 'Falsy children array from App must still delegate to BusinessOnboardingShell');
+
+  // 8. TenantShell isolation invariant
+  assert.notEqual(getShellNameForDomain('BUSINESS_ONBOARDING'), 'TenantShell');
+
+  // 9. App.tsx composition invariant: App.tsx must not pass duplicate BusinessOnboardingShell as children
+  const appFileContent = fs.readFileSync(path.resolve(process.cwd(), 'src/App.tsx'), 'utf-8');
+  assert.equal(
+    appFileContent.includes('<BusinessOnboardingShell'),
+    false,
+    'App.tsx must not directly render BusinessOnboardingShell as children to ShellResolver'
+  );
+  assert.equal(
+    appFileContent.includes('import BusinessOnboardingShell'),
+    false,
+    'App.tsx must not directly import BusinessOnboardingShell'
+  );
 });
+
