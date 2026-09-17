@@ -1,5 +1,78 @@
 @import "tailwindcss";
 
+/* MikitHub Design System CSS Variables */
+:root {
+  --mk-background: #f8fafc;
+  --mk-surface: #ffffff;
+  --mk-surface-elevated: #ffffff;
+  --mk-surface-muted: #f1f5f9;
+  --mk-foreground: #0f172a;
+  --mk-foreground-muted: #64748b;
+  --mk-border: #e2e8f0;
+  --mk-border-subtle: #f1f5f9;
+  --mk-primary: #4f46e5;
+  --mk-primary-foreground: #ffffff;
+  --mk-secondary: #0ea5e9;
+  --mk-secondary-foreground: #ffffff;
+  --mk-success: #10b981;
+  --mk-success-foreground: #ffffff;
+  --mk-warning: #f59e0b;
+  --mk-warning-foreground: #ffffff;
+  --mk-danger: #ef4444;
+  --mk-danger-foreground: #ffffff;
+  --mk-info: #06b6d4;
+  --mk-info-foreground: #ffffff;
+  --mk-focus: #6366f1;
+  --mk-overlay: rgba(15, 23, 42, 0.5);
+
+  --mk-radius-sm: 4px;
+  --mk-radius-md: 8px;
+  --mk-radius-lg: 12px;
+  --mk-radius-xl: 16px;
+  --mk-radius-full: 9999px;
+
+  --mk-shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --mk-shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+  --mk-shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+  --mk-shadow-xl: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
+}
+
+.dark, [data-mk-theme="dark"] {
+  --mk-background: #090d16;
+  --mk-surface: #0f172a;
+  --mk-surface-elevated: #1e293b;
+  --mk-surface-muted: #1e293b;
+  --mk-foreground: #f8fafc;
+  --mk-foreground-muted: #94a3b8;
+  --mk-border: #1e293b;
+  --mk-border-subtle: #334155;
+  --mk-primary: #6366f1;
+  --mk-primary-foreground: #ffffff;
+  --mk-secondary: #38bdf8;
+  --mk-secondary-foreground: #0f172a;
+  --mk-success: #34d399;
+  --mk-success-foreground: #022c22;
+  --mk-warning: #fbbf24;
+  --mk-warning-foreground: #451a03;
+  --mk-danger: #f87171;
+  --mk-danger-foreground: #450a0a;
+  --mk-info: #22d3ee;
+  --mk-info-foreground: #083344;
+  --mk-focus: #818cf8;
+  --mk-overlay: rgba(0, 0, 0, 0.75);
+
+  --mk-shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.3);
+  --mk-shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.4), 0 2px 4px -2px rgb(0 0 0 / 0.4);
+  --mk-shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.5), 0 4px 6px -4px rgb(0 0 0 / 0.5);
+  --mk-shadow-xl: 0 20px 25px -5px rgb(0 0 0 / 0.6), 0 8px 10px -6px rgb(0 0 0 / 0.6);
+}
+
+/* Accessibility focus ring utility */
+.mk-focus-ring:focus-visible {
+  outline: 2px solid var(--mk-focus);
+  outline-offset: 2px;
+}
+
 /* Custom utility to remove scrollbars while preserving scroll functionality */
 .no-scrollbar::-webkit-scrollbar {
   display: none;

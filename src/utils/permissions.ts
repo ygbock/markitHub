@@ -1,5 +1,7 @@
 import { PermissionKey, PermissionDefinition, PermissionCategory, StaffRole, RoleConfig, StaffMember } from '../types';
 
+export type { PermissionKey, StaffRole, StaffMember };
+
 export const PERMISSION_CATEGORIES: { id: PermissionCategory; label: string; icon: string; description: string }[] = [
   { id: 'inventory', label: 'Inventory & Catalog', icon: 'Package', description: 'Stock levels, catalog modifications, adjustments, and warehouse transfers' },
   { id: 'sales', label: 'Sales & POS Terminal', icon: 'Smartphone', description: 'Cashier checkout, discounts, refunds, held tabs, and shift reconciliation' },
