@@ -5,6 +5,7 @@ import { CustomerShell } from './CustomerShell';
 import { BusinessShell } from './BusinessShell';
 import { TenantShell } from './TenantShell';
 import { SuperAdminShell } from './SuperAdminShell';
+import { ShellOnboardingAdapter } from './ShellOnboardingAdapter';
 import BusinessOnboardingShell from '../components/business/BusinessOnboardingShell';
 import { StaffMember } from '../utils/permissions';
 import { Customer, ListingBusinessProfile } from '../types';
@@ -108,20 +109,23 @@ export const ShellResolver: React.FC<ShellResolverProps> = ({
 
     case 'BUSINESS_ONBOARDING':
       return (
-        <div className="min-h-screen bg-slate-50 dark:bg-slate-950" id="business-onboarding-shell-root">
-          {children || (
-            <BusinessOnboardingShell
-              onNavigate={onNavigate}
-              onComplete={(newBiz, choice) => {
-                if (choice === 'LISTING_AND_STORE' && newBiz.tenantId) {
-                  onNavigate(`/tenant/${newBiz.tenantId}/dashboard`);
-                } else {
-                  onNavigate(`/business/${newBiz.businessSlug || newBiz.slug || newBiz.id}`);
-                }
-              }}
-            />
-          )}
-        </div>
+        <ShellOnboardingAdapter
+          id="business-onboarding-shell-root"
+          businessId={route.params.businessId}
+          mode={
+            route.query?.mode === 'listing'
+              ? 'listing'
+              : route.query?.mode === 'listing-and-store' || route.query?.mode === 'store'
+              ? 'listing-and-store'
+              : undefined
+          }
+          onNavigate={onNavigate}
+          onCancel={() => {
+            onNavigate('/');
+          }}
+        >
+          {children}
+        </ShellOnboardingAdapter>
       );
 
     case 'CUSTOMER_ACCOUNT':

@@ -3,4 +3,5 @@ export * from './CustomerShell';
 export * from './BusinessShell';
 export * from './TenantShell';
 export * from './SuperAdminShell';
+export * from './ShellOnboardingAdapter';
 export * from './ShellResolver';

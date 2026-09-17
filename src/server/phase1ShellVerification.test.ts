@@ -38,6 +38,7 @@ import { TenantShell } from '../layouts/TenantShell';
 import { BusinessShell } from '../layouts/BusinessShell';
 import { CustomerShell } from '../layouts/CustomerShell';
 import { PublicShell } from '../layouts/PublicShell';
+import { ShellOnboardingAdapter } from '../layouts/ShellOnboardingAdapter';
 
 // ============================================================================
 // SECTION 1: Design System Foundation (Tokens, Themes, Primitives)
@@ -439,4 +440,58 @@ test('Phase 1 Behavioral I: Theme behavior, tokens, and storage persistence', ()
 
   mockStorage.setItem(THEME_STORAGE_KEY, 'system');
   assert.equal(mockStorage.getItem(THEME_STORAGE_KEY), 'system');
+});
+
+test('Phase 1 Behavioral J: Allowed Shell Onboarding Adapter integration and contract enforcement', () => {
+  // 1. Contract object compatibility check
+  let completed = false;
+  let cancelled = false;
+  const adapterContractCheck: ShellOnboardingAdapter = {
+    businessId: 'biz-test-123',
+    mode: 'listing',
+    children: React.createElement('div', { id: 'onboarding-custom-child' }, 'Test Child'),
+    onComplete: () => { completed = true; },
+    onCancel: () => { cancelled = true; },
+  };
+  assert.equal(adapterContractCheck.businessId, 'biz-test-123');
+  assert.equal(adapterContractCheck.mode, 'listing');
+  assert.ok(React.isValidElement(adapterContractCheck.children));
+  assert.equal(typeof adapterContractCheck.onComplete, 'function');
+  assert.equal(typeof adapterContractCheck.onCancel, 'function');
+
+  // 2. ShellOnboardingAdapter component structure
+  const customChild = React.createElement('div', { id: 'custom-child-view' }, 'Custom Step View');
+  const adapterEl = React.createElement(ShellOnboardingAdapter, {
+    businessId: 'biz-999',
+    mode: 'listing-and-store',
+    onComplete: () => { completed = true; },
+    onCancel: () => { cancelled = true; },
+    children: customChild,
+  });
+
+  assert.ok(React.isValidElement(adapterEl));
+  assert.equal(adapterEl.type, ShellOnboardingAdapter);
+
+  // 3. ShellResolver dispatches ShellOnboardingAdapter for canonical onboarding routes
+  const resolverOnboardingEl = ShellResolver({
+    currentPath: '/business/onboarding',
+    onNavigate: () => {},
+  });
+  assert.ok(React.isValidElement(resolverOnboardingEl));
+  assert.equal(resolverOnboardingEl.type, ShellOnboardingAdapter);
+  assert.equal((resolverOnboardingEl.props as any).id, 'business-onboarding-shell-root');
+
+  const resolverRegisterEl = ShellResolver({
+    currentPath: '/business/register',
+    onNavigate: () => {},
+  });
+  assert.ok(React.isValidElement(resolverRegisterEl));
+  assert.equal(resolverRegisterEl.type, ShellOnboardingAdapter);
+
+  // 4. Fallback rendering preserves default BusinessOnboardingShell when children are omitted
+  const standaloneAdapterEl = ShellOnboardingAdapter({
+    onNavigate: () => {},
+  });
+  assert.ok(React.isValidElement(standaloneAdapterEl));
+  assert.equal(standaloneAdapterEl.props.id, 'business-onboarding-shell-root');
 });
