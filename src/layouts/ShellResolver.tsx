@@ -109,7 +109,6 @@ export const ShellResolver: React.FC<ShellResolverProps> = ({
     case 'BUSINESS_ONBOARDING':
       return (
         <ShellOnboardingAdapter
-          id="business-onboarding-shell-root"
           businessId={route.params.businessId}
           mode={
             route.query?.mode === 'listing'
@@ -118,7 +117,7 @@ export const ShellResolver: React.FC<ShellResolverProps> = ({
               ? 'listing-and-store'
               : undefined
           }
-          onNavigate={onNavigate}
+          _navigate={onNavigate}
           onCancel={() => {
             onNavigate('/');
           }}
