@@ -11,6 +11,8 @@ interface LoginPageProps {
   onStaffLogin: (staff: StaffMember) => void;
   onCustomerLogin: (customer: Customer) => void;
   onBackToStore: () => void;
+  onBackToDiscovery?: () => void;
+  returnUrl?: string;
 }
 
 export default function LoginPage({
@@ -19,6 +21,8 @@ export default function LoginPage({
   onStaffLogin,
   onCustomerLogin,
   onBackToStore,
+  onBackToDiscovery,
+  returnUrl,
 }: LoginPageProps) {
   const [loginMode, setLoginMode] = useState<'staff' | 'customer'>('staff');
 
@@ -100,21 +104,34 @@ export default function LoginPage({
           </div>
           <div>
             <div className="text-sm font-black tracking-wider text-white uppercase flex items-center gap-2">
-              MarkitHub <span className="text-[10px] font-mono px-2 py-0.5 bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 rounded-full">Secure Auth</span>
+              MikitHub <span className="text-[10px] font-mono px-2 py-0.5 bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 rounded-full">Secure Auth</span>
             </div>
-            <p className="text-[10px] text-slate-400 font-medium">Enterprise POS & Commerce Suite</p>
+            <p className="text-[10px] text-slate-400 font-medium">Business Discovery, Commerce & Tenant Suite</p>
           </div>
         </div>
 
-        <button
-          type="button"
-          onClick={onBackToStore}
-          className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-white/10 hover:bg-white/15 active:scale-95 text-xs font-bold text-slate-200 hover:text-white transition-all cursor-pointer border border-white/10 shadow-sm"
-          id="btn-back-to-storefront"
-        >
-          <ArrowLeft className="w-3.5 h-3.5" />
-          <span>Back to Storefront</span>
-        </button>
+        <div className="flex items-center gap-2">
+          {onBackToDiscovery && (
+            <button
+              type="button"
+              onClick={onBackToDiscovery}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-xs font-bold text-slate-300 hover:text-white transition-all cursor-pointer border border-white/10"
+              id="btn-back-to-discovery"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" />
+              <span>Discovery</span>
+            </button>
+          )}
+
+          <button
+            type="button"
+            onClick={onBackToStore}
+            className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-white/10 hover:bg-white/15 active:scale-95 text-xs font-bold text-slate-200 hover:text-white transition-all cursor-pointer border border-white/10 shadow-sm"
+            id="btn-back-to-storefront"
+          >
+            <span>Storefront</span>
+          </button>
+        </div>
       </header>
 
       {/* Main Login Card Stage */}

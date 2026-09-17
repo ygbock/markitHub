@@ -902,8 +902,8 @@ export default function ECommerceStorefront({
           setActiveTab('home');
           setSearchTerm('');
         }}
-        onOpenLogin={onOpenLogin}
         onSwitchToAdmin={onSwitchToAdmin}
+        onOpenLogin={onOpenLogin}
         selectedCategory={filters.category || ''}
         onSelectCategory={cat => {
           setFilters(prev => ({ ...prev, category: cat }));

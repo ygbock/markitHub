@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { 
   INITIAL_PRODUCTS, INITIAL_CUSTOMERS, INITIAL_STAFF, 
   INITIAL_ORDERS, INITIAL_AUDIT_LOGS, INITIAL_CATEGORIES, INITIAL_REVIEWS,
@@ -44,11 +44,20 @@ import { useCurrency } from './context/CurrencyContext';
 import { decrementProductStock } from './utils/inventoryUtils';
 import { getOrderDeliveryTelemetry, flagOrderAsDelivered, buildAdminRefundNotification } from './utils/orderManagementUtils';
 
+// MikitHub Canonical Route Architecture & Domain Shells
+import { useMikitRouter } from './routes/useMikitRouter';
+import { evaluateCanonicalRouteGuard, TenantContextRecord } from './routes/routeGuards';
+import PublicDiscoveryShell from './components/discovery/PublicDiscoveryShell';
+import BusinessOnboardingShell from './components/business/BusinessOnboardingShell';
+import CustomerAccountShell from './components/customer/CustomerAccountShell';
+import RouteGuardShell from './components/routing/RouteGuardShell';
+import { DISCOVERY_BUSINESSES, CanonicalBusinessListing } from './data/discoveryData';
+
 // Icons
 import { 
   LayoutDashboard, Package, Smartphone, ShieldCheck, 
   Users, FileText, ShoppingBag, Terminal, Network, WifiOff, RefreshCw, Coins, Menu, MessageSquare,
-  Bell, AlertTriangle, Clock, LogIn, LogOut
+  Bell, AlertTriangle, Clock, LogIn, LogOut, Compass
 } from 'lucide-react';
 
 export default function App() {
@@ -65,51 +74,107 @@ export default function App() {
   const [activeStaff, setActiveStaff] = useState<StaffMember>(INITIAL_STAFF[0]); // Elena (Admin)
   const [activeCustomer, setActiveCustomer] = useState<Customer | null>(INITIAL_CUSTOMERS[0]); // Sarah Connor
 
-  // Navigation states
-  const [currentView, setCurrentView] = useState<'Admin' | 'ECommerce' | 'Login'>(() => {
-    if (typeof window !== 'undefined') {
-      const path = window.location.pathname;
-      if (path === '/login' || path.startsWith('/login/')) {
-        return 'Login';
-      }
-      if (path.startsWith('/store')) {
-        return 'ECommerce';
-      }
-    }
-    return 'Admin';
-  });
+  // MikitHub Canonical Router
+  const router = useMikitRouter();
+  const { currentRoute, activeDomain, navigate } = router;
+
+  // Active sub-tab in Tenant Operations
   const [adminSubTab, setAdminSubTab] = useState<AdminSubTab>('Dashboard');
 
-  const navigateToView = (view: 'Admin' | 'ECommerce' | 'Login') => {
-    setCurrentView(view);
-    if (typeof window !== 'undefined') {
-      const targetPath = view === 'Login' ? '/login' : view === 'ECommerce' ? '/store' : '/app';
-      if (window.location.pathname !== targetPath) {
-        window.history.pushState(null, '', targetPath);
-      }
+  // Tenant Registry & Guards
+  const tenantRegistry: Record<string, TenantContextRecord> = useMemo(() => ({
+    'nexus-retail': {
+      id: 'nexus-retail',
+      slug: 'nexus-retail',
+      name: 'Nexus Enterprise Commerce',
+      status: 'active',
+      capabilities: ['discovery', 'storefront', 'products', 'inventory', 'pos', 'orders', 'customers', 'services', 'bookings', 'marketing', 'reports', 'settings'],
+    },
+    'apex-gadgets': {
+      id: 'apex-gadgets',
+      slug: 'apex-gadgets',
+      name: 'Apex Gadgets Worldwide',
+      status: 'active',
+      capabilities: ['discovery', 'storefront', 'products', 'inventory', 'orders', 'marketing', 'customers'],
+    },
+    'sierra-boutique': {
+      id: 'sierra-boutique',
+      slug: 'sierra-boutique',
+      name: 'Sierra Fashion & Boutique',
+      status: 'active',
+      capabilities: ['discovery', 'storefront', 'products', 'services', 'inventory', 'orders', 'bookings', 'marketing'],
+    },
+    'suspended-merchant': {
+      id: 'suspended-merchant',
+      slug: 'suspended-merchant',
+      name: 'Suspended Merchant Co.',
+      status: 'suspended',
+      capabilities: ['pos'],
+      suspendedReason: 'Regulatory compliance review and policy violation',
+    }
+  }), []);
+
+  const tenantLookup = useCallback((tenantIdOrSlug: string): TenantContextRecord | null => {
+    return tenantRegistry[tenantIdOrSlug] || null;
+  }, [tenantRegistry]);
+
+  const isStaffMemberOfTenant = useCallback((staffId: string, tenantId: string): boolean => {
+    if (activeStaff.role === 'Super Admin') return true;
+    return tenantId === 'nexus-retail';
+  }, [activeStaff]);
+
+  const authContext = useMemo(() => ({
+    activeCustomer,
+    activeStaff,
+    tenantLookup,
+    isStaffMemberOfTenant,
+  }), [activeCustomer, activeStaff, tenantLookup, isStaffMemberOfTenant]);
+
+  const guardDecision = useMemo(() => {
+    return evaluateCanonicalRouteGuard(currentRoute, authContext);
+  }, [currentRoute, authContext]);
+
+  // Sync sub-tab based on canonical route ID
+  useEffect(() => {
+    if (activeDomain === 'TENANT_OPERATIONS') {
+      const routeId = currentRoute.definition.id;
+      if (routeId === 'tenant.pos') setAdminSubTab('POS');
+      else if (routeId === 'tenant.inventory') setAdminSubTab('Inventory');
+      else if (routeId === 'tenant.customers') setAdminSubTab('CRM');
+      else if (routeId === 'tenant.orders' || routeId === 'tenant.sales') setAdminSubTab('Invoices');
+      else if (routeId === 'tenant.reports') setAdminSubTab('Reports');
+      else if (routeId === 'tenant.settings' || routeId === 'tenant.security') setAdminSubTab('Settings');
+      else if (routeId.startsWith('tenant.storefront') || routeId === 'tenant.marketing') setAdminSubTab('StorefrontManagement');
+      else if (routeId === 'tenant.dashboard') setAdminSubTab('Dashboard');
+    }
+  }, [activeDomain, currentRoute.definition.id]);
+
+  const getTenantTabPath = (tenantId: string, subTab: AdminSubTab) => {
+    switch (subTab) {
+      case 'Dashboard': return `/tenant/${tenantId}/dashboard`;
+      case 'Inventory': return `/tenant/${tenantId}/inventory`;
+      case 'POS': return `/tenant/${tenantId}/pos`;
+      case 'CRM': return `/tenant/${tenantId}/customers`;
+      case 'Invoices': return `/tenant/${tenantId}/orders`;
+      case 'Reports': return `/tenant/${tenantId}/reports`;
+      case 'Settings': return `/tenant/${tenantId}/settings`;
+      case 'Security': return `/tenant/${tenantId}/settings`;
+      case 'StorefrontManagement': return `/tenant/${tenantId}/storefront`;
+      default: return `/tenant/${tenantId}/dashboard`;
     }
   };
 
-  useEffect(() => {
-    const handlePopState = () => {
-      const path = window.location.pathname;
-      if (path === '/login' || path.startsWith('/login/')) {
-        setCurrentView('Login');
-      } else if (path.startsWith('/store')) {
-        setCurrentView('ECommerce');
-      } else if (path === '/app' || path.startsWith('/admin')) {
-        setCurrentView('Admin');
-      }
-    };
-    window.addEventListener('popstate', handlePopState);
-    return () => window.removeEventListener('popstate', handlePopState);
-  }, []);
-
-  // Platform Control Plane is a separate application surface from the tenant
-  // workspace. The URL is the explicit context boundary; tenant state and
-  // navigation must never be reused to render the Super Admin portal.
-  const isPlatformRoute = typeof window !== 'undefined' &&
-    (window.location.pathname === '/platform' || window.location.pathname.startsWith('/platform/'));
+  const navigateToView = (view: 'Admin' | 'ECommerce' | 'Login') => {
+    if (view === 'Login') {
+      navigate('/login');
+    } else if (view === 'ECommerce') {
+      const tenantSlug = currentRoute.params.tenantSlug || currentRoute.params.tenantId || 'nexus-retail';
+      navigate(`/store/${tenantSlug}`);
+    } else {
+      const tenantId = currentRoute.params.tenantId || 'nexus-retail';
+      navigate(`/tenant/${tenantId}/dashboard`);
+    }
+  };
 
   // Central System Settings state
   const [systemSettings, setSystemSettings] = useState<SystemSettings>(DEFAULT_SETTINGS);
@@ -193,7 +258,7 @@ export default function App() {
   useEffect(() => {
     // The platform portal has its own server-authoritative data model and must
     // not initialize tenant Firestore subscriptions while it is active.
-    if (isPlatformRoute) return;
+    if (activeDomain === 'SUPER_ADMIN') return;
 
     // 1. Check local cache first for instant boot
     const savedProds = localStorage.getItem('nexus_products');
@@ -311,7 +376,7 @@ export default function App() {
       unsubCategories();
       unsubReviews();
     };
-  }, [isPlatformRoute]);
+  }, [activeDomain]);
 
   // Payment completion is authoritative from the server/webhook.
   // Never mark an order paid or decrement inventory from a browser redirect.
@@ -1361,7 +1426,8 @@ export default function App() {
 
   const handleNotificationActionClick = (notif: AdminNotification) => {
     setIsNotificationCenterOpen(false);
-    setCurrentView('Admin');
+    const tenantId = currentRoute.params.tenantId || 'nexus-retail';
+    navigate(`/tenant/${tenantId}/orders`);
     setAdminSubTab('Invoices');
     if (notif.orderId) {
       setSelectedOrderIdForInvoice(notif.orderId);
@@ -1386,57 +1452,132 @@ export default function App() {
     }
   };
 
-  if (isPlatformRoute) {
-    const isSuperAdmin = activeStaff.role === 'Super Admin';
+  // =========================================================================
+  // MIKITHUB CANONICAL ROUTE OWNERSHIP & DOMAIN DISPATCH
+  // =========================================================================
 
-    if (!isSuperAdmin) {
-      return (
-        <div className="min-h-screen bg-slate-950 text-white flex items-center justify-center p-6">
-          <div className="w-full max-w-lg rounded-3xl border border-white/10 bg-white/5 p-8 text-center shadow-2xl">
-            <ShieldCheck className="mx-auto h-10 w-10 text-rose-300" />
-            <h1 className="mt-4 text-2xl font-black">Platform Control Plane</h1>
-            <p className="mt-2 text-sm text-slate-400">
-              This portal is restricted to platform-level administrators. Tenant users remain in the tenant application.
-            </p>
-            <button
-              onClick={() => { window.location.href = '/app'; }}
-              className="mt-6 rounded-xl bg-white px-4 py-2.5 text-sm font-bold text-slate-950"
-            >
-              Return to Tenant Application
-            </button>
-          </div>
-        </div>
-      );
-    }
+  // 1. Guard check (Authorization & Tenant Status)
+  if (guardDecision.type !== 'ALLOW') {
+    return (
+      <RouteGuardShell
+        decision={guardDecision}
+        onNavigate={navigate}
+      />
+    );
+  }
 
+  // 2. Super Admin Platform Control Plane Domain (/superadmin/*)
+  if (activeDomain === 'SUPER_ADMIN') {
     return (
       <div className="min-h-screen bg-slate-100 text-slate-900" id="platform-control-plane-root">
-        <header className="sticky top-0 z-40 border-b border-white/10 bg-slate-950 px-4 py-3 text-white shadow-xl">
-          <div className="mx-auto flex max-w-[1600px] items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-600 font-black">M</div>
-              <div>
-                <div className="text-xs font-black uppercase tracking-[0.16em] text-indigo-300">MikitHub</div>
-                <div className="text-sm font-black">Platform Control Plane</div>
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="hidden rounded-full border border-emerald-400/20 bg-emerald-500/10 px-3 py-1.5 text-[10px] font-black uppercase tracking-wider text-emerald-300 sm:inline-flex">
-                Super Admin
-              </span>
-              <button
-                onClick={() => { window.location.href = '/app'; }}
-                className="rounded-xl border border-white/10 bg-white/10 px-3 py-2 text-xs font-bold hover:bg-white/15"
-              >
-                Tenant Application
-              </button>
-            </div>
-          </div>
-        </header>
-        <main className="mx-auto max-w-[1600px] p-4 sm:p-6 lg:p-8">
-          <SuperAdminDashboard />
-        </main>
+        <SuperAdminDashboard
+          initialTab="overview"
+          onNavigate={navigate}
+        />
       </div>
+    );
+  }
+
+  // 3. Public Discovery Domain (/ or /discover, /search, /business/:slug, /nearby)
+  if (activeDomain === 'PUBLIC_DISCOVERY') {
+    return (
+      <PublicDiscoveryShell
+        businessSlug={currentRoute.params.businessSlug}
+        products={products}
+        onNavigate={navigate}
+        onOpenLogin={() => navigate(`/login?returnUrl=${encodeURIComponent(currentRoute.pathname)}`)}
+      />
+    );
+  }
+
+  // 4. Business Onboarding Domain (/register/business)
+  if (activeDomain === 'BUSINESS_ONBOARDING') {
+    return (
+      <BusinessOnboardingShell
+        onNavigate={navigate}
+        onComplete={(newBiz, choice) => {
+          if (choice === 'LISTING_AND_STORE' && newBiz.tenantId) {
+            navigate(`/tenant/${newBiz.tenantId}/dashboard`);
+          } else {
+            navigate(`/business/${newBiz.slug}`);
+          }
+        }}
+      />
+    );
+  }
+
+  // 5. Customer Account Domain (/account/*)
+  if (activeDomain === 'CUSTOMER_ACCOUNT') {
+    return (
+      <CustomerAccountShell
+        customer={activeCustomer!}
+        orders={orders}
+        onNavigate={navigate}
+        onSignOut={() => {
+          setActiveCustomer(null);
+          navigate('/');
+        }}
+      />
+    );
+  }
+
+  // 6. Identity & Authentication Domain (/login, /register)
+  if (activeDomain === 'IDENTITY_AUTH') {
+    return (
+      <LoginPage
+        staffMembers={staffMembers}
+        customers={customers}
+        onStaffLogin={(staff) => {
+          setActiveStaff(staff);
+          createAuditRecord('STAFF_LOGIN', 'USERS', `Staff member ${staff.name} authenticated via login portal.`);
+          if (currentRoute.query.returnUrl) {
+            navigate(currentRoute.query.returnUrl);
+          } else if (staff.role === 'Super Admin') {
+            navigate('/superadmin/dashboard');
+          } else {
+            navigate('/tenant/nexus-retail/dashboard');
+          }
+        }}
+        onCustomerLogin={(cust) => {
+          setActiveCustomer(cust);
+          if (currentRoute.query.returnUrl) {
+            navigate(currentRoute.query.returnUrl);
+          } else {
+            navigate('/account/profile');
+          }
+        }}
+        onBackToStore={() => navigate('/store/nexus-retail')}
+        onBackToDiscovery={() => navigate('/')}
+        returnUrl={currentRoute.query.returnUrl}
+      />
+    );
+  }
+
+  // 7. Tenant Storefront Domain (/store/:tenantSlug/*)
+  if (activeDomain === 'STOREFRONT') {
+    const tenantSlug = currentRoute.params.tenantSlug || 'nexus-retail';
+    return (
+      <TenantProvider initialSlug={tenantSlug}>
+        <div className="min-h-screen bg-white" id="storefront-domain-root">
+          <ECommerceStorefront
+            products={products}
+            customers={customers}
+            orders={orders}
+            onPlaceEcomOrder={handlePlaceEcomOrder}
+            activeCustomer={activeCustomer}
+            onLoginCustomer={handleLoginCustomer}
+            onRegisterCustomer={handleAddCustomer}
+            onOpenLogin={() => navigate(`/login?returnUrl=${encodeURIComponent(currentRoute.pathname)}`)}
+            homepageConfig={homepageConfig}
+            reviews={reviews}
+            onAddReview={handleAddReview}
+            onHelpfulClick={handleHelpfulClick}
+            onConfirmOrderReceipt={handleConfirmOrderReceipt}
+            onFileReturnOrComplaint={handleFileReturnOrComplaint}
+            systemSettings={systemSettings}
+          />
+        </div>
+      </TenantProvider>
     );
   }
 
@@ -1444,24 +1585,21 @@ export default function App() {
     <div className="bg-slate-50 min-h-screen text-slate-800 flex flex-col justify-between" id="applet-viewport-root">
       
       {/* Top Main Mode Selector - Core Showroom navigation */}
-      {currentView === 'Admin' && (
       <header className="bg-slate-900 border-b border-white/10 px-3 sm:px-6 py-2.5 sticky top-0 z-40 shadow-md backdrop-blur-md w-full" id="master-mode-navbar">
         <div className="w-full px-3 sm:px-6 lg:px-8 xl:px-12 2xl:px-16 flex items-center justify-between gap-3">
           
           {/* Left Brand & Mobile Navigation Trigger */}
           <div className="flex items-center gap-2.5 sm:gap-3.5 min-w-0">
-            {/* Mobile/Tablet Sidebar Hamburger Toggle (visible on mobile/tablet when in Admin mode) */}
-            {currentView === 'Admin' && (
-              <button
-                onClick={() => setIsMobileSidebarOpen(true)}
-                className="lg:hidden p-2 text-gray-300 hover:text-white rounded-xl hover:bg-slate-800 active:scale-95 transition-all border border-slate-700/80 shrink-0 cursor-pointer"
-                title="Open Navigation Menu"
-                id="mobile-menu-toggle-btn"
-                aria-label="Open Navigation Menu"
-              >
-                <Menu className="w-4 h-4 sm:w-5 sm:h-5" />
-              </button>
-            )}
+            {/* Mobile/Tablet Sidebar Hamburger Toggle */}
+            <button
+              onClick={() => setIsMobileSidebarOpen(true)}
+              className="lg:hidden p-2 text-gray-300 hover:text-white rounded-xl hover:bg-slate-800 active:scale-95 transition-all border border-slate-700/80 shrink-0 cursor-pointer"
+              title="Open Navigation Menu"
+              id="mobile-menu-toggle-btn"
+              aria-label="Open Navigation Menu"
+            >
+              <Menu className="w-4 h-4 sm:w-5 sm:h-5" />
+            </button>
             
             <div className="w-8 h-8 sm:w-9 sm:h-9 bg-gradient-to-br from-indigo-500 via-indigo-600 to-indigo-700 rounded-xl text-white font-black text-xs sm:text-sm flex items-center justify-center shadow-md shadow-indigo-900/50 shrink-0 select-none">
               N
@@ -1473,7 +1611,7 @@ export default function App() {
                   NEXUS POS-COMMERCE CORE
                 </h1>
                 <span className="hidden md:inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-                  {currentView === 'Admin' ? adminSubTab : 'Online Store'}
+                  {adminSubTab}
                 </span>
               </div>
               <p className="text-[10px] text-gray-400 truncate hidden xs:block">
@@ -1503,53 +1641,64 @@ export default function App() {
               </span>
             </div>
 
-            {/* Admin Notification Center Bell - Only visible in Admin view */}
-            {currentView === 'Admin' && (
-              <button
-                onClick={() => setIsNotificationCenterOpen(true)}
-                className={`relative p-2 rounded-xl border transition-all cursor-pointer ${
-                  refundRequestsCount > 0
-                    ? 'bg-rose-500/20 text-rose-300 border-rose-500/40 hover:bg-rose-500/30 ring-2 ring-rose-500/30'
-                    : unreadNotifCount > 0
-                      ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30 hover:bg-indigo-500/30'
-                      : 'bg-white/5 text-gray-300 border-white/10 hover:bg-white/10'
-                }`}
-                title="Admin Alerts & RMA Notifications"
-                id="admin-notification-bell-btn"
-              >
-                <Bell className="w-4 h-4 sm:w-5 sm:h-5" />
-                {unreadNotifCount > 0 && (
-                  <span className={`absolute -top-1.5 -right-1.5 flex h-4 min-w-[16px] px-1 items-center justify-center text-[10px] font-black rounded-full text-white ${
-                    refundRequestsCount > 0 ? 'bg-rose-600 animate-pulse' : 'bg-indigo-600'
-                  }`}>
-                    {unreadNotifCount}
-                  </span>
-                )}
-              </button>
-            )}
-
-            {/* Global View Switcher (Admin <-> Storefront) */}
+            {/* Admin Notification Center Bell */}
             <button
-              onClick={() => navigateToView(currentView === 'Admin' ? 'ECommerce' : 'Admin')}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white text-xs font-bold shadow-md shadow-indigo-900/30 transition-all cursor-pointer"
-              id="header-mode-switch-btn"
+              onClick={() => setIsNotificationCenterOpen(true)}
+              className={`relative p-2 rounded-xl border transition-all cursor-pointer ${
+                refundRequestsCount > 0
+                  ? 'bg-rose-500/20 text-rose-300 border-rose-500/40 hover:bg-rose-500/30 ring-2 ring-rose-500/30'
+                  : unreadNotifCount > 0
+                    ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30 hover:bg-indigo-500/30'
+                    : 'bg-white/5 text-gray-300 border-white/10 hover:bg-white/10'
+              }`}
+              title="Admin Alerts & RMA Notifications"
+              id="admin-notification-bell-btn"
             >
-              {currentView === 'Admin' ? (
-                <>
-                  <ShoppingBag className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">Online Storefront</span>
-                </>
-              ) : (
-                <>
-                  <ShieldCheck className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">Admin Terminal</span>
-                </>
+              <Bell className="w-4 h-4 sm:w-5 sm:h-5" />
+              {unreadNotifCount > 0 && (
+                <span className={`absolute -top-1.5 -right-1.5 flex h-4 min-w-[16px] px-1 items-center justify-center text-[10px] font-black rounded-full text-white ${
+                  refundRequestsCount > 0 ? 'bg-rose-600 animate-pulse' : 'bg-indigo-600'
+                }`}>
+                  {unreadNotifCount}
+                </span>
               )}
             </button>
 
+            {/* Public Discovery Portal Navigation */}
+            <button
+              onClick={() => navigate('/')}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 text-slate-200 hover:text-white text-xs font-bold transition-all cursor-pointer border border-white/10"
+              title="Browse MikitHub Discovery"
+            >
+              <Compass className="w-3.5 h-3.5 text-indigo-400" />
+              <span className="hidden sm:inline">Discovery</span>
+            </button>
+
+            {/* Tenant Storefront */}
+            <button
+              onClick={() => navigate(`/store/${currentRoute.params.tenantId || 'nexus-retail'}`)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white text-xs font-bold shadow-md shadow-indigo-900/30 transition-all cursor-pointer"
+              id="header-mode-switch-btn"
+            >
+              <ShoppingBag className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Storefront</span>
+            </button>
+
+            {/* Platform Super Admin Console (Only visible to Super Admin) */}
+            {activeStaff.role === 'Super Admin' && (
+              <button
+                onClick={() => navigate('/superadmin/dashboard')}
+                className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/30 text-xs font-bold transition-all cursor-pointer"
+                title="Super Admin Platform Console"
+              >
+                <ShieldCheck className="w-3.5 h-3.5 text-amber-400" />
+                <span className="hidden sm:inline">Platform</span>
+              </button>
+            )}
+
             {/* Lock / Sign Out to Login */}
             <button
-              onClick={() => navigateToView('Login')}
+              onClick={() => navigate(`/login?returnUrl=${encodeURIComponent(currentRoute.pathname)}`)}
               className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 text-slate-300 hover:text-white text-xs font-bold transition-all cursor-pointer border border-white/10"
               title="Lock Terminal & Switch Operator"
               id="header-lock-btn"
@@ -1576,44 +1725,29 @@ export default function App() {
           </div>
         </div>
       </header>
-      )}
 
       {/* Main viewport area */}
       <div className="flex-1" id="main-content-stage">
-        {currentView === 'Login' ? (
-          <LoginPage
-            staffMembers={staffMembers}
-            customers={customers}
-            onStaffLogin={(staff) => {
-              setActiveStaff(staff);
-              navigateToView('Admin');
-              createAuditRecord('STAFF_LOGIN', 'USERS', `Staff member ${staff.name} authenticated via login portal.`);
+        {/* Tenant Operations: Static/Fixed Sidebar Layout with responsive main area */}
+        <div className="min-h-screen bg-slate-50 relative" id="admin-workspace-layout">
+          
+          {/* Enhanced Static/Fixed Sidebar Component */}
+          <EnhancedSidebar
+            currentView="Admin"
+            onSwitchView={navigateToView}
+            adminSubTab={adminSubTab}
+            eCommerceActiveTab={eCommerceActiveTab}
+            onSelectECommerceTab={(tab) => setECommerceActiveTab(tab)}
+            onSelectSubTab={(tab) => {
+              setIsMobileSidebarOpen(false);
+              if (tab === 'Platform') {
+                navigate('/superadmin/dashboard');
+                return;
+              }
+              setAdminSubTab(tab);
+              const tenantId = currentRoute.params.tenantId || 'nexus-retail';
+              navigate(getTenantTabPath(tenantId, tab));
             }}
-            onCustomerLogin={(customer) => {
-              setActiveCustomer(customer);
-              navigateToView('ECommerce');
-            }}
-            onBackToStore={() => navigateToView('ECommerce')}
-          />
-        ) : currentView === 'Admin' ? (
-          /* Admin Side: Static/Fixed Sidebar Layout with responsive main area */
-          <div className="min-h-screen bg-slate-50 relative" id="admin-workspace-layout">
-            
-            {/* Enhanced Static/Fixed Sidebar Component */}
-            <EnhancedSidebar
-              currentView={currentView}
-              onSwitchView={navigateToView}
-              adminSubTab={adminSubTab}
-              eCommerceActiveTab={eCommerceActiveTab}
-              onSelectECommerceTab={(tab) => setECommerceActiveTab(tab)}
-              onSelectSubTab={(tab) => {
-                setIsMobileSidebarOpen(false);
-                if (tab === 'Platform') {
-                  window.location.href = '/platform';
-                  return;
-                }
-                setAdminSubTab(tab);
-              }}
               activeStaff={activeStaff}
               dbStatus={deviceOffline ? 'offline' : dbStatus}
               lastSynced={lastSynced}
@@ -1796,7 +1930,7 @@ export default function App() {
                     products={products}
                     orders={orders}
                     customers={customers}
-                    onBackToHome={() => setCurrentView('ECommerce')}
+                    onBackToHome={() => navigate('/store/' + (currentRoute.params.tenantId || 'nexus-retail'))}
                     activeTab={eCommerceActiveTab}
                   />
                 )}
@@ -1816,29 +1950,7 @@ export default function App() {
               </div>
             </main>
           </div>
-        ) : (
-          /* eCommerce Storefront: Full Screen Premium layout */
-          <TenantProvider>
-            <ECommerceStorefront
-              products={products}
-              customers={customers}
-              orders={orders}
-              onPlaceEcomOrder={handlePlaceEcomOrder}
-              activeCustomer={activeCustomer}
-              onLoginCustomer={handleLoginCustomer}
-              onRegisterCustomer={handleAddCustomer}
-              onOpenLogin={() => navigateToView('Login')}
-              homepageConfig={homepageConfig}
-              reviews={reviews}
-              onAddReview={handleAddReview}
-              onHelpfulClick={handleHelpfulClick}
-              onConfirmOrderReceipt={handleConfirmOrderReceipt}
-              onFileReturnOrComplaint={handleFileReturnOrComplaint}
-              systemSettings={systemSettings}
-            />
-          </TenantProvider>
-        )}
-      </div>
+        </div>
 
       {/* Global Currency Selection Modal */}
       <CurrencySelectorModal

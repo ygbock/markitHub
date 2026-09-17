@@ -1,6 +1,6 @@
 {
   "name": "POS-Commerce Suite",
-  "description": "An enterprise-grade unified POS, Inventory, and E-Commerce platform featuring decoupled fintech payment gateway architecture with payment sessions, real-time omnichannel inventory reservation, and automated double-entry ledger settlement.",
+  "description": "MikitHub multi-tenant business discovery, commerce, POS, services, and business-management platform with canonical route ownership, public discovery, and tenant isolation.",
   "requestFramePermissions": [
     "camera"
   ],
