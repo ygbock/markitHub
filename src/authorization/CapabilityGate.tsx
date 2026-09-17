@@ -1,8 +1,15 @@
 import React from 'react';
 import { useTenant } from '../context/TenantContext';
+import { TenantCapability } from '../routes/canonicalRoutes';
 
+/**
+ * ARCHITECTURAL INVARIANT: UI AUTHORIZATION != SERVER AUTHORIZATION
+ *
+ * Presentation-level UI gating only. Conditionally hides, shows, or disables UI.
+ * Authoritative security enforcement resides on the server / Firebase Security Rules.
+ */
 export interface CapabilityGateProps {
-  capability: string | string[];
+  capability: TenantCapability | TenantCapability[] | string | string[];
   requireAll?: boolean;
   capabilitiesOverride?: string[];
   fallback?: React.ReactNode;

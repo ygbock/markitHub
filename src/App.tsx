@@ -52,6 +52,7 @@ import BusinessOnboardingShell from './components/business/BusinessOnboardingShe
 import ListingBusinessShell from './components/business/ListingBusinessShell';
 import CustomerAccountShell from './components/customer/CustomerAccountShell';
 import RouteGuardShell from './components/routing/RouteGuardShell';
+import { ShellResolver } from './layouts/ShellResolver';
 import { DISCOVERY_BUSINESSES, CanonicalBusinessListing } from './data/discoveryData';
 
 // Icons
@@ -1467,136 +1468,139 @@ export default function App() {
     );
   }
 
-  // 2. Super Admin Platform Control Plane Domain (/superadmin/*)
-  if (activeDomain === 'SUPER_ADMIN') {
-    return (
-      <div className="min-h-screen bg-slate-100 text-slate-900" id="platform-control-plane-root">
-        <SuperAdminDashboard
-          initialTab="overview"
-          onNavigate={navigate}
-        />
-      </div>
-    );
-  }
-
-  // 3. Public Discovery Domain (/ or /discover, /search, /business/:slug, /nearby)
-  if (activeDomain === 'PUBLIC_DISCOVERY') {
-    return (
-      <PublicDiscoveryShell
-        businessSlug={currentRoute.params.businessSlug}
-        products={products}
-        onNavigate={navigate}
-        onOpenLogin={() => navigate(`/login?returnUrl=${encodeURIComponent(currentRoute.pathname)}`)}
-      />
-    );
-  }
-
-  // 4a. Listing-Only Business Management Domain (/business/:businessId/*)
-  if (activeDomain === 'BUSINESS') {
-    return (
-      <ListingBusinessShell
-        businessId={currentRoute.params.businessId}
-        onNavigate={navigate}
-        onUpgradeToTenant={(_locationId) => {
-          navigate('/business/onboarding');
-        }}
-      />
-    );
-  }
-
-  // 4b. Business Onboarding Domain (/register/business, /business/onboarding)
-  if (activeDomain === 'BUSINESS_ONBOARDING') {
-    return (
-      <BusinessOnboardingShell
-        onNavigate={navigate}
-        onComplete={(newBiz, choice) => {
-          if (choice === 'LISTING_AND_STORE' && newBiz.tenantId) {
-            navigate(`/tenant/${newBiz.tenantId}/dashboard`);
-          } else {
-            navigate(`/business/${newBiz.businessSlug || newBiz.slug || newBiz.id}`);
-          }
-        }}
-      />
-    );
-  }
-
-  // 5. Customer Account Domain (/account/*)
-  if (activeDomain === 'CUSTOMER_ACCOUNT') {
-    return (
-      <CustomerAccountShell
-        customer={activeCustomer!}
-        orders={orders}
-        onNavigate={navigate}
-        onSignOut={() => {
-          setActiveCustomer(null);
-          navigate('/');
-        }}
-      />
-    );
-  }
-
-  // 6. Identity & Authentication Domain (/login, /register)
-  if (activeDomain === 'IDENTITY_AUTH') {
-    return (
-      <LoginPage
-        staffMembers={staffMembers}
-        customers={customers}
-        onStaffLogin={(staff) => {
-          setActiveStaff(staff);
-          createAuditRecord('STAFF_LOGIN', 'USERS', `Staff member ${staff.name} authenticated via login portal.`);
-          if (currentRoute.query.returnUrl) {
-            navigate(currentRoute.query.returnUrl);
-          } else if (staff.role === 'Super Admin') {
-            navigate('/superadmin/dashboard');
-          } else {
-            navigate('/tenant/nexus-retail/dashboard');
-          }
-        }}
-        onCustomerLogin={(cust) => {
-          setActiveCustomer(cust);
-          if (currentRoute.query.returnUrl) {
-            navigate(currentRoute.query.returnUrl);
-          } else {
-            navigate('/account/profile');
-          }
-        }}
-        onBackToStore={() => navigate('/store/nexus-retail')}
-        onBackToDiscovery={() => navigate('/')}
-        returnUrl={currentRoute.query.returnUrl}
-      />
-    );
-  }
-
-  // 7. Tenant Storefront Domain (/store/:tenantSlug/*)
-  if (activeDomain === 'STOREFRONT') {
-    const tenantSlug = currentRoute.params.tenantSlug || 'nexus-retail';
-    return (
-      <TenantProvider initialSlug={tenantSlug}>
-        <div className="min-h-screen bg-white" id="storefront-domain-root">
-          <ECommerceStorefront
-            products={products}
-            customers={customers}
-            orders={orders}
-            onPlaceEcomOrder={handlePlaceEcomOrder}
-            activeCustomer={activeCustomer}
-            onLoginCustomer={handleLoginCustomer}
-            onRegisterCustomer={handleAddCustomer}
-            onOpenLogin={() => navigate(`/login?returnUrl=${encodeURIComponent(currentRoute.pathname)}`)}
-            homepageConfig={homepageConfig}
-            reviews={reviews}
-            onAddReview={handleAddReview}
-            onHelpfulClick={handleHelpfulClick}
-            onConfirmOrderReceipt={handleConfirmOrderReceipt}
-            onFileReturnOrComplaint={handleFileReturnOrComplaint}
-            systemSettings={systemSettings}
+  // 2. Authoritative Frontend Shell Dispatcher via ShellResolver
+  return (
+    <ShellResolver
+      currentPath={currentRoute.pathname}
+      activeDomain={activeDomain}
+      onNavigate={navigate}
+      staff={activeStaff}
+      activeCustomer={activeCustomer}
+      onUpgradeToTenant={(_locationId) => {
+        navigate('/business/onboarding');
+      }}
+      onLogout={() => {
+        setActiveStaff(INITIAL_STAFF[0]);
+        navigate('/login');
+      }}
+      isOnline={dbStatus === 'connected'}
+    >
+      {/* 2a. Super Admin Platform Control Plane Domain (/superadmin/*) */}
+      {activeDomain === 'SUPER_ADMIN' && (
+        <div className="min-h-screen bg-slate-100 text-slate-900" id="platform-control-plane-root">
+          <SuperAdminDashboard
+            initialTab="overview"
+            onNavigate={navigate}
           />
         </div>
-      </TenantProvider>
-    );
-  }
+      )}
 
-  return (
-    <div className="bg-slate-50 min-h-screen text-slate-800 flex flex-col justify-between" id="applet-viewport-root">
+      {/* 2b. Public Discovery Domain (/ or /discover, /search, /business/:slug, /nearby) */}
+      {activeDomain === 'PUBLIC_DISCOVERY' && (
+        <PublicDiscoveryShell
+          businessSlug={currentRoute.params.businessSlug}
+          products={products}
+          onNavigate={navigate}
+          onOpenLogin={() => navigate(`/login?returnUrl=${encodeURIComponent(currentRoute.pathname)}`)}
+        />
+      )}
+
+      {/* 2c. Listing-Only Business Management Domain (/business/:businessId/*) */}
+      {activeDomain === 'BUSINESS' && (
+        <ListingBusinessShell
+          businessId={currentRoute.params.businessId}
+          onNavigate={navigate}
+          onUpgradeToTenant={(_locationId) => {
+            navigate('/business/onboarding');
+          }}
+        />
+      )}
+
+      {/* 2d. Business Onboarding Domain (/register/business, /business/onboarding) */}
+      {activeDomain === 'BUSINESS_ONBOARDING' && (
+        <BusinessOnboardingShell
+          onNavigate={navigate}
+          onComplete={(newBiz, choice) => {
+            if (choice === 'LISTING_AND_STORE' && newBiz.tenantId) {
+              navigate(`/tenant/${newBiz.tenantId}/dashboard`);
+            } else {
+              navigate(`/business/${newBiz.businessSlug || newBiz.slug || newBiz.id}`);
+            }
+          }}
+        />
+      )}
+
+      {/* 2e. Customer Account Domain (/account/*) */}
+      {activeDomain === 'CUSTOMER_ACCOUNT' && (
+        <CustomerAccountShell
+          customer={activeCustomer!}
+          orders={orders}
+          onNavigate={navigate}
+          onSignOut={() => {
+            setActiveCustomer(null);
+            navigate('/');
+          }}
+        />
+      )}
+
+      {/* 2f. Identity & Authentication Domain (/login, /register) */}
+      {activeDomain === 'IDENTITY_AUTH' && (
+        <LoginPage
+          staffMembers={staffMembers}
+          customers={customers}
+          onStaffLogin={(staff) => {
+            setActiveStaff(staff);
+            createAuditRecord('STAFF_LOGIN', 'USERS', `Staff member ${staff.name} authenticated via login portal.`);
+            if (currentRoute.query.returnUrl) {
+              navigate(currentRoute.query.returnUrl);
+            } else if (staff.role === 'Super Admin') {
+              navigate('/superadmin/dashboard');
+            } else {
+              navigate('/tenant/nexus-retail/dashboard');
+            }
+          }}
+          onCustomerLogin={(cust) => {
+            setActiveCustomer(cust);
+            if (currentRoute.query.returnUrl) {
+              navigate(currentRoute.query.returnUrl);
+            } else {
+              navigate('/account/profile');
+            }
+          }}
+          onBackToStore={() => navigate('/store/nexus-retail')}
+          onBackToDiscovery={() => navigate('/')}
+          returnUrl={currentRoute.query.returnUrl}
+        />
+      )}
+
+      {/* 2g. Tenant Storefront Domain (/store/:tenantSlug/*) */}
+      {activeDomain === 'STOREFRONT' && (
+        <TenantProvider initialSlug={currentRoute.params.tenantSlug || 'nexus-retail'}>
+          <div className="min-h-screen bg-white" id="storefront-domain-root">
+            <ECommerceStorefront
+              products={products}
+              customers={customers}
+              orders={orders}
+              onPlaceEcomOrder={handlePlaceEcomOrder}
+              activeCustomer={activeCustomer}
+              onLoginCustomer={handleLoginCustomer}
+              onRegisterCustomer={handleAddCustomer}
+              onOpenLogin={() => navigate(`/login?returnUrl=${encodeURIComponent(currentRoute.pathname)}`)}
+              homepageConfig={homepageConfig}
+              reviews={reviews}
+              onAddReview={handleAddReview}
+              onHelpfulClick={handleHelpfulClick}
+              onConfirmOrderReceipt={handleConfirmOrderReceipt}
+              onFileReturnOrComplaint={handleFileReturnOrComplaint}
+              systemSettings={systemSettings}
+            />
+          </div>
+        </TenantProvider>
+      )}
+
+      {/* 2h. Tenant Operations Domain (/tenant/:tenantId/*) */}
+      {activeDomain === 'TENANT_OPERATIONS' && (
+        <div className="bg-slate-50 min-h-screen text-slate-800 flex flex-col justify-between" id="applet-viewport-root">
       
       {/* Top Main Mode Selector - Core Showroom navigation */}
       <header className="bg-slate-900 border-b border-white/10 px-3 sm:px-6 py-2.5 sticky top-0 z-40 shadow-md backdrop-blur-md w-full" id="master-mode-navbar">
@@ -1996,6 +2000,8 @@ export default function App() {
         onMarkAllAsRead={handleMarkAllNotificationsAsRead}
         onActionClick={handleNotificationActionClick}
       />
-    </div>
+        </div>
+      )}
+    </ShellResolver>
   );
 }

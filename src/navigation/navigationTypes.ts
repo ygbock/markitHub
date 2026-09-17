@@ -1,5 +1,6 @@
 import React from 'react';
 import { PermissionKey, StaffRole } from '../utils/permissions';
+import { TenantCapability } from '../routes/canonicalRoutes';
 
 export interface NavigationItem {
   id: string;
@@ -10,7 +11,7 @@ export interface NavigationItem {
   badge?: string | number;
   badgeVariant?: 'default' | 'primary' | 'success' | 'warning' | 'danger';
   permission?: PermissionKey;
-  capability?: string;
+  capability?: TenantCapability;
   role?: StaffRole | StaffRole[];
   exact?: boolean;
   external?: boolean;
@@ -22,5 +23,6 @@ export interface NavigationGroup {
   title: string;
   items: NavigationItem[];
   permission?: PermissionKey;
-  capability?: string;
+  capability?: TenantCapability;
 }
+

@@ -1,6 +1,12 @@
 import React from 'react';
 import { StaffRole, StaffMember, isStaffSuspended } from '../utils/permissions';
 
+/**
+ * ARCHITECTURAL INVARIANT: UI AUTHORIZATION != SERVER AUTHORIZATION
+ *
+ * Presentation-level UI gating only. Conditionally hides, shows, or disables UI.
+ * Authoritative security enforcement resides on the server / Firebase Security Rules.
+ */
 export interface RoleGateProps {
   role: StaffRole | StaffRole[];
   staff?: StaffMember | null;

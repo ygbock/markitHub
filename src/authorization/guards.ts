@@ -1,10 +1,33 @@
 import { PermissionKey, StaffMember, isStaffSuspended, hasPermission } from '../utils/permissions';
+import { TenantCapability } from '../routes/canonicalRoutes';
+
+/**
+ * ARCHITECTURAL INVARIANT: UI AUTHORIZATION != SERVER AUTHORIZATION
+ *
+ * Presentation-level UI gating infrastructure only.
+ * Evaluates permissions, capabilities, and lifecycle states to conditionally
+ * hide, show, or disable user interface elements for enhanced UX.
+ *
+ * IMPORTANT: This client-side evaluator is NOT the authoritative security boundary.
+ * Authoritative enforcement MUST always be executed on the server, in Firebase
+ * Security Rules, and in Express backend route middlewares:
+ *
+ * Authenticate
+ *   → resolve identity
+ *   → resolve tenant/business context
+ *   → verify ownership/membership
+ *   → verify role
+ *   → verify permission
+ *   → verify capability
+ *   → verify resource status
+ *   → authorize
+ */
 
 export interface CanRenderModuleParams {
   staff?: StaffMember | null;
   permission?: PermissionKey | PermissionKey[];
   requireAllPermissions?: boolean;
-  capability?: string | string[];
+  capability?: TenantCapability | TenantCapability[] | string | string[];
   requireAllCapabilities?: boolean;
   tenantCapabilities?: string[];
   tenantStatus?: 'active' | 'suspended' | 'trial' | 'closed' | string;
@@ -24,7 +47,7 @@ export interface GuardEvaluationResult {
 }
 
 /**
- * Authoritative module rendering gate evaluator.
+ * Presentation-level module rendering gate evaluator.
  * Evaluates staff status, tenant lifecycle, permissions, and tenant capabilities.
  */
 export function canRenderModule(params: CanRenderModuleParams): GuardEvaluationResult {

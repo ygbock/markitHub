@@ -2,6 +2,12 @@ import React from 'react';
 import { PermissionKey, StaffMember, hasPermission } from '../utils/permissions';
 import { PermissionDeniedState } from '../components/shared/StateFeedback';
 
+/**
+ * ARCHITECTURAL INVARIANT: UI AUTHORIZATION != SERVER AUTHORIZATION
+ *
+ * Presentation-level UI gating only. Conditionally hides, shows, or disables UI.
+ * Authoritative security enforcement resides on the server / Firebase Security Rules.
+ */
 export interface PermissionGateProps {
   permission: PermissionKey | PermissionKey[];
   staff?: StaffMember | null;

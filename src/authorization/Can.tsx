@@ -1,13 +1,20 @@
 import React from 'react';
 import { PermissionKey, StaffRole, StaffMember } from '../utils/permissions';
+import { TenantCapability } from '../routes/canonicalRoutes';
 import { canRenderModule, CanRenderModuleParams } from './guards';
 import { PermissionDeniedState } from '../components/shared/StateFeedback';
 import { SuspendedState } from '../components/ui/SuspendedState';
 
+/**
+ * ARCHITECTURAL INVARIANT: UI AUTHORIZATION != SERVER AUTHORIZATION
+ *
+ * Presentation-level UI gating only. Conditionally hides, shows, or disables UI.
+ * Authoritative security enforcement resides on the server / Firebase Security Rules.
+ */
 export interface CanProps {
   permission?: PermissionKey | PermissionKey[];
   requireAllPermissions?: boolean;
-  capability?: string | string[];
+  capability?: TenantCapability | TenantCapability[] | string | string[];
   requireAllCapabilities?: boolean;
   role?: StaffRole | StaffRole[];
   staff?: StaffMember | null;
@@ -20,7 +27,7 @@ export interface CanProps {
 }
 
 /**
- * Compound authorization gate evaluating permissions, capabilities, roles, and suspension states.
+ * Compound presentation authorization gate evaluating permissions, capabilities, roles, and suspension states.
  */
 export const Can: React.FC<CanProps> = ({
   permission,

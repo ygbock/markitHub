@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   Store,
   ChevronDown,
@@ -12,7 +12,7 @@ import {
   LogOut,
   Sparkles,
 } from 'lucide-react';
-import { tenantNavigation } from '../navigation/navigationRegistries';
+import { getTenantNavigation } from '../navigation/navigationRegistries';
 import { useTenant } from '../context/TenantContext';
 import { useTheme } from '../design-system/ThemeContext';
 import { StaffMember, hasPermission, StaffRole } from '../utils/permissions';
@@ -46,6 +46,9 @@ export const TenantShell: React.FC<TenantShellProps> = ({
   const { theme, setTheme, resolvedTheme } = useTheme();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [branchDropdownOpen, setBranchDropdownOpen] = useState(false);
+
+  const activeTenantId = tenantSlug || 'nexus-retail';
+  const navigation = useMemo(() => getTenantNavigation(activeTenantId), [activeTenantId]);
 
   // Check if tenant is suspended
   const isSuspended = (capabilities as any)?.includes?.('suspended') || false;
@@ -215,7 +218,7 @@ export const TenantShell: React.FC<TenantShellProps> = ({
           id="desktop-fixed-sidebar"
           className="hidden md:flex flex-col w-60 bg-slate-900 border-r border-slate-800 flex-shrink-0 py-4 px-3 overflow-y-auto no-scrollbar space-y-6"
         >
-          {tenantNavigation.map((group) => {
+          {navigation.map((group) => {
             // Filter items by capability & permission
             const visibleItems = group.items.filter((item) => {
               if (item.capability && !hasCapability(item.capability)) {
@@ -241,7 +244,7 @@ export const TenantShell: React.FC<TenantShellProps> = ({
                     <button
                       key={item.id}
                       type="button"
-                      onClick={() => onNavigate(item.path || '/tenant')}
+                      onClick={() => onNavigate(item.path || `/tenant/${activeTenantId}/dashboard`)}
                       className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-medium transition-colors text-left ${
                         isActive
                           ? 'bg-indigo-600 text-white font-semibold shadow-sm'
@@ -282,7 +285,7 @@ export const TenantShell: React.FC<TenantShellProps> = ({
                 </button>
               </div>
 
-              {tenantNavigation.map((group) => {
+              {navigation.map((group) => {
                 const visibleItems = group.items.filter((item) => {
                   if (item.capability && !hasCapability(item.capability)) return false;
                   if (item.permission && staff && !hasPermission(staff, item.permission)) return false;
@@ -304,7 +307,7 @@ export const TenantShell: React.FC<TenantShellProps> = ({
                           type="button"
                           onClick={() => {
                             setMobileMenuOpen(false);
-                            onNavigate(item.path || '/tenant');
+                            onNavigate(item.path || `/tenant/${activeTenantId}/dashboard`);
                           }}
                           className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-medium text-left ${
                             isActive

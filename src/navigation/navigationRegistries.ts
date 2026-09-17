@@ -108,155 +108,179 @@ export const customerNavigation: NavigationItem[] = [
 ];
 
 /**
- * Business listing-only management navigation registry
+ * Generates canonical business-scoped navigation items for the active business.
+ * Scopes all business management links to the active business identifier.
  */
-export const businessNavigation: NavigationItem[] = [
-  {
-    id: 'business-profile',
-    label: 'Public Profile & Branding',
-    path: '/business/profile',
-    icon: Building2,
-  },
-  {
-    id: 'business-locations',
-    label: 'Locations & Branches',
-    path: '/business/locations',
-    icon: MapPin,
-  },
-  {
-    id: 'business-services',
-    label: 'Services & Catalog',
-    path: '/business/services',
-    icon: ListPlus,
-  },
-  {
-    id: 'business-analytics',
-    label: 'Discovery Analytics',
-    path: '/business/analytics',
-    icon: BarChart3,
-  },
-  {
-    id: 'business-upgrade',
-    label: 'Upgrade to MikitHub Tenant',
-    path: '/business/upgrade',
-    icon: Rocket,
-  },
-];
+export function getBusinessNavigation(businessId: string = ':businessId'): NavigationItem[] {
+  const cleanId = encodeURIComponent(businessId.trim());
+  return [
+    {
+      id: 'business-profile',
+      label: 'Public Profile & Branding',
+      path: `/business/${cleanId}/profile`,
+      icon: Building2,
+    },
+    {
+      id: 'business-locations',
+      label: 'Locations & Branches',
+      path: `/business/${cleanId}/locations`,
+      icon: MapPin,
+    },
+    {
+      id: 'business-services',
+      label: 'Services & Catalog',
+      path: `/business/${cleanId}/services`,
+      icon: ListPlus,
+    },
+    {
+      id: 'business-analytics',
+      label: 'Discovery Analytics',
+      path: `/business/${cleanId}/analytics`,
+      icon: BarChart3,
+    },
+    {
+      id: 'business-upgrade',
+      label: 'Upgrade to MikitHub Tenant',
+      path: `/business/${cleanId}/upgrade`,
+      icon: Rocket,
+    },
+  ];
+}
 
 /**
- * Tenant operational sidebar navigation groups (with capability & permission gating)
+ * Business listing-only management navigation registry
  */
-export const tenantNavigation: NavigationGroup[] = [
-  {
-    id: 'group-operations',
-    title: 'Operations',
-    items: [
-      {
-        id: 'tenant-dashboard',
-        label: 'Dashboard',
-        path: '/tenant/dashboard',
-        icon: LayoutDashboard,
-      },
-      {
-        id: 'tenant-pos',
-        label: 'Point of Sale (POS)',
-        path: '/tenant/pos',
-        icon: CreditCard,
-        capability: 'pos',
-        permission: 'sales.create',
-      },
-      {
-        id: 'tenant-catalog',
-        label: 'Catalog & Products',
-        path: '/tenant/catalog',
-        icon: Layers,
-        capability: 'storefront',
-      },
-      {
-        id: 'tenant-inventory',
-        label: 'Inventory & Stock',
-        path: '/tenant/inventory',
-        icon: Package,
-        capability: 'inventory',
-        permission: 'inventory.view',
-      },
-      {
-        id: 'tenant-orders',
-        label: 'Orders & Receipts',
-        path: '/tenant/orders',
-        icon: FileText,
-        capability: 'orders',
-      },
-    ],
-  },
-  {
-    id: 'group-relationships',
-    title: 'Customer & Services',
-    items: [
-      {
-        id: 'tenant-customers',
-        label: 'Customers & CRM',
-        path: '/tenant/customers',
-        icon: Users,
-        capability: 'customers',
-      },
-      {
-        id: 'tenant-bookings',
-        label: 'Bookings & Schedule',
-        path: '/tenant/bookings',
-        icon: Calendar,
-        capability: 'services',
-      },
-      {
-        id: 'tenant-reviews',
-        label: 'Customer Reviews',
-        path: '/tenant/reviews',
-        icon: Award,
-        capability: 'reviews',
-      },
-    ],
-  },
-  {
-    id: 'group-insights',
-    title: 'Growth & Insights',
-    items: [
-      {
-        id: 'tenant-reports',
-        label: 'Reports & Analytics',
-        path: '/tenant/reports',
-        icon: BarChart3,
-        capability: 'reporting',
-        permission: 'sales.view',
-      },
-      {
-        id: 'tenant-loyalty',
-        label: 'Loyalty & Rewards',
-        path: '/tenant/loyalty',
-        icon: Tag,
-        capability: 'loyalty',
-      },
-    ],
-  },
-  {
-    id: 'group-admin',
-    title: 'Management',
-    items: [
-      {
-        id: 'tenant-staff',
-        label: 'Staff & Roles',
-        path: '/tenant/staff',
-        icon: Users,
-        permission: 'users.manage',
-      },
-      {
-        id: 'tenant-settings',
-        label: 'Tenant Settings',
-        path: '/tenant/settings',
-        icon: Settings,
-      },
-    ],
-  },
-];
+export const businessNavigation: NavigationItem[] = getBusinessNavigation(':businessId');
+
+/**
+ * Generates canonical tenant-scoped navigation groups for the active tenant.
+ * Requires an active tenant ID and ensures every operational destination is scoped to that tenant.
+ * Uses only canonical TenantCapability identifiers.
+ */
+export function getTenantNavigation(tenantId: string = ':tenantId'): NavigationGroup[] {
+  const cleanId = encodeURIComponent(tenantId.trim());
+  return [
+    {
+      id: 'group-operations',
+      title: 'Operations',
+      items: [
+        {
+          id: 'tenant-dashboard',
+          label: 'Dashboard',
+          path: `/tenant/${cleanId}/dashboard`,
+          icon: LayoutDashboard,
+        },
+        {
+          id: 'tenant-pos',
+          label: 'Point of Sale (POS)',
+          path: `/tenant/${cleanId}/pos`,
+          icon: CreditCard,
+          capability: 'pos',
+          permission: 'sales.create',
+        },
+        {
+          id: 'tenant-catalog',
+          label: 'Catalog & Products',
+          path: `/tenant/${cleanId}/products`,
+          icon: Layers,
+          capability: 'products',
+          permission: 'inventory.view',
+        },
+        {
+          id: 'tenant-inventory',
+          label: 'Inventory & Stock',
+          path: `/tenant/${cleanId}/inventory`,
+          icon: Package,
+          capability: 'inventory',
+          permission: 'inventory.view',
+        },
+        {
+          id: 'tenant-orders',
+          label: 'Orders & Receipts',
+          path: `/tenant/${cleanId}/orders`,
+          icon: FileText,
+          capability: 'orders',
+          permission: 'sales.view',
+        },
+      ],
+    },
+    {
+      id: 'group-relationships',
+      title: 'Customer & Services',
+      items: [
+        {
+          id: 'tenant-customers',
+          label: 'Customers & CRM',
+          path: `/tenant/${cleanId}/customers`,
+          icon: Users,
+          capability: 'customers',
+          permission: 'crm.view',
+        },
+        {
+          id: 'tenant-bookings',
+          label: 'Bookings & Schedule',
+          path: `/tenant/${cleanId}/bookings`,
+          icon: Calendar,
+          capability: 'bookings',
+        },
+        {
+          id: 'tenant-reviews',
+          label: 'Customer Reviews',
+          path: `/tenant/${cleanId}/reviews`,
+          icon: Award,
+          capability: 'customers',
+        },
+      ],
+    },
+    {
+      id: 'group-insights',
+      title: 'Growth & Insights',
+      items: [
+        {
+          id: 'tenant-reports',
+          label: 'Reports & Analytics',
+          path: `/tenant/${cleanId}/reports`,
+          icon: BarChart3,
+          capability: 'reports',
+          permission: 'finance.reports',
+        },
+        {
+          id: 'tenant-loyalty',
+          label: 'Loyalty & Promotions',
+          path: `/tenant/${cleanId}/marketing`,
+          icon: Tag,
+          capability: 'marketing',
+        },
+      ],
+    },
+    {
+      id: 'group-admin',
+      title: 'Management',
+      items: [
+        {
+          id: 'tenant-staff',
+          label: 'Staff & Roles',
+          path: `/tenant/${cleanId}/staff`,
+          icon: Users,
+          permission: 'users.manage',
+        },
+        {
+          id: 'tenant-settings',
+          label: 'Tenant Settings',
+          path: `/tenant/${cleanId}/settings`,
+          icon: Settings,
+          capability: 'settings',
+          permission: 'system.settings',
+        },
+      ],
+    },
+  ];
+}
+
+/**
+ * Tenant operational sidebar navigation groups (default template with :tenantId placeholder)
+ */
+export const tenantNavigation: NavigationGroup[] = getTenantNavigation(':tenantId');
 
 /**
  * Super Admin platform governance navigation groups (5 authoritative groups)
