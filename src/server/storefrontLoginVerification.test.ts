@@ -48,10 +48,10 @@ test('Login Page 7: LoginPage provides Return to Storefront navigation button', 
   assert.ok(loginPageFile.includes('onClick={onBackToStore}'), 'Must wire onBackToStore callback');
 });
 
-test('App Routing 8: App.tsx handles /login route and switches between Login, Admin, and ECommerce views', () => {
-  assert.ok(appFile.includes("path === '/login' || path.startsWith('/login/')"), 'Must detect /login pathname');
+test('App Routing 8: App.tsx handles /login route and switches between Login, Admin, and ECommerce views via Canonical Router', () => {
+  assert.ok(appFile.includes("activeDomain === 'IDENTITY_AUTH'"), 'Must dispatch on IDENTITY_AUTH canonical domain');
   assert.ok(appFile.includes("import LoginPage from './components/LoginPage';"), 'Must import LoginPage component');
-  assert.ok(appFile.includes("<LoginPage"), 'Must render LoginPage when currentView is Login');
-  assert.ok(appFile.includes("navigateToView('Login')"), 'Must provide navigateToView helper for /login navigation');
-  assert.ok(appFile.includes("onOpenLogin={() => navigateToView('Login')}"), 'Must pass login navigation handler to storefront');
+  assert.ok(appFile.includes("<LoginPage"), 'Must render LoginPage when activeDomain is IDENTITY_AUTH');
+  assert.ok(appFile.includes("navigate(`/login?returnUrl="), 'Must navigate to /login for authentication flow');
+  assert.ok(appFile.includes("onOpenLogin={() => navigate("), 'Must pass login navigation handler to storefront');
 });
