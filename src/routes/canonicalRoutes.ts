@@ -32,6 +32,7 @@ export type CanonicalRouteDomain =
   | 'CUSTOMER_ACCOUNT'
   | 'IDENTITY_AUTH'
   | 'BUSINESS_ONBOARDING'
+  | 'BUSINESS'
   | 'TENANT_OPERATIONS'
   | 'SUPER_ADMIN';
 
@@ -438,9 +439,36 @@ export const CANONICAL_ROUTE_DEFINITIONS: CanonicalRouteDefinition[] = [
     description: 'Multi-step onboarding: Business Info -> Category -> Location -> Contact -> Decision (Listing Only vs Store).',
   },
   {
+    id: 'business.dashboard',
+    pattern: '/business/:businessId/dashboard',
+    domain: 'BUSINESS',
+    context: 'BUSINESS',
+    auth: 'BUSINESS_OWNER',
+    title: 'Business Overview',
+    description: 'Business metrics, branches, and discovery settings.',
+  },
+  {
+    id: 'business.overview',
+    pattern: '/business/:businessId/overview',
+    domain: 'BUSINESS',
+    context: 'BUSINESS',
+    auth: 'BUSINESS_OWNER',
+    title: 'Business Overview',
+    description: 'Business overview and listing preview.',
+  },
+  {
+    id: 'business.services',
+    pattern: '/business/:businessId/services',
+    domain: 'BUSINESS',
+    context: 'BUSINESS',
+    auth: 'BUSINESS_OWNER',
+    title: 'Business Services',
+    description: 'Services and menu offerings.',
+  },
+  {
     id: 'business.setup',
     pattern: '/business/:businessId/setup',
-    domain: 'BUSINESS_ONBOARDING',
+    domain: 'BUSINESS',
     context: 'BUSINESS',
     auth: 'BUSINESS_OWNER',
     title: 'Business Setup',
@@ -449,7 +477,7 @@ export const CANONICAL_ROUTE_DEFINITIONS: CanonicalRouteDefinition[] = [
   {
     id: 'business.listing',
     pattern: '/business/:businessId/listing',
-    domain: 'BUSINESS_ONBOARDING',
+    domain: 'BUSINESS',
     context: 'BUSINESS',
     auth: 'BUSINESS_OWNER',
     title: 'Manage Public Listing',
@@ -458,7 +486,7 @@ export const CANONICAL_ROUTE_DEFINITIONS: CanonicalRouteDefinition[] = [
   {
     id: 'business.locations',
     pattern: '/business/:businessId/locations',
-    domain: 'BUSINESS_ONBOARDING',
+    domain: 'BUSINESS',
     context: 'BUSINESS',
     auth: 'BUSINESS_OWNER',
     title: 'Business Locations',
@@ -467,7 +495,7 @@ export const CANONICAL_ROUTE_DEFINITIONS: CanonicalRouteDefinition[] = [
   {
     id: 'business.settings',
     pattern: '/business/:businessId/settings',
-    domain: 'BUSINESS_ONBOARDING',
+    domain: 'BUSINESS',
     context: 'BUSINESS',
     auth: 'BUSINESS_OWNER',
     title: 'Business Settings',
@@ -1026,7 +1054,7 @@ export function parseCanonicalRoute(rawUrlOrPath: string): CanonicalRouteMatch {
       definition: {
         id: 'business.generic',
         pattern: '/business/:businessId/*',
-        domain: 'BUSINESS_ONBOARDING',
+        domain: 'BUSINESS',
         context: 'BUSINESS',
         auth: 'BUSINESS_OWNER',
         title: 'Business Management',

@@ -1,5 +1,6 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
 import { StorefrontTenantConfig } from '../server/tenantManager';
+import { TenantCapability } from '../types';
 
 export interface TenantInfoOption {
   slug: string;
@@ -33,13 +34,30 @@ export const AVAILABLE_TENANTS: TenantInfoOption[] = [
   },
 ];
 
-interface TenantContextType {
+export const DEFAULT_TENANT_CAPABILITIES: TenantCapability[] = [
+  'pos',
+  'inventory',
+  'storefront',
+  'orders',
+  'customers',
+  'reporting',
+  'reviews',
+  'loyalty',
+];
+
+export interface TenantContextType {
   tenantConfig: StorefrontTenantConfig | null;
   tenantSlug: string;
+  tenantId: string;
+  locationId: string | null;
+  capabilities: string[];
   isLoading: boolean;
   error: string | null;
   availableTenants: TenantInfoOption[];
   setTenantSlug: (slug: string) => void;
+  setLocationId: (locationId: string | null) => void;
+  switchBranch: (tenantIdOrSlug: string, locationId?: string) => void;
+  hasCapability: (capability: string) => boolean;
   formatCurrency: (amount: number) => string;
   convertPrice: (amountInBaseUSD: number) => number;
   refetchTenant: () => Promise<void>;
@@ -49,9 +67,14 @@ const TenantContext = createContext<TenantContextType | undefined>(undefined);
 
 const TENANT_STORAGE_KEY = 'nexus_storefront_tenant_slug';
 
-export const TenantProvider: React.FC<{ children: React.ReactNode; initialSlug?: string }> = ({
+export const TenantProvider: React.FC<{ 
+  children: React.ReactNode; 
+  initialSlug?: string;
+  initialLocationId?: string;
+}> = ({
   children,
   initialSlug,
+  initialLocationId,
 }) => {
   const [tenantSlug, setTenantSlugState] = useState<string>(() => {
     // 1. Check prop / URL parameter
@@ -81,6 +104,7 @@ export const TenantProvider: React.FC<{ children: React.ReactNode; initialSlug?:
     return 'nexus-retail';
   });
 
+  const [locationId, setLocationId] = useState<string | null>(initialLocationId || null);
   const [tenantConfig, setTenantConfig] = useState<StorefrontTenantConfig | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -102,6 +126,9 @@ export const TenantProvider: React.FC<{ children: React.ReactNode; initialSlug?:
       const data = await response.json();
       if (data.success && data.tenant) {
         setTenantConfig(data);
+        if (!locationId && data.store?.id) {
+          setLocationId(data.store.id);
+        }
         // Apply CSS custom variables for dynamic tenant branding
         if (typeof document !== 'undefined') {
           const root = document.documentElement;
@@ -117,7 +144,7 @@ export const TenantProvider: React.FC<{ children: React.ReactNode; initialSlug?:
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [locationId]);
 
   useEffect(() => {
     fetchTenantConfig(tenantSlug);
@@ -130,6 +157,28 @@ export const TenantProvider: React.FC<{ children: React.ReactNode; initialSlug?:
       localStorage.setItem(TENANT_STORAGE_KEY, newSlug);
     }
   }, [tenantSlug]);
+
+  const switchBranch = useCallback((tenantIdOrSlug: string, targetLocationId?: string) => {
+    if (!tenantIdOrSlug) return;
+    const cleanSlug = tenantIdOrSlug.startsWith('tenant-') ? tenantIdOrSlug.replace('tenant-', '') : tenantIdOrSlug;
+    setTenantSlug(cleanSlug);
+    if (targetLocationId) {
+      setLocationId(targetLocationId);
+    }
+  }, [setTenantSlug]);
+
+  const tenantId = useMemo(() => {
+    return tenantConfig?.tenant?.id || (tenantSlug.startsWith('tenant-') ? tenantSlug : `tenant-${tenantSlug}`);
+  }, [tenantConfig, tenantSlug]);
+
+  const capabilities = useMemo(() => {
+    return (tenantConfig as any)?.capabilities || DEFAULT_TENANT_CAPABILITIES;
+  }, [tenantConfig]);
+
+  const hasCapability = useCallback((capability: string): boolean => {
+    if (!capability) return false;
+    return capabilities.some((cap: string) => cap.toLowerCase() === capability.toLowerCase());
+  }, [capabilities]);
 
   const formatCurrency = useCallback(
     (amount: number): string => {
@@ -165,10 +214,16 @@ export const TenantProvider: React.FC<{ children: React.ReactNode; initialSlug?:
       value={{
         tenantConfig,
         tenantSlug,
+        tenantId,
+        locationId,
+        capabilities,
         isLoading,
         error,
         availableTenants: AVAILABLE_TENANTS,
         setTenantSlug,
+        setLocationId,
+        switchBranch,
+        hasCapability,
         formatCurrency,
         convertPrice,
         refetchTenant,
@@ -185,6 +240,14 @@ export const useTenant = () => {
     throw new Error('useTenant must be used within a TenantProvider');
   }
   return context;
+};
+
+export const useTenantCapabilities = () => {
+  const { capabilities, hasCapability } = useTenant();
+  return {
+    capabilities,
+    hasCapability,
+  };
 };
 
 export const useTenantBranding = () => {

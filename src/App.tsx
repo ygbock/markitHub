@@ -49,6 +49,7 @@ import { useMikitRouter } from './routes/useMikitRouter';
 import { evaluateCanonicalRouteGuard, TenantContextRecord } from './routes/routeGuards';
 import PublicDiscoveryShell from './components/discovery/PublicDiscoveryShell';
 import BusinessOnboardingShell from './components/business/BusinessOnboardingShell';
+import ListingBusinessShell from './components/business/ListingBusinessShell';
 import CustomerAccountShell from './components/customer/CustomerAccountShell';
 import RouteGuardShell from './components/routing/RouteGuardShell';
 import { DISCOVERY_BUSINESSES, CanonicalBusinessListing } from './data/discoveryData';
@@ -57,7 +58,7 @@ import { DISCOVERY_BUSINESSES, CanonicalBusinessListing } from './data/discovery
 import { 
   LayoutDashboard, Package, Smartphone, ShieldCheck, 
   Users, FileText, ShoppingBag, Terminal, Network, WifiOff, RefreshCw, Coins, Menu, MessageSquare,
-  Bell, AlertTriangle, Clock, LogIn, LogOut, Compass
+  Bell, AlertTriangle, Clock, LogIn, LogOut, Compass, MapPin
 } from 'lucide-react';
 
 export default function App() {
@@ -1490,7 +1491,20 @@ export default function App() {
     );
   }
 
-  // 4. Business Onboarding Domain (/register/business)
+  // 4a. Listing-Only Business Management Domain (/business/:businessId/*)
+  if (activeDomain === 'BUSINESS') {
+    return (
+      <ListingBusinessShell
+        businessId={currentRoute.params.businessId}
+        onNavigate={navigate}
+        onUpgradeToTenant={(_locationId) => {
+          navigate('/business/onboarding');
+        }}
+      />
+    );
+  }
+
+  // 4b. Business Onboarding Domain (/register/business, /business/onboarding)
   if (activeDomain === 'BUSINESS_ONBOARDING') {
     return (
       <BusinessOnboardingShell
@@ -1499,7 +1513,7 @@ export default function App() {
           if (choice === 'LISTING_AND_STORE' && newBiz.tenantId) {
             navigate(`/tenant/${newBiz.tenantId}/dashboard`);
           } else {
-            navigate(`/business/${newBiz.slug}`);
+            navigate(`/business/${newBiz.businessSlug || newBiz.slug || newBiz.id}`);
           }
         }}
       />
@@ -1617,6 +1631,21 @@ export default function App() {
               <p className="text-[10px] text-gray-400 truncate hidden xs:block">
                 Enterprise Unified Multi-Channel System
               </p>
+            </div>
+
+            {/* Multi-Location Operational Branch Switcher */}
+            <div className="hidden xl:flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-slate-800/90 border border-slate-700/80 text-xs text-slate-200">
+              <MapPin className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+              <select
+                value={currentRoute.params.tenantId || 'nexus-retail'}
+                onChange={(e) => navigate(`/tenant/${e.target.value}/dashboard`)}
+                className="bg-transparent text-white text-xs font-semibold focus:outline-none cursor-pointer pr-1"
+                aria-label="Operational Branch Switcher"
+              >
+                <option value="nexus-retail" className="bg-slate-900 text-white">Branch: Freetown Central Flagship</option>
+                <option value="apex-gadgets" className="bg-slate-900 text-white">Branch: Apex Tech Hub</option>
+                <option value="sierra-boutique" className="bg-slate-900 text-white">Branch: Sierra Siaka Stevens</option>
+              </select>
             </div>
           </div>
 

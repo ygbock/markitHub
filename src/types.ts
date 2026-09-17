@@ -92,6 +92,123 @@ export interface RoleConfig {
   defaultPermissions: PermissionKey[];
 }
 
+// ============================================================================
+// MIKITHUB CANONICAL DATA ENTITIES (M0 Foundation)
+// ============================================================================
+
+export type BusinessVerificationStatus = 'unverified' | 'pending' | 'verified' | 'rejected';
+export type BusinessLifecycleStatus = 'draft' | 'pending_verification' | 'active' | 'suspended' | 'archived';
+
+export interface BusinessLocation {
+  id: string;
+  businessId: string;
+  name: string;
+  addressLine1: string;
+  city: string;
+  country: string;
+  geo?: { latitude: number; longitude: number };
+  phone: string;
+  operatingHours?: Record<string, string> | string;
+  hasOperationalTenant?: boolean;
+  tenantId?: string | null;
+  isFulfillmentCenter?: boolean;
+  isActive: boolean;
+}
+
+export interface BusinessListing {
+  id: string;
+  businessId: string;
+  slug: string;
+  headline: string;
+  description: string;
+  categories: string[];
+  tags: string[];
+  logoUrl?: string;
+  bannerUrl?: string;
+  ratingAverage: number;
+  reviewCount: number;
+  isPublished: boolean;
+  isFeatured?: boolean;
+}
+
+export interface Business {
+  id: string;
+  legalName: string;
+  tradingName: string;
+  registrationNumber: string;
+  taxId: string;
+  ownerUid: string;
+  country: string;
+  currency: string;
+  verificationStatus: BusinessVerificationStatus;
+  status: BusinessLifecycleStatus;
+  listing?: BusinessListing;
+  locations?: BusinessLocation[];
+  tenantIds?: string[];
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export type CanonicalTenantStatus = 'active' | 'suspended' | 'archived' | 'cancelled';
+
+export type TenantCapability =
+  | 'pos'
+  | 'inventory'
+  | 'storefront'
+  | 'orders'
+  | 'customers'
+  | 'reporting'
+  | 'booking'
+  | 'b2b'
+  | 'reviews'
+  | 'loyalty'
+  | string;
+
+export interface Tenant {
+  id: string;
+  businessId: string;
+  locationId?: string;
+  ownerUid: string;
+  name: string;
+  slug: string;
+  isPrimaryBranch?: boolean;
+  status: CanonicalTenantStatus;
+  subscriptionId?: string;
+  planId?: string;
+  capabilities: string[];
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface TenantCustomerRelation {
+  id: string; // matches global User auth.uid
+  tenantId: string;
+  name: string;
+  email: string;
+  phone: string;
+  loyaltyPoints: number;
+  loyaltyTier: 'Bronze' | 'Silver' | 'Gold' | 'Platinum' | 'Diamond';
+  totalSpent: number;
+  totalOrders: number;
+  segment: 'VIP' | 'Regular' | 'New' | 'Inactive';
+  notes?: string;
+  storeCreditBalance?: number;
+  createdAt?: string;
+}
+
+export interface ListingBusinessProfile {
+  business: Business;
+  listing: BusinessListing;
+  locations: BusinessLocation[];
+  services: Array<{
+    id: string;
+    name: string;
+    price: number;
+    durationMinutes?: number;
+    description: string;
+  }>;
+}
+
 export interface BarcodeEntry {
   type: 'EAN' | 'UPC' | 'CODE128' | 'CODE39' | 'QR' | 'CUSTOM' | string;
   code: string;
