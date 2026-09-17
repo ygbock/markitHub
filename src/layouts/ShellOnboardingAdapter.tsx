@@ -2,7 +2,7 @@ import React from 'react';
 import BusinessOnboardingShell from '../components/business/BusinessOnboardingShell';
 
 /**
- * ShellOnboardingAdapter Interface (Allowed Adapter Contract)
+ * ShellOnboardingAdapter Interface (Authoritative Adapter Contract)
  *
  * Designed narrowly to bridge the existing onboarding implementation
  * into the canonical shell architecture without implementing or owning
@@ -11,25 +11,14 @@ import BusinessOnboardingShell from '../components/business/BusinessOnboardingSh
 export interface ShellOnboardingAdapter {
   businessId?: string;
   mode?: 'listing' | 'listing-and-store';
-
-  children: React.ReactNode;
-
-  onComplete?: () => void;
-  onCancel?: () => void;
-}
-
-export interface ShellOnboardingAdapterProps {
-  businessId?: string;
-  mode?: 'listing' | 'listing-and-store';
-
   children?: React.ReactNode;
-
   onComplete?: () => void;
   onCancel?: () => void;
-
   onNavigate?: (path: string) => void;
   id?: string;
 }
+
+export type ShellOnboardingAdapterProps = ShellOnboardingAdapter;
 
 /**
  * ShellOnboardingAdapter Component
@@ -40,7 +29,7 @@ export interface ShellOnboardingAdapterProps {
  */
 export const ShellOnboardingAdapter: React.FC<ShellOnboardingAdapterProps> = ({
   businessId,
-  mode,
+  mode: _mode,
   children,
   onComplete,
   onCancel,
@@ -54,8 +43,9 @@ export const ShellOnboardingAdapter: React.FC<ShellOnboardingAdapterProps> = ({
       onComplete();
     }
     // Canonical route translation:
-    if (choice === 'LISTING_AND_STORE' && businessData?.tenantId) {
-      onNavigate(`/tenant/${businessData.tenantId}/dashboard`);
+    if (choice === 'LISTING_AND_STORE' && (businessData?.tenantId || businessData?.id)) {
+      const tenantId = businessData?.tenantId || businessData?.id || businessId;
+      onNavigate(`/tenant/${tenantId}/dashboard`);
     } else {
       const slug = businessData?.businessSlug || businessData?.slug || businessData?.id || businessId;
       onNavigate(slug ? `/business/${slug}` : '/');
@@ -65,14 +55,17 @@ export const ShellOnboardingAdapter: React.FC<ShellOnboardingAdapterProps> = ({
   const handleNavigate = (path: string) => {
     if (path === '/' && onCancel) {
       onCancel();
-    } else {
-      onNavigate(path);
     }
+    onNavigate(path);
   };
+
+  const hasCustomChildren = React.Children.toArray(children).length > 0;
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950" id={id}>
-      {children || (
+      {hasCustomChildren ? (
+        children
+      ) : (
         <BusinessOnboardingShell
           onNavigate={handleNavigate}
           onComplete={handleComplete}
@@ -83,3 +76,4 @@ export const ShellOnboardingAdapter: React.FC<ShellOnboardingAdapterProps> = ({
 };
 
 export default ShellOnboardingAdapter;
+

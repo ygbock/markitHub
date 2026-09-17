@@ -6,7 +6,6 @@ import { BusinessShell } from './BusinessShell';
 import { TenantShell } from './TenantShell';
 import { SuperAdminShell } from './SuperAdminShell';
 import { ShellOnboardingAdapter } from './ShellOnboardingAdapter';
-import BusinessOnboardingShell from '../components/business/BusinessOnboardingShell';
 import { StaffMember } from '../utils/permissions';
 import { Customer, ListingBusinessProfile } from '../types';
 

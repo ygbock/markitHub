@@ -39,6 +39,7 @@ import { BusinessShell } from '../layouts/BusinessShell';
 import { CustomerShell } from '../layouts/CustomerShell';
 import { PublicShell } from '../layouts/PublicShell';
 import { ShellOnboardingAdapter } from '../layouts/ShellOnboardingAdapter';
+import BusinessOnboardingShell from '../components/business/BusinessOnboardingShell';
 
 // ============================================================================
 // SECTION 1: Design System Foundation (Tokens, Themes, Primitives)
@@ -443,9 +444,11 @@ test('Phase 1 Behavioral I: Theme behavior, tokens, and storage persistence', ()
 });
 
 test('Phase 1 Behavioral J: Allowed Shell Onboarding Adapter integration and contract enforcement', () => {
-  // 1. Contract object compatibility check
+  // 1. Contract reconciliation: Interface and Props accept identical structure with optional children
   let completed = false;
   let cancelled = false;
+  let navigatedPath = '';
+
   const adapterContractCheck: ShellOnboardingAdapter = {
     businessId: 'biz-test-123',
     mode: 'listing',
@@ -459,39 +462,86 @@ test('Phase 1 Behavioral J: Allowed Shell Onboarding Adapter integration and con
   assert.equal(typeof adapterContractCheck.onComplete, 'function');
   assert.equal(typeof adapterContractCheck.onCancel, 'function');
 
-  // 2. ShellOnboardingAdapter component structure
-  const customChild = React.createElement('div', { id: 'custom-child-view' }, 'Custom Step View');
-  const adapterEl = React.createElement(ShellOnboardingAdapter, {
-    businessId: 'biz-999',
+  // Also test without children to confirm optional contract reconciliation
+  const adapterContractWithoutChildren: ShellOnboardingAdapter = {
+    businessId: 'biz-test-456',
     mode: 'listing-and-store',
-    onComplete: () => { completed = true; },
+  };
+  assert.equal(adapterContractWithoutChildren.businessId, 'biz-test-456');
+  assert.equal(adapterContractWithoutChildren.children, undefined);
+
+  // 2. Behavioral verification: /business/onboarding and onboarding paths resolve through ShellOnboardingAdapter
+  const onboardingPaths = ['/business/onboarding', '/business/register', '/register/business'];
+  for (const path of onboardingPaths) {
+    const domain = resolveDomainForPath(path);
+    assert.equal(domain, 'BUSINESS_ONBOARDING', `Route ${path} must map to BUSINESS_ONBOARDING domain`);
+
+    const resolved = ShellResolver({
+      currentPath: path,
+      onNavigate: (p) => { navigatedPath = p; },
+    });
+    assert.ok(React.isValidElement(resolved), `ShellResolver must return a valid element for ${path}`);
+    assert.equal(resolved.type, ShellOnboardingAdapter, `Route ${path} must resolve to ShellOnboardingAdapter`);
+    
+    // CRITICAL: Verify no onboarding path resolves to TenantShell
+    assert.notEqual(resolved.type, TenantShell, `Route ${path} must NEVER resolve to TenantShell`);
+  }
+
+  // 3. Adapter delegation to existing BusinessOnboardingShell when owning onboarding content
+  const adapterOutput = ShellOnboardingAdapter({
+    businessId: 'biz-fallback-id',
+    onNavigate: (p) => { navigatedPath = p; },
     onCancel: () => { cancelled = true; },
-    children: customChild,
+    onComplete: () => { completed = true; },
   });
 
-  assert.ok(React.isValidElement(adapterEl));
-  assert.equal(adapterEl.type, ShellOnboardingAdapter);
+  assert.ok(React.isValidElement(adapterOutput));
+  assert.equal(adapterOutput.props.id, 'business-onboarding-shell-root');
 
-  // 3. ShellResolver dispatches ShellOnboardingAdapter for canonical onboarding routes
-  const resolverOnboardingEl = ShellResolver({
-    currentPath: '/business/onboarding',
-    onNavigate: () => {},
-  });
-  assert.ok(React.isValidElement(resolverOnboardingEl));
-  assert.equal(resolverOnboardingEl.type, ShellOnboardingAdapter);
-  assert.equal((resolverOnboardingEl.props as any).id, 'business-onboarding-shell-root');
+  // Verify internal child is the existing BusinessOnboardingShell component
+  const renderedChild = adapterOutput.props.children;
+  assert.ok(React.isValidElement(renderedChild));
+  assert.equal(renderedChild.type, BusinessOnboardingShell, 'Adapter must delegate to existing BusinessOnboardingShell');
 
-  const resolverRegisterEl = ShellResolver({
-    currentPath: '/business/register',
-    onNavigate: () => {},
-  });
-  assert.ok(React.isValidElement(resolverRegisterEl));
-  assert.equal(resolverRegisterEl.type, ShellOnboardingAdapter);
+  // 4. Behavioral test: Listing + Store completion navigates to /tenant/:tenantId/dashboard
+  completed = false;
+  navigatedPath = '';
+  renderedChild.props.onComplete(
+    { tenantId: 'tenant-stellar-42', businessSlug: 'stellar-store', id: 'biz-stellar' },
+    'LISTING_AND_STORE'
+  );
+  assert.equal(navigatedPath, '/tenant/tenant-stellar-42/dashboard', 'Listing + Store completion must navigate to tenant dashboard');
+  assert.equal(completed, true, 'onComplete callback must be invoked');
 
-  // 4. Fallback rendering preserves default BusinessOnboardingShell when children are omitted
-  const standaloneAdapterEl = ShellOnboardingAdapter({
-    onNavigate: () => {},
+  // 5. Behavioral test: Listing-only completion navigates to /business/:businessId
+  completed = false;
+  navigatedPath = '';
+  renderedChild.props.onComplete(
+    { businessSlug: 'artisan-bakery', id: 'artisan-1' },
+    'LISTING_ONLY'
+  );
+  assert.equal(navigatedPath, '/business/artisan-bakery', 'Listing-only completion must navigate to /business/:businessSlug');
+  assert.equal(completed, true, 'onComplete callback must be invoked');
+
+  // Fallback to businessId if slug not in record
+  navigatedPath = '';
+  renderedChild.props.onComplete({}, 'LISTING_ONLY');
+  assert.equal(navigatedPath, '/business/biz-fallback-id', 'Listing-only completion must fallback to businessId prop');
+
+  // 6. Behavioral test: Cancellation navigates to / and invokes onCancel
+  cancelled = false;
+  navigatedPath = '';
+  renderedChild.props.onNavigate('/');
+  assert.equal(navigatedPath, '/', 'Cancellation navigation must navigate to /');
+  assert.equal(cancelled, true, 'Cancellation must invoke onCancel callback');
+
+  // 7. App runtime path verification: Falsy children array from App correctly triggers delegation
+  // In App.tsx, condition branches evaluate to false, so children is [false, false]
+  const appRuntimeAdapter = ShellOnboardingAdapter({
+    onNavigate: (p) => { navigatedPath = p; },
+    children: [false, false] as any,
   });
-  assert.ok(React.isValidElement(standaloneAdapterEl));
-  assert.equal(standaloneAdapterEl.props.id, 'business-onboarding-shell-root');
+  assert.ok(React.isValidElement(appRuntimeAdapter));
+  assert.ok(React.isValidElement(appRuntimeAdapter.props.children));
+  assert.equal(appRuntimeAdapter.props.children.type, BusinessOnboardingShell, 'Falsy children array from App must still delegate to BusinessOnboardingShell');
 });

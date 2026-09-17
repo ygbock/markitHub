@@ -48,7 +48,6 @@ import { getOrderDeliveryTelemetry, flagOrderAsDelivered, buildAdminRefundNotifi
 import { useMikitRouter } from './routes/useMikitRouter';
 import { evaluateCanonicalRouteGuard, TenantContextRecord } from './routes/routeGuards';
 import PublicDiscoveryShell from './components/discovery/PublicDiscoveryShell';
-import BusinessOnboardingShell from './components/business/BusinessOnboardingShell';
 import ListingBusinessShell from './components/business/ListingBusinessShell';
 import CustomerAccountShell from './components/customer/CustomerAccountShell';
 import RouteGuardShell from './components/routing/RouteGuardShell';
@@ -1516,19 +1515,7 @@ export default function App() {
         />
       )}
 
-      {/* 2d. Business Onboarding Domain (/register/business, /business/onboarding) */}
-      {activeDomain === 'BUSINESS_ONBOARDING' && (
-        <BusinessOnboardingShell
-          onNavigate={navigate}
-          onComplete={(newBiz, choice) => {
-            if (choice === 'LISTING_AND_STORE' && newBiz.tenantId) {
-              navigate(`/tenant/${newBiz.tenantId}/dashboard`);
-            } else {
-              navigate(`/business/${newBiz.businessSlug || newBiz.slug || newBiz.id}`);
-            }
-          }}
-        />
-      )}
+      {/* 2d. Business Onboarding Domain (/register/business, /business/onboarding) - Delegated directly to ShellResolver -> ShellOnboardingAdapter */}
 
       {/* 2e. Customer Account Domain (/account/*) */}
       {activeDomain === 'CUSTOMER_ACCOUNT' && (

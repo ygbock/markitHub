@@ -430,6 +430,15 @@ export const CANONICAL_ROUTE_DEFINITIONS: CanonicalRouteDefinition[] = [
     description: 'Create a new business identity on MikitHub.',
   },
   {
+    id: 'business.register.alias',
+    pattern: '/register/business',
+    domain: 'BUSINESS_ONBOARDING',
+    context: 'BUSINESS',
+    auth: 'CUSTOMER',
+    title: 'Register Business',
+    description: 'Create a new business identity on MikitHub.',
+  },
+  {
     id: 'business.onboarding',
     pattern: '/business/onboarding',
     domain: 'BUSINESS_ONBOARDING',
