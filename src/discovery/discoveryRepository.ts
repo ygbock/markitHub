@@ -32,6 +32,34 @@ function boundedLimit(value?: number): number {
   return Math.min(Math.max(value ?? DEFAULT_LIMIT, 1), MAX_LIMIT);
 }
 
+function normalizeFilters(filters: DiscoveryFilters = {}): DiscoveryFilters {
+  const normalized: DiscoveryFilters = { ...filters };
+  if (normalized.text != null) normalized.text = normalized.text.trim() || undefined;
+  if (normalized.categorySlug != null) normalized.categorySlug = normalized.categorySlug.trim().toLowerCase() || undefined;
+  if (normalized.businessId != null) normalized.businessId = normalized.businessId.trim() || undefined;
+  if (normalized.tenantId != null) normalized.tenantId = normalized.tenantId.trim() || undefined;
+
+  if (normalized.minPrice != null && (!Number.isFinite(normalized.minPrice) || normalized.minPrice < 0)) normalized.minPrice = undefined;
+  if (normalized.maxPrice != null && (!Number.isFinite(normalized.maxPrice) || normalized.maxPrice < 0)) normalized.maxPrice = undefined;
+  if (normalized.minPrice != null && normalized.maxPrice != null && normalized.minPrice > normalized.maxPrice) {
+    [normalized.minPrice, normalized.maxPrice] = [normalized.maxPrice, normalized.minPrice];
+  }
+
+  const validCoordinate = (value: number | undefined) => value != null && Number.isFinite(value);
+  if (!validCoordinate(normalized.latitude) || !validCoordinate(normalized.longitude) ||
+      normalized.latitude! < -90 || normalized.latitude! > 90 ||
+      normalized.longitude! < -180 || normalized.longitude! > 180) {
+    normalized.latitude = undefined;
+    normalized.longitude = undefined;
+  }
+  if (normalized.radiusKm != null) {
+    normalized.radiusKm = Number.isFinite(normalized.radiusKm)
+      ? Math.min(Math.max(normalized.radiusKm, 1), 100)
+      : undefined;
+  }
+  return normalized;
+}
+
 function textMatches(value: unknown, text?: string): boolean {
   if (!text) return true;
   const needle = text.trim().toLowerCase();
@@ -161,7 +189,8 @@ function normalizeService(raw: DocumentData, id: string, tenantId?: string): Dis
   };
 }
 
-function matchesBusiness(item: DiscoveryBusiness, filters: DiscoveryFilters = {}): boolean {
+function matchesBusiness(item: DiscoveryBusiness, rawFilters: DiscoveryFilters = {}): boolean {
+  const filters = normalizeFilters(rawFilters);
   if (!textMatches(item.name, filters.text) && !textMatches(item.description, filters.text) &&
       !textMatches(item.headline, filters.text) && !arrayMatches(item.tags, filters.text) &&
       !arrayMatches(item.categories, filters.text)) return false;
@@ -178,7 +207,8 @@ function matchesBusiness(item: DiscoveryBusiness, filters: DiscoveryFilters = {}
   return true;
 }
 
-function matchesProduct(item: DiscoveryProduct, filters: DiscoveryFilters = {}): boolean {
+function matchesProduct(item: DiscoveryProduct, rawFilters: DiscoveryFilters = {}): boolean {
+  const filters = normalizeFilters(rawFilters);
   if (!textMatches(item.name, filters.text) && !textMatches(item.description, filters.text) &&
       !textMatches(item.brand, filters.text) && !arrayMatches(item.tags, filters.text)) return false;
   if (filters.categorySlug && item.category !== filters.categorySlug) return false;
@@ -191,7 +221,8 @@ function matchesProduct(item: DiscoveryProduct, filters: DiscoveryFilters = {}):
   return true;
 }
 
-function matchesService(item: DiscoveryService, filters: DiscoveryFilters = {}): boolean {
+function matchesService(item: DiscoveryService, rawFilters: DiscoveryFilters = {}): boolean {
+  const filters = normalizeFilters(rawFilters);
   if (!textMatches(item.name, filters.text) && !textMatches(item.description, filters.text) &&
       !textMatches(item.category, filters.text) && !arrayMatches(item.tags, filters.text)) return false;
   if (filters.categorySlug && item.category !== filters.categorySlug) return false;
@@ -202,12 +233,14 @@ function matchesService(item: DiscoveryService, filters: DiscoveryFilters = {}):
   return true;
 }
 
-function matchesCategory(item: DiscoveryCategory, filters: DiscoveryFilters = {}): boolean {
-  return textMatches(item.name, filters.text) || textMatches(item.slug, filters.text) || textMatches(item.description, filters.text);
+function matchesCategory(item: DiscoveryCategory, rawFilters: DiscoveryFilters = {}): boolean {
+  const filters = normalizeFilters(rawFilters);
+  if (filters.categorySlug && item.slug !== filters.categorySlug) return false;
+  return !filters.text || textMatches(item.name, filters.text) || textMatches(item.slug, filters.text) || textMatches(item.description, filters.text);
 }
 
 function sortBusinesses(items: DiscoveryBusiness[], queryOptions: DiscoveryQuery): DiscoveryBusiness[] {
-  const filters = queryOptions.filters || {};
+  const filters = normalizeFilters(queryOptions.filters || {});
   const origin = filters.latitude != null && filters.longitude != null
     ? { latitude: filters.latitude, longitude: filters.longitude }
     : null;
@@ -296,11 +329,12 @@ function constraintsForPublicCollection(limit: number): QueryConstraint[] {
 export class FirestoreDiscoveryRepository implements DiscoveryRepository {
   async listBusinesses(queryOptions: DiscoveryQuery = {}): Promise<DiscoverySearchResult<DiscoveryBusiness>> {
     const take = boundedLimit(queryOptions.limit);
+    const normalizedQuery = { ...queryOptions, filters: normalizeFilters(queryOptions.filters) };
     const snapshot = await getDocs(query(collection(db, 'businesses'), where('status', '==', 'active'), ...constraintsForPublicCollection(take)));
     const items = sortBusinesses(snapshot.docs
       .map(docSnap => normalizeBusiness({ id: docSnap.id, ...docSnap.data() } as Business & Record<string, unknown>))
       .filter((item): item is DiscoveryBusiness => item !== null)
-      .filter(item => matchesBusiness(item, queryOptions.filters)), queryOptions);
+      .filter(item => matchesBusiness(item, normalizedQuery.filters)), normalizedQuery);
     return paginate(items, queryOptions);
   }
 
@@ -360,12 +394,13 @@ export class FirestoreDiscoveryRepository implements DiscoveryRepository {
 
   async listProducts(queryOptions: DiscoveryQuery = {}): Promise<DiscoverySearchResult<DiscoveryProduct>> {
     const take = boundedLimit(queryOptions.limit);
+    const normalizedQuery = { ...queryOptions, filters: normalizeFilters(queryOptions.filters) };
     const snapshot = await getDocs(query(collectionGroup(db, 'products'), ...constraintsForPublicCollection(take)));
     const items = snapshot.docs
       .map(docSnap => normalizeProduct({ id: docSnap.id, ...docSnap.data() } as Product & Record<string, unknown>, docSnap.id, docSnap.ref.parent.parent?.id))
       .filter((item): item is DiscoveryProduct => item !== null)
-      .filter(item => matchesProduct(item, queryOptions.filters));
-    return paginate(items, queryOptions);
+      .filter(item => matchesProduct(item, normalizedQuery.filters));
+    return paginate(items, normalizedQuery);
   }
 
   async getServiceById(id: string): Promise<DiscoveryService | null> {
@@ -399,16 +434,18 @@ export class FirestoreDiscoveryRepository implements DiscoveryRepository {
 
   async listServices(queryOptions: DiscoveryQuery = {}): Promise<DiscoverySearchResult<DiscoveryService>> {
     const take = boundedLimit(queryOptions.limit);
+    const normalizedQuery = { ...queryOptions, filters: normalizeFilters(queryOptions.filters) };
     const snapshot = await getDocs(query(collectionGroup(db, 'services'), ...constraintsForPublicCollection(take)));
     const items = snapshot.docs
       .map(docSnap => normalizeService(docSnap.data(), docSnap.id, docSnap.ref.parent.parent?.id))
       .filter((item): item is DiscoveryService => item !== null)
-      .filter(item => matchesService(item, queryOptions.filters));
-    return paginate(items, queryOptions);
+      .filter(item => matchesService(item, normalizedQuery.filters));
+    return paginate(items, normalizedQuery);
   }
 
   async listCategories(queryOptions: DiscoveryQuery = {}): Promise<DiscoverySearchResult<DiscoveryCategory>> {
     const take = boundedLimit(queryOptions.limit);
+    const normalizedQuery = { ...queryOptions, filters: normalizeFilters(queryOptions.filters) };
     const snapshot = await getDocs(query(collection(db, 'categories'), where('status', '==', 'active'), ...constraintsForPublicCollection(take)));
     const items = snapshot.docs.map(docSnap => {
       const raw = docSnap.data() as Category;
@@ -423,9 +460,9 @@ export class FirestoreDiscoveryRepository implements DiscoveryRepository {
         sortOrder: Number(raw.sort_order ?? 0),
         status: raw.status === 'inactive' ? 'inactive' : 'active',
       } satisfies DiscoveryCategory;
-    }).filter(item => matchesCategory(item, queryOptions.filters));
+    }).filter(item => matchesCategory(item, normalizedQuery.filters));
     items.sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name));
-    return paginate(items, queryOptions);
+    return paginate(items, normalizedQuery);
   }
 
   async search(queryOptions: DiscoveryQuery = {}): Promise<UnifiedDiscoveryResults> {
