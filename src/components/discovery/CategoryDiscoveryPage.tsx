@@ -439,10 +439,10 @@ export default function CategoryDiscoveryPage({ categorySlug, onNavigate }: Cate
                     </h2>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
-                    {productucts.map(product => (
+                    {products.map(product => (
                       <button
                         key={product.id}
-                        onClick={() => onNavigate(product.slug ? '/productuct/' + product.slug : `/productucts`)}
+                        onClick={() => onNavigate(product.slug ? '/product/' + product.slug : `/products`)}
                         className="text-left bg-white rounded-3xl border border-slate-200 p-5 hover:border-indigo-300 hover:shadow-lg transition-all group"
                       >
                         <div className="flex items-start justify-between gap-3">
@@ -456,7 +456,7 @@ export default function CategoryDiscoveryPage({ categorySlug, onNavigate }: Cate
                         <h3 className="font-bold text-base text-slate-900 mt-3 group-hover:text-indigo-600 transition-colors">
                           {product.name}
                         </h3>
-                        <p className="text-sm text-slate-500 mt-1 line-clamp-2">{product.description || 'Quality productuct offering.'}</p>
+                        <p className="text-sm text-slate-500 mt-1 line-clamp-2">{product.description || 'Quality product offering.'}</p>
                         <div className="flex items-center justify-between mt-4 pt-3 border-t border-slate-100 text-xs text-slate-500">
                           <span>{product.brand || 'Available in stock'}</span>
                           <span className="flex items-center gap-1 text-indigo-600 font-bold">
@@ -478,10 +478,10 @@ export default function CategoryDiscoveryPage({ categorySlug, onNavigate }: Cate
                     </h2>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
-                    {serviceices.map(service => (
+                    {services.map(service => (
                       <button
                         key={service.id}
-                        onClick={() => onNavigate(service.slug ? '/serviceice/' + service.slug : `/serviceices`)}
+                        onClick={() => onNavigate(service.slug ? '/service/' + service.slug : `/services`)}
                         className="text-left bg-white rounded-3xl border border-slate-200 p-5 hover:border-indigo-300 hover:shadow-lg transition-all group"
                       >
                         <div className="flex items-start justify-between gap-3">
@@ -497,7 +497,7 @@ export default function CategoryDiscoveryPage({ categorySlug, onNavigate }: Cate
                         <h3 className="font-bold text-base text-slate-900 mt-3 group-hover:text-indigo-600 transition-colors">
                           {service.name}
                         </h3>
-                        <p className="text-sm text-slate-500 mt-1 line-clamp-2">{service.description || 'Professional serviceice.'}</p>
+                        <p className="text-sm text-slate-500 mt-1 line-clamp-2">{service.description || 'Professional service.'}</p>
                         <div className="flex items-center justify-between mt-4 pt-3 border-t border-slate-100 text-xs text-slate-500">
                           <span>{service.durationMinutes ? `${service.durationMinutes} mins` : 'Available for booking'}</span>
                           <span className="flex items-center gap-1 text-indigo-600 font-bold">
@@ -529,7 +529,7 @@ export default function CategoryDiscoveryPage({ categorySlug, onNavigate }: Cate
           </button>
           <div className="text-right">
             <h1 className="text-xl sm:text-2xl font-black">All Categories</h1>
-            <p className="text-xs text-slate-300">Browse businesses, products, and serviceices by industry.</p>
+            <p className="text-xs text-slate-300">Browse businesses, products, and services by industry.</p>
           </div>
         </div>
       </header>
