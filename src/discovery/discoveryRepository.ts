@@ -84,7 +84,7 @@ function distanceKm(a: { latitude: number; longitude: number }, b: { latitude: n
 
 export function parseOperatingHours(value: unknown): { open: number; close: number } | null {
   if (typeof value !== 'string') return null;
-  const match = value.trim().match(/^(\\d{1,2}):(\\d{2})\\s*(?:-|–|—)\\s*(\\d{1,2}):(\\d{2})$/);
+  const match = value.trim().match(/^(\d{1,2}):(\d{2})\s*(?:-|–|—)\s*(\d{1,2}):(\d{2})$/);
   if (!match) return null;
   const open = Number(match[1]) * 60 + Number(match[2]);
   const close = Number(match[3]) * 60 + Number(match[4]);
