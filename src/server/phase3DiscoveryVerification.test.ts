@@ -358,7 +358,7 @@ test('Phase 3G Invariant 51: nearby results navigate to canonical business profi
 test('Phase 3G Invariant 52: discovery location normalization derives open-now from authoritative operating hours when explicit state is absent', () => {
   const source = readFileSync(resolve(process.cwd(), 'src/discovery/discoveryRepository.ts'), 'utf8');
   assert.match(source, /function computeOpenNow/);
-  assert.match(source, /raw\.isOpenNow === 'boolean'/);
+  assert.match(source, /typeof raw\.isOpenNow === 'boolean'/);
   assert.match(source, /computeOpenNow\(raw\.operatingHours\)/);
 });
 
