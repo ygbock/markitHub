@@ -547,7 +547,7 @@ test('Phase 3I Invariant 73: discovery remains authoritative and read-only at th
   const source = readFileSync(resolve(process.cwd(), 'src/components/discovery/UnifiedSearchPage.tsx'), 'utf8');
   assert.match(source, /discoveryRepository\.search/);
   assert.doesNotMatch(source, /DISCOVERY_BUSINESSES|DISCOVERY_CATEGORIES/);
-  assert.doesNotMatch(source, /\\b(setDoc|addDoc|updateDoc|deleteDoc)\\b/);
+  assert.doesNotMatch(source, /\b(setDoc|addDoc|updateDoc|deleteDoc)\b/);
 });
 
 test('Phase 3I Invariant 74: discovery filters remain available from the directory results experience', () => {
