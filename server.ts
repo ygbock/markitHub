@@ -54,6 +54,7 @@ import { startPlatformScheduler, stopPlatformScheduler } from './src/server/plat
 import { addUsageEventToTransaction, evaluateUsageLimit, usagePeriod, usageMeterId, USAGE_METER_COLLECTION } from './src/server/platformUsageMeter';
 import { DEFAULT_PLATFORM_PLANS } from './src/server/platformAdminControlPlane';
 import { validateTenantProvisioningRequest, hashProvisioningIdempotencyKey, buildTenantProvisioningRecords } from './src/server/tenantProvisioning';
+import { validateBusinessRegistrationRequest, hashBusinessRegistrationKey, buildBusinessRegistrationRecords } from './src/server/businessRegistration';
 import {
   createAuthoritativeAuditRecord,
   recordAuditEvent,
@@ -660,6 +661,88 @@ async function startServer() {
     requirePlatformAdmin,
     getAdminDb,
     getAdminAuth: getFirebaseAdminAuth,
+  });
+
+  // =========================================================================
+  // CANONICAL BUSINESS REGISTRATION
+  // =========================================================================
+  app.post('/api/business/register', requireServerAuth, async (req: any, res: any) => {
+    const db = getAdminDb();
+    if (!db) return res.status(503).json({ error: 'Business registration service is not configured.' });
+
+    try {
+      const request = validateBusinessRegistrationRequest({
+        ...req.body,
+        idempotencyKey: req.headers['idempotency-key'],
+      });
+      const keyHash = hashBusinessRegistrationKey(request.idempotencyKey);
+      const requestRef = db.collection('business_registration_requests').doc(keyHash);
+
+      let responsePayload: any = null;
+      let replayed = false;
+
+      await db.runTransaction(async (transaction) => {
+        const priorRequest = await transaction.get(requestRef);
+        if (priorRequest.exists) {
+          const priorBusinessId = String(priorRequest.data()?.businessId || '').trim();
+          if (!priorBusinessId) throw Object.assign(new Error('Business registration idempotency record is invalid.'), { statusCode: 500 });
+          const priorBusiness = await transaction.get(db.collection('businesses').doc(priorBusinessId));
+          if (!priorBusiness.exists) throw Object.assign(new Error('Business registration record references a missing business.'), { statusCode: 409 });
+          responsePayload = { id: priorBusiness.id, ...priorBusiness.data() };
+          replayed = true;
+          return;
+        }
+
+        const records = buildBusinessRegistrationRecords({
+          request,
+          ownerUid: req.user.uid,
+        });
+        const businessRef = db.collection('businesses').doc(records.business.id);
+        const locationRef = businessRef.collection('locations').doc(records.location.id);
+        const relationshipRef = db.collection('business_relationships').doc(records.business.id + '_' + req.user.uid);
+
+        transaction.create(businessRef, records.business);
+        transaction.create(locationRef, records.location);
+        transaction.create(relationshipRef, records.relationship);
+        transaction.create(requestRef, {
+          businessId: records.business.id,
+          locationId: records.location.id,
+          idempotencyKeyHash: keyHash,
+          createdAt: records.business.createdAt,
+        });
+
+        const audit = createAuthoritativeAuditRecord({
+          tenantId: 'platform',
+          actorUid: req.user.uid,
+          actorEmail: req.user.email,
+          actorRole: 'Business Owner',
+          action: 'BUSINESS_REGISTERED',
+          module: 'Business Registration',
+          targetType: 'business',
+          targetId: records.business.id,
+          targetName: records.business.tradingName,
+          newState: {
+            businessId: records.business.id,
+            locationId: records.location.id,
+            listingSlug: records.slug,
+            verificationStatus: records.business.verificationStatus,
+          },
+          reason: 'Business owner registered a canonical MikitHub business listing.',
+          result: 'success',
+        });
+        transaction.create(db.collection('audit_logs').doc(audit.id), audit);
+        responsePayload = records.business;
+      });
+
+      return res.status(replayed ? 200 : 201).json({
+        success: true,
+        replayed,
+        business: responsePayload,
+      });
+    } catch (err: any) {
+      const status = Number(err?.statusCode) || 500;
+      return res.status(status).json({ success: false, error: err?.message || 'Business registration failed.' });
+    }
   });
 
   // =========================================================================
