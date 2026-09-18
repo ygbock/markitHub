@@ -368,3 +368,42 @@ test('Phase 3G Invariant 53: geographic discovery remains read-only', () => {
   assert.ok(!/\b(setDoc|addDoc|updateDoc|deleteDoc)\b/.test(repository));
   assert.ok(!/\b(setDoc|addDoc|updateDoc|deleteDoc)\b/.test(ui));
 });
+
+
+test('Phase 3G Remediation: operating-hours parser accepts standard HH:MM ranges', () => {
+  const { parseOperatingHours } = require('../discovery/discoveryRepository') as typeof import('../discovery/discoveryRepository');
+  assert.deepEqual(parseOperatingHours('09:00-17:00'), { open: 540, close: 1020 });
+  assert.deepEqual(parseOperatingHours('09:00 – 17:00'), { open: 540, close: 1020 });
+  assert.deepEqual(parseOperatingHours('09:00—17:00'), { open: 540, close: 1020 });
+});
+
+test('Phase 3G Remediation: computeOpenNow handles open, closed, boundary, and missing days', () => {
+  const { computeOpenNow } = require('../discovery/discoveryRepository') as typeof import('../discovery/discoveryRepository');
+  const hours = { monday: '09:00-17:00' };
+  assert.equal(computeOpenNow(hours, new Date(2026, 8, 14, 8, 59)), false);
+  assert.equal(computeOpenNow(hours, new Date(2026, 8, 14, 9, 0)), true);
+  assert.equal(computeOpenNow(hours, new Date(2026, 8, 14, 16, 59)), true);
+  assert.equal(computeOpenNow(hours, new Date(2026, 8, 14, 17, 0)), false);
+  assert.equal(computeOpenNow(hours, new Date(2026, 8, 15, 12, 0)), undefined);
+});
+
+test('Phase 3G Remediation: computeOpenNow supports midnight-crossing ranges and rejects malformed hours', () => {
+  const { computeOpenNow, parseOperatingHours } = require('../discovery/discoveryRepository') as typeof import('../discovery/discoveryRepository');
+  const hours = { monday: '22:00-02:00' };
+  assert.equal(computeOpenNow(hours, new Date(2026, 8, 14, 22, 30)), true);
+  assert.equal(computeOpenNow(hours, new Date(2026, 8, 14, 1, 59)), true);
+  assert.equal(computeOpenNow(hours, new Date(2026, 8, 14, 2, 0)), false);
+  assert.equal(parseOperatingHours('not-a-time'), null);
+  assert.equal(parseOperatingHours('25:00-17:00'), null);
+});
+
+test('Phase 3G Remediation: explicit isOpenNow remains authoritative over derived operating hours', () => {
+  const { computeOpenNow } = require('../discovery/discoveryRepository') as typeof import('../discovery/discoveryRepository');
+  assert.equal(computeOpenNow({ monday: '09:00-17:00' }, new Date(2026, 8, 14, 12, 0)), true);
+});
+
+test('Phase 3G Remediation: geographic UI gives opt-in guidance instead of claiming it is requesting location', () => {
+  const source = readFileSync(resolve(process.cwd(), 'src/components/discovery/GeographicDiscoveryPage.tsx'), 'utf8');
+  assert.match(source, /Use your location to find nearby businesses/);
+  assert.doesNotMatch(source, /Requesting your location…/);
+});
