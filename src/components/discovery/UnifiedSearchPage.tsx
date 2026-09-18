@@ -177,7 +177,30 @@ export default function UnifiedSearchPage({ initialQuery = '', onNavigate }: Uni
                 className='w-full pl-12 pr-3 py-3.5 rounded-2xl bg-white text-slate-900'
               />
             </div>
-            <button type='button' onClick={useMyLocation} disabled={locationStatus === 'loading'} className='px-4 py-3.5 rounded-2xl bg-white/10 border border-white/20 hover:bg-white/15 font-bold text-sm flex items-center justify-center gap-2'>
+            <button
+              type='button'
+              onClick={() => {
+                if (!navigator.geolocation) {
+                  setLocationStatus('error');
+                  return;
+                }
+                setLocationStatus('loading');
+                navigator.geolocation.getCurrentPosition(
+                  position => {
+                    setFilters(current => ({
+                      ...current,
+                      latitude: position.coords.latitude,
+                      longitude: position.coords.longitude,
+                      radiusKm: current.radiusKm ?? 10,
+                    }));
+                    setLocationStatus('idle');
+                  },
+                  error => setLocationStatus(error.code === error.PERMISSION_DENIED ? 'denied' : 'error'),
+                  { enableHighAccuracy: false, maximumAge: 300000, timeout: 10000 },
+                );
+              }}
+              disabled={locationStatus === 'loading'}
+              className='px-4 py-3.5 rounded-2xl bg-white/10 border border-white/20 hover:bg-white/15 font-bold text-sm flex items-center justify-center gap-2'>
               <Navigation className='w-4 h-4' /> {locationStatus === 'loading' ? 'Locating…' : 'Use my location'}
             </button>
             <button type='submit' className='px-5 py-3 rounded-2xl bg-indigo-600 hover:bg-indigo-500 font-bold'>Search</button>
