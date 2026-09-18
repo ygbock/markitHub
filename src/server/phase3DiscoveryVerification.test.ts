@@ -200,3 +200,63 @@ test('Phase 3D Invariant 30: service discovery remains read-only and bounded', (
   assert.match(source, /firestoreLimit\(3\)/);
   assert.match(source, /Math\.min\(limit \* 3, MAX_LIMIT\)/);
 });
+
+
+test('Phase 3E Invariant 31: unified discovery exposes a typed ranked result contract across all canonical entities', () => {
+  const types = readFileSync(resolve(process.cwd(), 'src/discovery/types.ts'), 'utf8');
+  assert.match(types, /export interface DiscoverySearchItem/);
+  assert.match(types, /type: DiscoveryEntityType/);
+  assert.match(types, /rankedResults: DiscoverySearchItem\[\]/);
+});
+
+test('Phase 3E Invariant 32: unified search queries all requested entity domains concurrently', () => {
+  const source = readFileSync(resolve(process.cwd(), 'src/discovery/discoveryRepository.ts'), 'utf8');
+  assert.match(source, /const \[businesses, products, services, categories\] = await Promise\.all/);
+  for (const method of ['listBusinesses', 'listProducts', 'listServices', 'listCategories']) {
+    assert.match(source, new RegExp(method + '\\(candidateQuery\\)'));
+  }
+});
+
+test('Phase 3E Invariant 33: unified search ranks exact and prefix text matches above weaker matches', () => {
+  const source = readFileSync(resolve(process.cwd(), 'src/discovery/discoveryRepository.ts'), 'utf8');
+  assert.match(source, /haystack === needle/);
+  assert.match(source, /haystack\.startsWith\(needle\)/);
+  assert.match(source, /b\.score - a\.score/);
+});
+
+test('Phase 3E Invariant 34: unified search preserves bounded candidate reads before cross-entity ranking', () => {
+  const source = readFileSync(resolve(process.cwd(), 'src/discovery/discoveryRepository.ts'), 'utf8');
+  assert.match(source, /candidateLimit = Math\.min\(boundedLimit\(queryOptions\.limit\) \* 3, MAX_LIMIT\)/);
+  assert.match(source, /\.slice\(0, boundedLimit\(queryOptions\.limit\)\)/);
+});
+
+test('Phase 3E Invariant 35: unified search supports explicit entity-type narrowing', () => {
+  const source = readFileSync(resolve(process.cwd(), 'src/discovery/discoveryRepository.ts'), 'utf8');
+  assert.match(source, /queryOptions\.types/);
+  assert.match(source, /types\.includes\('business'\)/);
+  assert.match(source, /types\.includes\('product'\)/);
+  assert.match(source, /types\.includes\('service'\)/);
+  assert.match(source, /types\.includes\('category'\)/);
+});
+
+test('Phase 3E Invariant 36: canonical /search route renders the unified search experience', () => {
+  const source = readFileSync(resolve(process.cwd(), 'src/App.tsx'), 'utf8');
+  assert.match(source, /UnifiedSearchPage/);
+  assert.match(source, /currentRoute\.definition\.id !== 'public\.search'/);
+  assert.match(source, /currentRoute\.definition\.id === 'public\.search'/);
+});
+
+test('Phase 3E Invariant 37: unified search UI navigates to canonical entity-owned routes', () => {
+  const source = readFileSync(resolve(process.cwd(), 'src/components/discovery/UnifiedSearchPage.tsx'), 'utf8');
+  assert.match(source, /'\/business\/'/);
+  assert.match(source, /'\/product\/'/);
+  assert.match(source, /'\/service\/'/);
+  assert.match(source, /'\/category\/'/);
+});
+
+test('Phase 3E Invariant 38: unified search remains read-only and uses the canonical discovery repository', () => {
+  const repository = readFileSync(resolve(process.cwd(), 'src/discovery/discoveryRepository.ts'), 'utf8');
+  const ui = readFileSync(resolve(process.cwd(), 'src/components/discovery/UnifiedSearchPage.tsx'), 'utf8');
+  assert.ok(!/\b(setDoc|addDoc|updateDoc|deleteDoc)\b/.test(repository));
+  assert.match(ui, /import \{ discoveryRepository \} from '\.\.\/\.\.\/discovery\/discoveryRepository'/);
+});
