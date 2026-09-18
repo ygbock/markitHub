@@ -75,3 +75,40 @@ test('Phase 3A Invariant 12: repository is exported as the canonical discovery r
   const source = readFileSync(resolve(process.cwd(), 'src/discovery/discoveryRepository.ts'), 'utf8');
   assert.match(source, /export const discoveryRepository: DiscoveryRepository/);
 });
+
+
+test('Phase 3B Invariant 13: business discovery exposes canonical ID and slug profile reads', async () => {
+  const source = readFileSync(resolve(process.cwd(), 'src/discovery/discoveryRepository.ts'), 'utf8');
+  assert.match(source, /getBusinessById/);
+  assert.match(source, /getBusinessBySlug/);
+  assert.match(source, /where\\('listing\\.slug', '==', normalizedSlug\\)/);
+});
+
+test('Phase 3B Invariant 14: listing-only businesses remain discoverable without tenant activation', async () => {
+  const source = readFileSync(resolve(process.cwd(), 'src/discovery/discoveryRepository.ts'), 'utf8');
+  assert.match(source, /isTenant: Array\\.isArray\\(raw\\.tenantIds\\) && raw\\.tenantIds\\.length > 0/);
+  assert.match(source, /listing\\.isPublished !== true/);
+});
+
+test('Phase 3B Invariant 15: tenant activation is represented as optional business state, never required for listing visibility', async () => {
+  const source = readFileSync(resolve(process.cwd(), 'src/discovery/discoveryRepository.ts'), 'utf8');
+  assert.doesNotMatch(source, /if \\(!raw\\.tenantIds\\)/);
+  assert.match(source, /raw\\.status !== 'active'/);
+});
+
+test('Phase 3B Invariant 16: verified status is derived from authoritative business verification state', async () => {
+  const source = readFileSync(resolve(process.cwd(), 'src/discovery/discoveryRepository.ts'), 'utf8');
+  assert.match(source, /isVerified: raw\\.verificationStatus === 'verified'/);
+});
+
+test('Phase 3B Invariant 17: public business profile reads are bounded and read-only', async () => {
+  const source = readFileSync(resolve(process.cwd(), 'src/discovery/discoveryRepository.ts'), 'utf8');
+  assert.match(source, /firestoreLimit\\(3\\)/);
+  assert.ok(!/\\b(setDoc|addDoc|updateDoc|deleteDoc)\\b/.test(source));
+});
+
+test('Phase 3B Invariant 18: distance sorting uses real business location coordinates when supplied', async () => {
+  const source = readFileSync(resolve(process.cwd(), 'src/discovery/discoveryRepository.ts'), 'utf8');
+  assert.match(source, /case 'distance': return withDistance\\(a\\) - withDistance\\(b\\)/);
+  assert.match(source, /item\\.locations\\.filter\\(l => l\\.geo\\)/);
+});
