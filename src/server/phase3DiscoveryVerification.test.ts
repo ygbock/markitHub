@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { computeOpenNow, distanceKm, parseOperatingHours } from '../discovery/discoveryRepository';
+import { computeOpenNow, distanceKm, normalizeDiscoveryLocation, parseOperatingHours } from '../discovery/discoveryRepository';
 
 test('Phase 3A Invariant 1: discovery domain exposes all four canonical entity types', async () => {
   const source = readFileSync(resolve(process.cwd(), 'src/discovery/types.ts'), 'utf8');
@@ -395,8 +395,12 @@ test('Phase 3G Remediation: computeOpenNow supports midnight-crossing ranges and
 });
 
 test('Phase 3G Remediation: explicit isOpenNow remains authoritative over derived operating hours', () => {
-  const { computeOpenNow } = require('../discovery/discoveryRepository') as typeof import('../discovery/discoveryRepository');
-  assert.equal(computeOpenNow({ monday: '09:00-17:00' }, new Date(2026, 8, 14, 12, 0)), true);
+  const derived = normalizeDiscoveryLocation({ id: 'location-1', operatingHours: { monday: '09:00-17:00' } });
+  const explicitClosed = normalizeDiscoveryLocation({ id: 'location-2', isOpenNow: false, operatingHours: { monday: '09:00-17:00' } });
+  const explicitOpen = normalizeDiscoveryLocation({ id: 'location-3', isOpenNow: true, operatingHours: { monday: '00:00-01:00' } });
+  assert.equal(derived.isOpenNow, true);
+  assert.equal(explicitClosed.isOpenNow, false);
+  assert.equal(explicitOpen.isOpenNow, true);
 });
 
 test('Phase 3G Remediation: geographic UI gives opt-in guidance instead of claiming it is requesting location', () => {
