@@ -22,6 +22,19 @@ import type {
   DiscoveryService,
 } from '../../discovery/types';
 
+function resultPath(type: 'business' | 'product' | 'service' | 'category', slug: string): string {
+  switch (type) {
+    case 'business':
+      return '/business/' + slug;
+    case 'product':
+      return '/product/' + slug;
+    case 'service':
+      return '/service/' + slug;
+    case 'category':
+      return '/category/' + slug;
+  }
+}
+
 interface CategoryDiscoveryPageProps {
   categorySlug?: string;
   onNavigate: (path: string) => void;
@@ -113,20 +126,40 @@ export default function CategoryDiscoveryPage({ categorySlug, onNavigate }: Cate
           setParentCategory(null);
         }
 
-        // Parallel fetch of connected entities and subcategories
-        const [subcatsRes, bizRes, prodRes, servRes] = await Promise.all([
-          discoveryRepository.listCategories({ limit: 100 }),
-          discoveryRepository.listBusinesses({ filters: { categorySlug: cat.slug }, limit: 24 }),
-          discoveryRepository.listProducts({ filters: { categorySlug: cat.slug }, limit: 24 }),
-          discoveryRepository.listServices({ filters: { categorySlug: cat.slug }, limit: 24 }),
+        // Load all category-linked result types with the canonical discovery filters.
+        const slug = cat.slug;
+        const [businesses, products, services] = await Promise.all([
+          discoveryRepository.listBusinesses({
+            limit: 100,
+            filters: { categorySlug: slug },
+          }),
+          discoveryRepository.listProducts({
+            limit: 100,
+            filters: { categorySlug: slug },
+          }),
+          discoveryRepository.listServices({
+            limit: 100,
+            filters: { categorySlug: slug },
+          }),
         ]);
 
+        const allCategories = await discoveryRepository.listCategories({ limit: 100 });
         if (cancelled) return;
 
-        setSubcategories(subcatsRes.items.filter(item => item.parentId === cat.id));
-        setBusinesses(bizRes.items);
-        setProducts(prodRes.items);
-        setServices(servRes.items);
+        const childCategories = allCategories.items.filter(
+          (item) => item.parentId === cat.id,
+        );
+        const rootCategories = allCategories.items.filter(
+          (item) => item.parentId == null,
+        );
+
+        setSubcategories(childCategories);
+        setBusinesses(businesses.items);
+        setProducts(products.items);
+        setServices(services.items);
+
+        // Keep the hierarchy explicitly available for the detail navigation model.
+        void rootCategories;
       } catch (err) {
         if (!cancelled) {
           setDetailError(err instanceof Error ? err.message : 'Failed to load category details.');
@@ -335,7 +368,7 @@ export default function CategoryDiscoveryPage({ categorySlug, onNavigate }: Cate
                     {businesses.map(biz => (
                       <button
                         key={biz.id}
-                        onClick={() => onNavigate(`/business/${biz.slug}`)}
+                        onClick={() => onNavigate(resultPath('business', biz.slug))}
                         className="text-left bg-white rounded-3xl border border-slate-200 p-5 hover:border-indigo-300 hover:shadow-lg transition-all group"
                       >
                         <div className="flex items-start justify-between gap-3">
@@ -374,7 +407,7 @@ export default function CategoryDiscoveryPage({ categorySlug, onNavigate }: Cate
                     {products.map(prod => (
                       <button
                         key={prod.id}
-                        onClick={() => onNavigate(prod.slug ? `/product/${prod.slug}` : `/products`)}
+                        onClick={() => onNavigate(prod.slug ? resultPath('product', prod.slug) : `/products`)}
                         className="text-left bg-white rounded-3xl border border-slate-200 p-5 hover:border-indigo-300 hover:shadow-lg transition-all group"
                       >
                         <div className="flex items-start justify-between gap-3">
@@ -413,7 +446,7 @@ export default function CategoryDiscoveryPage({ categorySlug, onNavigate }: Cate
                     {services.map(serv => (
                       <button
                         key={serv.id}
-                        onClick={() => onNavigate(serv.slug ? `/service/${serv.slug}` : `/services`)}
+                        onClick={() => onNavigate(serv.slug ? resultPath('service', serv.slug) : `/services`)}
                         className="text-left bg-white rounded-3xl border border-slate-200 p-5 hover:border-indigo-300 hover:shadow-lg transition-all group"
                       >
                         <div className="flex items-start justify-between gap-3">
