@@ -33,8 +33,6 @@ export interface RouteAuthContext {
   activeStaff: StaffMember | null;
   tenantLookup: (tenantIdOrSlug: string) => TenantContextRecord | null;
   isStaffMemberOfTenant: (staffId: string, tenantId: string) => boolean;
-
-  // Phase 2 Canonical Identity Context additions
   platformUser?: User | null;
   platformIdentity?: PlatformIdentity | null;
   tenantMemberships?: TenantMembership[];
@@ -64,9 +62,6 @@ export interface RouteGuardDecision {
   requiredPermission?: string;
 }
 
-/**
- * Evaluates route guard against the resolved route and authorization context.
- */
 export function evaluateCanonicalRouteGuard(
   routeMatch: CanonicalRouteMatch,
   authContext: RouteAuthContext
@@ -74,7 +69,6 @@ export function evaluateCanonicalRouteGuard(
   const { definition, params, pathname } = routeMatch;
   const { domain, auth, requiredCapability, requiredPermission } = definition;
 
-  // 0. FAIL CLOSED ON PLATFORM USER SUSPENSION (Invariant B)
   if (authContext.platformUser?.status === 'suspended') {
     return {
       type: 'PERMISSION_DENIED',
@@ -83,231 +77,104 @@ export function evaluateCanonicalRouteGuard(
     };
   }
 
-  // 1. PUBLIC DISCOVERY & STOREFRONT (Open access by default)
   if (auth === 'NONE') {
-    // If storefront requires specific capability check
     if (domain === 'STOREFRONT' && params.tenantSlug) {
       const tenant = authContext.tenantLookup(params.tenantSlug);
       if (tenant) {
         if (tenant.status === 'suspended') {
-          return {
-            type: 'TENANT_SUSPENDED',
-            allowed: false,
-            message: `This store is currently unavailable due to an active administrative suspension.`,
-            tenant,
-          };
+          return { type: 'TENANT_SUSPENDED', allowed: false, message: 'This store is currently unavailable due to an active administrative suspension.', tenant };
         }
         if (requiredCapability && !tenant.capabilities.includes(requiredCapability)) {
-          return {
-            type: 'CAPABILITY_DISABLED',
-            allowed: false,
-            message: `The storefront capability is not currently activated for this business.`,
-            tenant,
-            requiredCapability,
-          };
+          return { type: 'CAPABILITY_DISABLED', allowed: false, message: 'The storefront capability is not currently activated for this business.', tenant, requiredCapability };
         }
       }
     }
-
     return { type: 'ALLOW', allowed: true };
   }
 
-  // 2. CUSTOMER AUTHENTICATION REQUIRED (/account/*)
   if (auth === 'CUSTOMER') {
     if (!authContext.activeCustomer && !authContext.platformUser) {
-      return {
-        type: 'REDIRECT_LOGIN',
-        allowed: false,
-        message: 'Please sign in to access your customer account.',
-        redirectUrl: `/login?returnUrl=${encodeURIComponent(pathname)}`,
-      };
+      return { type: 'REDIRECT_LOGIN', allowed: false, message: 'Please sign in to access your customer account.', redirectUrl: `/login?returnUrl=${encodeURIComponent(pathname)}` };
     }
     if (authContext.platformUser && authContext.platformUser.status !== 'active') {
-      return {
-        type: 'PERMISSION_DENIED',
-        allowed: false,
-        message: 'Your account status is not active.',
-      };
+      return { type: 'PERMISSION_DENIED', allowed: false, message: 'Your account status is not active.' };
     }
     return { type: 'ALLOW', allowed: true };
   }
 
-  // 3. SUPER ADMIN PLATFORM REQUIRED (/superadmin/*)
   if (domain === 'SUPER_ADMIN' || auth === 'PLATFORM_ADMIN') {
-    const isPlatformAdmin = 
-      authContext.platformIdentity?.isSuperAdmin === true ||
-      authContext.platformIdentity?.isPlatformAdmin === true;
-
-    if (!authContext.activeStaff && !authContext.platformUser) {
-      return {
-        type: 'REDIRECT_LOGIN',
-        allowed: false,
-        message: 'Super Admin authentication required to access the Platform Control Plane.',
-        redirectUrl: `/login?returnUrl=${encodeURIComponent(pathname)}`,
-      };
+    const isPlatformAdmin = authContext.platformIdentity?.isSuperAdmin === true || authContext.platformIdentity?.isPlatformAdmin === true;
+    if (!authContext.platformUser) {
+      return { type: 'REDIRECT_LOGIN', allowed: false, message: 'Super Admin authentication required to access the Platform Control Plane.', redirectUrl: `/login?returnUrl=${encodeURIComponent(pathname)}` };
     }
-
     if (!isPlatformAdmin) {
-      return {
-        type: 'SUPER_ADMIN_REQUIRED',
-        allowed: false,
-        message: 'Access denied: The Super Admin Platform Control Plane is restricted to platform administrators.',
-        redirectUrl: '/tenant/nexus-retail/dashboard',
-      };
+      return { type: 'SUPER_ADMIN_REQUIRED', allowed: false, message: 'Access denied: The Super Admin Platform Control Plane is restricted to platform administrators.', redirectUrl: '/login' };
     }
-
     return { type: 'ALLOW', allowed: true };
   }
 
-  // 4. BUSINESS OWNER ONBOARDING (/business/:businessId/*)
   if (auth === 'BUSINESS_OWNER') {
-    // Hard Rule: A customer or regular staff identity ALONE must NOT satisfy BUSINESS_OWNER authorization!
-    // Requires explicit business owner relationship or verified owner staff profile.
-    const isBizOwner = 
-      authContext.isBusinessOwner?.(params.businessId) ||
-      authContext.businessRelationships?.some(r => 
-        (!params.businessId || r.businessId === params.businessId) && 
-        r.relationshipType === 'owner' && 
-        r.status === 'active'
-      ) ||
-      authContext.activeStaff?.isOwner === true ||
-      (authContext.activeStaff as any)?.role === 'Owner';
-
+    const isBizOwner = authContext.isBusinessOwner?.(params.businessId) === true || !!authContext.businessRelationships?.some(r =>
+      (!params.businessId || r.businessId === params.businessId) && r.relationshipType === 'owner' && r.status === 'active'
+    );
     if (!isBizOwner) {
-      return {
-        type: 'REDIRECT_LOGIN',
-        allowed: false,
-        message: 'Business Owner authentication is required to access business setup and controls.',
-        redirectUrl: `/login?returnUrl=${encodeURIComponent(pathname)}`,
-      };
+      return { type: 'REDIRECT_LOGIN', allowed: false, message: 'Business Owner authentication is required to access business setup and controls.', redirectUrl: `/login?returnUrl=${encodeURIComponent(pathname)}` };
     }
     return { type: 'ALLOW', allowed: true };
   }
 
-  // 5. TENANT OPERATIONAL ROUTES (/tenant/:tenantId/*)
   if (domain === 'TENANT_OPERATIONS' || auth === 'TENANT_STAFF') {
-    // A. Authenticate user
-    if (!authContext.activeStaff && !authContext.platformUser) {
-      return {
-        type: 'REDIRECT_LOGIN',
-        allowed: false,
-        message: 'Staff authentication is required to access the tenant operational workspace.',
-        redirectUrl: `/login?returnUrl=${encodeURIComponent(pathname)}`,
-      };
+    if (!authContext.platformUser) {
+      return { type: 'REDIRECT_LOGIN', allowed: false, message: 'Staff authentication is required to access the tenant operational workspace.', redirectUrl: `/login?returnUrl=${encodeURIComponent(pathname)}` };
+    }
+    if (authContext.platformUser.status !== 'active' || authContext.activeStaff?.status?.toLowerCase() === 'suspended') {
+      return { type: 'PERMISSION_DENIED', allowed: false, message: 'Your account status is not active.' };
     }
 
-    // Check platform user / staff status
-    if ((authContext.platformUser && authContext.platformUser.status !== 'active') || authContext.activeStaff?.status?.toLowerCase() === 'suspended') {
-      return {
-        type: 'PERMISSION_DENIED',
-        allowed: false,
-        message: 'Your account status is not active.',
-      };
+    if (!params.tenantId) {
+      return { type: 'TENANT_NOT_FOUND', allowed: false, message: 'A canonical tenant ID is required for tenant operational routes.' };
     }
-
-    // B. Resolve tenant from URL
-    const targetTenantId = params.tenantId || 'nexus-retail';
+    const targetTenantId = params.tenantId;
     const tenant = authContext.tenantLookup(targetTenantId);
-
     if (!tenant) {
-      return {
-        type: 'TENANT_NOT_FOUND',
-        allowed: false,
-        message: `Tenant "${targetTenantId}" does not exist on the platform.`,
-      };
+      return { type: 'TENANT_NOT_FOUND', allowed: false, message: `Tenant "${targetTenantId}" does not exist on the platform.` };
     }
 
-    // C. Verify tenant membership authoritatively
     const isSuperAdmin = authContext.platformIdentity?.isSuperAdmin === true;
-
-    // Authoritative TenantMembership check
-    const hasAuthoritativeMembership = !!(authContext.tenantMemberships && authContext.tenantMemberships.some(m => 
+    const hasAuthoritativeMembership = !!authContext.tenantMemberships?.some(m =>
       (m.tenantId === tenant.id || m.tenantId === tenant.slug || m.tenantId === `tenant-${tenant.id}`) && m.status === 'active'
-    ));
-
-    // Legacy fallback ONLY when tenantMemberships array property is omitted from route context
-    const hasLegacyMembership = authContext.tenantMemberships === undefined && authContext.activeStaff ? (
-      authContext.isStaffMemberOfTenant(authContext.activeStaff.id, tenant.id) ||
-      authContext.isStaffMemberOfTenant(authContext.activeStaff.id, tenant.slug)
-    ) : false;
-
+    );
+    const hasLegacyMembership = authContext.tenantMemberships === undefined && authContext.activeStaff
+      ? (authContext.isStaffMemberOfTenant(authContext.activeStaff.id, tenant.id) || authContext.isStaffMemberOfTenant(authContext.activeStaff.id, tenant.slug))
+      : false;
     const isMember = isSuperAdmin || hasAuthoritativeMembership || hasLegacyMembership;
 
     if (!isMember) {
-      return {
-        type: 'TENANT_MEMBERSHIP_REQUIRED',
-        allowed: false,
-        message: `You do not have active staff membership in tenant "${tenant.name}".`,
-        tenant,
-      };
+      return { type: 'TENANT_MEMBERSHIP_REQUIRED', allowed: false, message: `You do not have active staff membership in tenant "${tenant.name}".`, tenant };
     }
-
-    // D. Verify tenant operational status
     if (tenant.status === 'suspended') {
-      return {
-        type: 'TENANT_SUSPENDED',
-        allowed: false,
-        message: `Tenant "${tenant.name}" has been suspended. Operational capabilities are paused.`,
-        tenant,
-      };
+      return { type: 'TENANT_SUSPENDED', allowed: false, message: `Tenant "${tenant.name}" has been suspended. Operational capabilities are paused.`, tenant };
     }
-
     if (tenant.status === 'pending') {
-      return {
-        type: 'TENANT_PENDING',
-        allowed: false,
-        message: `Tenant "${tenant.name}" registration is pending administrative review.`,
-        tenant,
-      };
+      return { type: 'TENANT_PENDING', allowed: false, message: `Tenant "${tenant.name}" registration is pending administrative review.`, tenant };
     }
-
-    if (tenant.status === 'archived') {
-      // Archived allows read-only for settings/reports but restricts mutations
-      if (definition.id.includes('pos') || definition.id.includes('sales')) {
-        return {
-          type: 'TENANT_ARCHIVED',
-          allowed: false,
-          message: `Tenant "${tenant.name}" is archived. Commerce and POS transactions are disabled.`,
-          tenant,
-        };
-      }
+    if (tenant.status === 'archived' && (definition.id.includes('pos') || definition.id.includes('sales'))) {
+      return { type: 'TENANT_ARCHIVED', allowed: false, message: `Tenant "${tenant.name}" is archived. Commerce and POS transactions are disabled.`, tenant };
     }
-
-    // E. Verify required capability
     if (requiredCapability && !tenant.capabilities.includes(requiredCapability)) {
-      return {
-        type: 'CAPABILITY_DISABLED',
-        allowed: false,
-        message: `Capability "${requiredCapability}" is not activated for tenant "${tenant.name}".`,
-        tenant,
-        requiredCapability,
-      };
+      return { type: 'CAPABILITY_DISABLED', allowed: false, message: `Capability "${requiredCapability}" is not activated for tenant "${tenant.name}".`, tenant, requiredCapability };
     }
-
-    // F. Verify required RBAC permission
-    if (requiredPermission && authContext.activeStaff.role !== 'Super Admin') {
+    if (requiredPermission && !isSuperAdmin) {
+      if (!authContext.activeStaff) {
+        return { type: 'PERMISSION_DENIED', allowed: false, message: 'An active staff authorization context is required for this tenant permission.' , requiredPermission, tenant };
+      }
       const staffPerms = getEffectivePermissions(authContext.activeStaff);
-      const hasPerm = staffPerms.includes(requiredPermission as any);
-
-      if (!hasPerm) {
-        return {
-          type: 'PERMISSION_DENIED',
-          allowed: false,
-          message: `Access denied: Required permission "${requiredPermission}" is missing from your role.`,
-          requiredPermission,
-          tenant,
-        };
+      if (!staffPerms.includes(requiredPermission as any)) {
+        return { type: 'PERMISSION_DENIED', allowed: false, message: `Access denied: Required permission "${requiredPermission}" is missing from your role.`, requiredPermission, tenant };
       }
     }
-
-    // Passed all 6 checks!
-    return {
-      type: 'ALLOW',
-      allowed: true,
-      tenant,
-    };
+    return { type: 'ALLOW', allowed: true, tenant };
   }
 
-  // Default fallback
   return { type: 'ALLOW', allowed: true };
 }
