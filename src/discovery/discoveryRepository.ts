@@ -1,6 +1,8 @@
 import {
   collection,
   collectionGroup,
+  doc,
+  getDoc,
   getDocs,
   limit as firestoreLimit,
   query,
@@ -100,15 +102,22 @@ function normalizeBusiness(raw: Business & Record<string, unknown>): DiscoveryBu
   };
 }
 
-function normalizeProduct(raw: Product & Record<string, unknown>, id: string): DiscoveryProduct | null {
+function normalizeProduct(raw: Product & Record<string, unknown>, id: string, tenantId?: string): DiscoveryProduct | null {
   const ecommerce = raw.ecommerce;
   const published = ecommerce?.published === true || ecommerce?.storefrontStatus === 'Published';
   const status = raw.status ?? 'Active';
   if (!published || status !== 'Active') return null;
+  // An explicitly disabled website target overrides a generic published flag.
+  if (ecommerce?.publishTargets?.website === false) return null;
 
+  const variantAvailability = Array.isArray(raw.variants)
+    ? raw.variants.some(variant => Number(variant.available ?? variant.onHand ?? variant.stock ?? 0) > 0 || variant.allowBackorder === true)
+    : false;
   const available = raw.available ?? raw.onHand ?? raw.stock ?? 0;
   return {
     id,
+    tenantId: tenantId || (raw as Record<string, unknown>).tenantId as string | undefined,
+    businessId: (raw as Record<string, unknown>).businessId as string | undefined,
     name: raw.name,
     slug: ecommerce?.slug,
     description: raw.description,
@@ -117,11 +126,11 @@ function normalizeProduct(raw: Product & Record<string, unknown>, id: string): D
     brand: raw.brand,
     price: Number(raw.price || 0),
     originalPrice: raw.originalPrice,
-    currency: undefined,
+    currency: (raw as Record<string, unknown>).currency as string | undefined,
     imageUrl: raw.imageUrl,
     rating: raw.rating,
     reviewCount: raw.reviewCount,
-    available: Number(available) > 0 || raw.allowBackorder === true,
+    available: Number(available) > 0 || variantAvailability || raw.allowBackorder === true,
     published,
     featured: raw.isFeatured === true || ecommerce?.featured === true,
   };
@@ -268,11 +277,44 @@ export class FirestoreDiscoveryRepository implements DiscoveryRepository {
     return null;
   }
 
+  async getProductById(id: string): Promise<DiscoveryProduct | null> {
+    const clean = id.trim();
+    if (!clean) return null;
+    const topLevel = await getDoc(doc(db, 'products', clean));
+    if (topLevel.exists()) {
+      return normalizeProduct({ id: topLevel.id, ...topLevel.data() } as Product & Record<string, unknown>, topLevel.id);
+    }
+    const snapshot = await getDocs(query(collectionGroup(db, 'products'), firestoreLimit(100)));
+    for (const docSnap of snapshot.docs) {
+      if (docSnap.id !== clean) continue;
+      const tenantId = docSnap.ref.parent.parent?.id;
+      const item = normalizeProduct({ id: docSnap.id, ...docSnap.data() } as Product & Record<string, unknown>, docSnap.id, tenantId);
+      if (item) return item;
+    }
+    return null;
+  }
+
+  async getProductBySlug(slug: string): Promise<DiscoveryProduct | null> {
+    const normalizedSlug = slug.trim().toLowerCase();
+    if (!normalizedSlug) return null;
+    const snapshot = await getDocs(query(
+      collectionGroup(db, 'products'),
+      where('ecommerce.slug', '==', normalizedSlug),
+      firestoreLimit(3),
+    ));
+    for (const docSnap of snapshot.docs) {
+      const tenantId = docSnap.ref.parent.parent?.id;
+      const item = normalizeProduct({ id: docSnap.id, ...docSnap.data() } as Product & Record<string, unknown>, docSnap.id, tenantId);
+      if (item) return item;
+    }
+    return null;
+  }
+
   async listProducts(queryOptions: DiscoveryQuery = {}): Promise<DiscoverySearchResult<DiscoveryProduct>> {
     const take = boundedLimit(queryOptions.limit);
     const snapshot = await getDocs(query(collectionGroup(db, 'products'), ...constraintsForPublicCollection(take)));
     const items = snapshot.docs
-      .map(docSnap => normalizeProduct({ id: docSnap.id, ...docSnap.data() } as Product & Record<string, unknown>, docSnap.id))
+      .map(docSnap => normalizeProduct({ id: docSnap.id, ...docSnap.data() } as Product & Record<string, unknown>, docSnap.id, docSnap.ref.parent.parent?.id))
       .filter((item): item is DiscoveryProduct => item !== null)
       .filter(item => matchesProduct(item, queryOptions.filters));
     return paginate(items, queryOptions);
