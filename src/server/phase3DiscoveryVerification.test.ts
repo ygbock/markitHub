@@ -490,3 +490,10 @@ test('Phase 3H Invariant 68: category result navigation remains entity-owned and
   assert.match(source, /'\/service\/'/);
   assert.doesNotMatch(source, /\/tenant\//);
 });
+
+test('Phase 3H Invariant 69: category slug lookup has an explicit Firestore composite index', () => {
+  const indexes = readFileSync(resolve(process.cwd(), 'firestore.indexes.json'), 'utf8');
+  assert.match(indexes, /"collectionGroup": "categories"/);
+  assert.match(indexes, /"fieldPath": "status"/);
+  assert.match(indexes, /"fieldPath": "slug"/);
+});
