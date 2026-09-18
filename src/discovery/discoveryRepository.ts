@@ -105,7 +105,7 @@ export function computeOpenNow(operatingHours: unknown, now = new Date()): boole
     : minutes >= range.open || minutes < range.close;
 }
 
-function normalizeLocation(raw: Partial<BusinessLocation> & { [key: string]: any }): DiscoveryLocation {
+export function normalizeDiscoveryLocation(raw: Partial<BusinessLocation> & { [key: string]: any }): DiscoveryLocation {
   return {
     id: raw.id,
     businessId: raw.businessId,
@@ -131,7 +131,7 @@ function normalizeBusiness(raw: Business & Record<string, unknown>): DiscoveryBu
   if (!listing || listing.isPublished !== true || raw.status !== 'active') return null;
 
   const locations = Array.isArray(raw.locations)
-    ? raw.locations.filter((location): location is BusinessLocation => !!location && location.isActive !== false).map(normalizeLocation)
+    ? raw.locations.filter((location): location is BusinessLocation => !!location && location.isActive !== false).map(normalizeDiscoveryLocation)
     : [];
 
   return {
