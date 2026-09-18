@@ -31,6 +31,10 @@ export interface DiscoveryBusiness {
   tags: string[];
   logoUrl?: string;
   bannerUrl?: string;
+  email?: string;
+  phone?: string;
+  badges: string[];
+  photos: string[];
   ratingAverage: number;
   reviewCount: number;
   isFeatured: boolean;
