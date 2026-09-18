@@ -4,6 +4,7 @@ import App from './App.tsx';
 import { CurrencyProvider } from './context/CurrencyContext';
 import { ThemeProvider } from './design-system/ThemeContext';
 import { ToastProvider } from './components/ui/ToastContext';
+import { AuthProvider } from './context/AuthContext';
 import './index.css';
 
 createRoot(document.getElementById('root')!).render(
@@ -11,7 +12,9 @@ createRoot(document.getElementById('root')!).render(
     <ThemeProvider>
       <ToastProvider>
         <CurrencyProvider>
-          <App />
+          <AuthProvider>
+            <App />
+          </AuthProvider>
         </CurrencyProvider>
       </ToastProvider>
     </ThemeProvider>

@@ -80,6 +80,7 @@ test('Ownership Test 2: Tenant A admin cannot become owner', () => {
       uid: 'uid-admin-a',
       tenantId: 'tenant-a',
       role: 'Admin',
+      roleId: 'Admin',
       status: 'active',
     },
   });

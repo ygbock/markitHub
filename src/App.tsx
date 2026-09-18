@@ -41,6 +41,7 @@ import CurrencySelectorModal from './components/CurrencySelectorModal';
 import AdminNotificationCenter from './components/AdminNotificationCenter';
 import EnhancedSidebar, { AdminSubTab } from './components/EnhancedSidebar';
 import { useCurrency } from './context/CurrencyContext';
+import { useAuth } from './context/AuthContext';
 import { decrementProductStock } from './utils/inventoryUtils';
 import { getOrderDeliveryTelemetry, flagOrderAsDelivered, buildAdminRefundNotification } from './utils/orderManagementUtils';
 
@@ -119,17 +120,41 @@ export default function App() {
     return tenantRegistry[tenantIdOrSlug] || null;
   }, [tenantRegistry]);
 
+  // Consume Phase 2 Authoritative AuthContext
+  let authContextState: ReturnType<typeof useAuth> | null = null;
+  try {
+    authContextState = useAuth();
+  } catch {
+    authContextState = null;
+  }
+
   const isStaffMemberOfTenant = useCallback((staffId: string, tenantId: string): boolean => {
     if (activeStaff.role === 'Super Admin') return true;
+    if (authContextState?.isTenantMember(tenantId)) return true;
     return tenantId === 'nexus-retail';
-  }, [activeStaff]);
+  }, [activeStaff, authContextState]);
 
   const authContext = useMemo(() => ({
     activeCustomer,
     activeStaff,
     tenantLookup,
     isStaffMemberOfTenant,
-  }), [activeCustomer, activeStaff, tenantLookup, isStaffMemberOfTenant]);
+    platformUser: authContextState?.user || null,
+    platformIdentity: authContextState?.platformIdentity || null,
+    tenantMemberships: authContextState?.tenantMemberships || [],
+    businessRelationships: authContextState?.businessRelationships || [],
+    isBusinessOwner: authContextState?.isBusinessOwner,
+  }), [
+    activeCustomer, 
+    activeStaff, 
+    tenantLookup, 
+    isStaffMemberOfTenant,
+    authContextState?.user,
+    authContextState?.platformIdentity,
+    authContextState?.tenantMemberships,
+    authContextState?.businessRelationships,
+    authContextState?.isBusinessOwner,
+  ]);
 
   const guardDecision = useMemo(() => {
     return evaluateCanonicalRouteGuard(currentRoute, authContext);
@@ -1530,11 +1555,13 @@ export default function App() {
         />
       )}
 
-      {/* 2f. Identity & Authentication Domain (/login, /register) */}
+      {/* 2f. Identity & Authentication Domain (/login, /register, /forgot-password, /reset-password, /verify-email) */}
       {activeDomain === 'IDENTITY_AUTH' && (
         <LoginPage
           staffMembers={staffMembers}
           customers={customers}
+          currentPath={currentRoute.pathname}
+          onNavigate={navigate}
           onStaffLogin={(staff) => {
             setActiveStaff(staff);
             createAuditRecord('STAFF_LOGIN', 'USERS', `Staff member ${staff.name} authenticated via login portal.`);

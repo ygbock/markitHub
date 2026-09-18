@@ -96,6 +96,48 @@ export interface RoleConfig {
 // MIKITHUB CANONICAL DATA ENTITIES (M0 Foundation)
 // ============================================================================
 
+/** Phase 2: Authoritative Platform User Identity stored under users/{uid} */
+export interface User {
+  uid: string;
+  email?: string;
+  displayName?: string;
+  photoURL?: string;
+  emailVerified: boolean;
+  status: 'active' | 'suspended';
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+/** Phase 2: Authoritative Tenant Membership */
+export interface TenantMembership {
+  uid: string;
+  tenantId: string;
+  role: string;
+  roleId?: string;
+  status: 'active' | 'suspended' | 'deactivated' | 'invited';
+  createdAt?: string;
+  updatedAt?: string;
+  email?: string | null;
+  name?: string;
+}
+
+/** Phase 2: Business Ownership & Relationship */
+export interface BusinessRelationship {
+  uid: string;
+  businessId: string;
+  relationshipType: 'owner' | 'manager' | 'staff';
+  status: 'active' | 'suspended';
+  createdAt?: string;
+}
+
+/** Phase 2: Super Admin & Platform Operator Identity */
+export interface PlatformIdentity {
+  uid: string;
+  role: 'Super Admin' | 'Platform Operator' | 'None';
+  isPlatformAdmin: boolean;
+  isSuperAdmin: boolean;
+}
+
 export type BusinessVerificationStatus = 'unverified' | 'pending' | 'verified' | 'rejected';
 export type BusinessLifecycleStatus = 'draft' | 'pending_verification' | 'active' | 'suspended' | 'archived';
 
@@ -2113,7 +2155,7 @@ export interface TenantRecord {
   [key: string]: unknown;
 }
 
-export type MembershipStatus = 'active' | 'suspended' | 'deactivated';
+export type MembershipStatus = 'active' | 'suspended' | 'deactivated' | 'invited';
 
 export interface TenantMembership {
   uid: string;

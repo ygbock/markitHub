@@ -3,7 +3,7 @@ import {
   Search, MapPin, Phone, MessageSquare, ExternalLink, 
   ShieldCheck, Star, Clock, Navigation, Sparkles, 
   Filter, Grid, Map, Layers, Store, ArrowRight, ArrowLeft,
-  Wrench, CheckCircle2, ChevronRight, User, ShoppingBag
+  Wrench, CheckCircle2, ChevronRight, ChevronDown, User, ShoppingBag
 } from 'lucide-react';
 import { DISCOVERY_BUSINESSES, DISCOVERY_CATEGORIES, CanonicalBusinessListing } from '../../data/discoveryData';
 import { Product } from '../../types';
@@ -25,9 +25,14 @@ export default function PublicDiscoveryShell({
 }: PublicDiscoveryShellProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
+  const [categoryDropdownOpen, setCategoryDropdownOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<string>(initialTab);
   const [viewMode, setViewMode] = useState<'list' | 'map'>('list');
   const [selectedListingForModal, setSelectedListingForModal] = useState<CanonicalBusinessListing | null>(null);
+
+  const currentCategoryObj = useMemo(() => {
+    return DISCOVERY_CATEGORIES.find(c => c.id === selectedCategory) || DISCOVERY_CATEGORIES[0];
+  }, [selectedCategory]);
 
   // If a businessSlug is present in URL, resolve that specific business profile
   const activeBusinessProfile = useMemo(() => {
@@ -339,59 +344,6 @@ export default function PublicDiscoveryShell({
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col justify-between" id="public-discovery-root">
       
-      {/* Top Navbar */}
-      <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-slate-200 px-4 sm:px-8 py-3.5 flex items-center justify-between shadow-xs">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 bg-gradient-to-br from-indigo-600 to-indigo-800 rounded-xl text-white font-black text-base flex items-center justify-center shadow-md shadow-indigo-600/20">
-            M
-          </div>
-          <div>
-            <div className="text-sm font-black tracking-tight text-slate-900 flex items-center gap-1.5">
-              <span>MikitHub</span>
-              <span className="text-[10px] font-mono px-2 py-0.2 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200">
-                Discovery
-              </span>
-            </div>
-            <p className="text-[10px] text-slate-500">Local Business, Service & Commerce Hub</p>
-          </div>
-        </div>
-
-        {/* Global Navigation Links */}
-        <nav className="hidden md:flex items-center gap-6 text-xs font-bold text-slate-600">
-          <button onClick={() => { setActiveTab('discover'); onNavigate('/'); }} className={`hover:text-indigo-600 cursor-pointer ${activeTab === 'discover' ? 'text-indigo-600' : ''}`}>
-            Discover
-          </button>
-          <button onClick={() => { setActiveTab('businesses'); onNavigate('/businesses'); }} className={`hover:text-indigo-600 cursor-pointer ${activeTab === 'businesses' ? 'text-indigo-600' : ''}`}>
-            Businesses
-          </button>
-          <button onClick={() => { setActiveTab('services'); onNavigate('/services'); }} className={`hover:text-indigo-600 cursor-pointer ${activeTab === 'services' ? 'text-indigo-600' : ''}`}>
-            Services
-          </button>
-          <button onClick={() => { setActiveTab('nearby'); onNavigate('/nearby'); }} className={`hover:text-indigo-600 cursor-pointer ${activeTab === 'nearby' ? 'text-indigo-600' : ''}`}>
-            Nearby
-          </button>
-        </nav>
-
-        {/* Action Controls */}
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => onNavigate('/business/onboarding')}
-            className="hidden sm:flex items-center gap-1 px-3 py-1.5 rounded-xl border border-indigo-200 bg-indigo-50/50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold transition-all cursor-pointer"
-          >
-            <Store className="w-3.5 h-3.5" />
-            <span>List Business</span>
-          </button>
-
-          <button
-            onClick={onOpenLogin}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition-all cursor-pointer shadow-xs"
-          >
-            <User className="w-3.5 h-3.5 text-indigo-400" />
-            <span>Sign In</span>
-          </button>
-        </div>
-      </header>
-
       {/* Hero Section: "What are you looking for?" */}
       <section className="bg-gradient-to-b from-slate-900 via-indigo-950 to-slate-900 text-white py-14 px-4 sm:px-8 relative overflow-hidden">
         {/* Background glow accents */}
@@ -429,7 +381,7 @@ export default function PublicDiscoveryShell({
               {searchTerm && (
                 <button
                   onClick={() => setSearchTerm('')}
-                  className="px-2 text-xs font-bold text-slate-400 hover:text-slate-600"
+                  className="px-2 text-xs font-bold text-slate-400 hover:text-slate-600 cursor-pointer"
                 >
                   Clear
                 </button>
@@ -462,61 +414,121 @@ export default function PublicDiscoveryShell({
       {/* Main Discovery Body */}
       <main className="max-w-6xl mx-auto w-full py-8 px-4 sm:px-8 flex-1 space-y-8">
         
-        {/* Category Filter Carousel / Strip */}
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-bold text-slate-900 uppercase tracking-wider">Categories</h2>
-            <span className="text-xs text-slate-500">{filteredBusinesses.length} businesses matching</span>
-          </div>
-
-          <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-none">
-            {DISCOVERY_CATEGORIES.map(cat => {
-              const isSelected = selectedCategory === cat.id;
-              return (
-                <button
-                  key={cat.id}
-                  onClick={() => setSelectedCategory(cat.id)}
-                  className={`px-4 py-2 rounded-xl text-xs font-bold shrink-0 transition-all flex items-center gap-2 cursor-pointer ${
-                    isSelected
-                      ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
-                      : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
-                  }`}
-                >
-                  <span>{cat.name}</span>
-                  <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${
-                    isSelected ? 'bg-indigo-800 text-white' : 'bg-slate-100 text-slate-500'
-                  }`}>
-                    {cat.count}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* View Switcher Tabs: Businesses vs Services vs Map */}
-        <div className="flex items-center justify-between border-b border-slate-200 pb-3">
-          <div className="flex items-center gap-2">
+        {/* View Switcher Tabs & Categories Dropdown Menu */}
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-3">
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Businesses Tab */}
             <button
               onClick={() => setActiveTab('businesses')}
               className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                 activeTab === 'businesses' || activeTab === 'discover'
-                  ? 'bg-slate-900 text-white'
-                  : 'text-slate-600 hover:bg-slate-100'
+                  ? 'bg-slate-900 text-white shadow-xs'
+                  : 'text-slate-600 hover:bg-slate-100 bg-white border border-slate-200'
               }`}
             >
               Businesses ({filteredBusinesses.length})
             </button>
+
+            {/* Services & Skills Tab */}
             <button
               onClick={() => setActiveTab('services')}
               className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                 activeTab === 'services'
-                  ? 'bg-slate-900 text-white'
-                  : 'text-slate-600 hover:bg-slate-100'
+                  ? 'bg-slate-900 text-white shadow-xs'
+                  : 'text-slate-600 hover:bg-slate-100 bg-white border border-slate-200'
               }`}
             >
               Services & Skills ({allServices.length})
             </button>
+
+            {/* Categories Dropdown Menu */}
+            <div className="relative inline-block text-left" id="categories-dropdown-container">
+              <button
+                type="button"
+                onClick={() => setCategoryDropdownOpen(!categoryDropdownOpen)}
+                className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer border ${
+                  selectedCategory !== 'all'
+                    ? 'bg-indigo-50 border-indigo-300 text-indigo-700 shadow-xs'
+                    : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                }`}
+                id="btn-categories-dropdown"
+              >
+                <Filter className="w-3.5 h-3.5 text-indigo-600" />
+                <span>Category: <strong className="font-extrabold">{currentCategoryObj.name}</strong></span>
+                {selectedCategory !== 'all' && (
+                  <span className="bg-indigo-600 text-white text-[10px] px-1.5 py-0.2 rounded-full font-extrabold">
+                    {currentCategoryObj.count}
+                  </span>
+                )}
+                <ChevronDown className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-200 ${categoryDropdownOpen ? 'rotate-180' : ''}`} />
+              </button>
+
+              {categoryDropdownOpen && (
+                <>
+                  <div
+                    className="fixed inset-0 z-40"
+                    onClick={() => setCategoryDropdownOpen(false)}
+                  />
+
+                  <div
+                    className="absolute left-0 mt-2 w-64 bg-white rounded-2xl shadow-xl border border-slate-200 py-2 z-50 animate-in fade-in zoom-in-95 duration-150"
+                    id="menu-categories-dropdown"
+                  >
+                    <div className="px-3.5 py-1.5 text-[10px] font-bold text-slate-400 uppercase tracking-wider border-b border-slate-100 flex items-center justify-between">
+                      <span>Filter by Category</span>
+                      {selectedCategory !== 'all' && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedCategory('all');
+                            setCategoryDropdownOpen(false);
+                          }}
+                          className="text-indigo-600 hover:underline cursor-pointer lowercase text-[10px] font-semibold"
+                        >
+                          Clear filter
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="max-h-64 overflow-y-auto py-1">
+                      {DISCOVERY_CATEGORIES.map((cat) => {
+                        const isSelected = selectedCategory === cat.id;
+                        return (
+                          <button
+                            key={cat.id}
+                            type="button"
+                            onClick={() => {
+                              setSelectedCategory(cat.id);
+                              setCategoryDropdownOpen(false);
+                            }}
+                            className={`w-full px-3.5 py-2 text-left text-xs font-semibold flex items-center justify-between transition-colors cursor-pointer ${
+                              isSelected
+                                ? 'bg-indigo-50 text-indigo-700 font-bold'
+                                : 'text-slate-700 hover:bg-slate-50'
+                            }`}
+                            id={`cat-option-${cat.id}`}
+                          >
+                            <span className="flex items-center gap-2">
+                              {isSelected && <CheckCircle2 className="w-3.5 h-3.5 text-indigo-600 shrink-0" />}
+                              <span>{cat.name}</span>
+                            </span>
+                            <span
+                              className={`text-[10px] px-2 py-0.5 rounded-full font-mono font-bold ${
+                                isSelected
+                                  ? 'bg-indigo-600 text-white'
+                                  : 'bg-slate-100 text-slate-500'
+                              }`}
+                            >
+                              {cat.count}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
           </div>
 
           <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200">

@@ -80,21 +80,6 @@ export const PublicShell: React.FC<PublicShellProps> = ({
               </div>
             </div>
 
-            {/* Global Search Bar */}
-            <form
-              onSubmit={handleSearchSubmit}
-              className="hidden lg:flex flex-1 max-w-md relative items-center"
-            >
-              <Search className="w-4 h-4 text-slate-400 absolute left-3.5 pointer-events-none" />
-              <input
-                type="text"
-                placeholder="Search businesses, products, services..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full h-10 pl-10 pr-4 rounded-full border border-slate-200 dark:border-slate-800 bg-slate-100/70 dark:bg-slate-800/70 text-xs text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:bg-white dark:focus:bg-slate-900 focus:border-indigo-500 focus:outline-none transition-colors"
-              />
-            </form>
-
             {/* Navigation & CTAs */}
             <div className="flex items-center gap-2 sm:gap-3">
               <nav className="hidden md:flex items-center space-x-1">
@@ -167,20 +152,9 @@ export const PublicShell: React.FC<PublicShellProps> = ({
             </div>
           </div>
 
-          {/* Mobile Search & Menu */}
+          {/* Mobile Menu */}
           {mobileMenuOpen && (
             <div className="md:hidden py-4 border-t border-slate-200 dark:border-slate-800 space-y-3">
-              <form onSubmit={handleSearchSubmit} className="relative">
-                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3 pointer-events-none" />
-                <input
-                  type="text"
-                  placeholder="Search businesses, products..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full h-10 pl-9 pr-3 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-100 dark:bg-slate-800 text-xs"
-                />
-              </form>
-
               <div className="flex flex-col space-y-1">
                 {publicNavigation.map((item) => (
                   <button

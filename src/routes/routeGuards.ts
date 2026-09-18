@@ -14,7 +14,7 @@ import {
   TenantCapability, 
   TenantOperationalStatus 
 } from './canonicalRoutes';
-import { StaffMember, Customer } from '../types';
+import { StaffMember, Customer, User, PlatformIdentity, TenantMembership, BusinessRelationship } from '../types';
 import { getEffectivePermissions } from '../utils/permissions';
 
 export interface TenantContextRecord {
@@ -33,6 +33,13 @@ export interface RouteAuthContext {
   activeStaff: StaffMember | null;
   tenantLookup: (tenantIdOrSlug: string) => TenantContextRecord | null;
   isStaffMemberOfTenant: (staffId: string, tenantId: string) => boolean;
+
+  // Phase 2 Canonical Identity Context additions
+  platformUser?: User | null;
+  platformIdentity?: PlatformIdentity | null;
+  tenantMemberships?: TenantMembership[];
+  businessRelationships?: BusinessRelationship[];
+  isBusinessOwner?: (businessId?: string) => boolean;
 }
 
 export type GuardDecisionType = 
@@ -67,6 +74,15 @@ export function evaluateCanonicalRouteGuard(
   const { definition, params, pathname } = routeMatch;
   const { domain, auth, requiredCapability, requiredPermission } = definition;
 
+  // 0. FAIL CLOSED ON PLATFORM USER SUSPENSION (Invariant B)
+  if (authContext.platformUser?.status === 'suspended') {
+    return {
+      type: 'PERMISSION_DENIED',
+      allowed: false,
+      message: 'Your platform user account has been suspended by an administrator.',
+    };
+  }
+
   // 1. PUBLIC DISCOVERY & STOREFRONT (Open access by default)
   if (auth === 'NONE') {
     // If storefront requires specific capability check
@@ -98,7 +114,7 @@ export function evaluateCanonicalRouteGuard(
 
   // 2. CUSTOMER AUTHENTICATION REQUIRED (/account/*)
   if (auth === 'CUSTOMER') {
-    if (!authContext.activeCustomer) {
+    if (!authContext.activeCustomer && !authContext.platformUser) {
       return {
         type: 'REDIRECT_LOGIN',
         allowed: false,
@@ -111,7 +127,13 @@ export function evaluateCanonicalRouteGuard(
 
   // 3. SUPER ADMIN PLATFORM REQUIRED (/superadmin/*)
   if (domain === 'SUPER_ADMIN' || auth === 'PLATFORM_ADMIN') {
-    if (!authContext.activeStaff) {
+    const isPlatformAdmin = 
+      authContext.platformIdentity?.isSuperAdmin ||
+      authContext.platformIdentity?.isPlatformAdmin ||
+      authContext.activeStaff?.role === 'Super Admin' ||
+      (authContext.activeStaff as any)?.isPlatformAdmin === true;
+
+    if (!authContext.activeStaff && !authContext.platformUser) {
       return {
         type: 'REDIRECT_LOGIN',
         allowed: false,
@@ -119,10 +141,6 @@ export function evaluateCanonicalRouteGuard(
         redirectUrl: `/login?returnUrl=${encodeURIComponent(pathname)}`,
       };
     }
-
-    const isPlatformAdmin = 
-      authContext.activeStaff.role === 'Super Admin' ||
-      (authContext.activeStaff as any).isPlatformAdmin === true;
 
     if (!isPlatformAdmin) {
       return {
@@ -138,11 +156,20 @@ export function evaluateCanonicalRouteGuard(
 
   // 4. BUSINESS OWNER ONBOARDING (/business/:businessId/*)
   if (auth === 'BUSINESS_OWNER') {
-    if (!authContext.activeStaff && !authContext.activeCustomer) {
+    // Phase 2 Correction: A customer identity ALONE must NOT satisfy BUSINESS_OWNER authorization!
+    // Must be an active staff member or explicit business owner/relationship
+    const isBizOwner = 
+      authContext.isBusinessOwner?.(params.businessId) ||
+      authContext.activeStaff?.isOwner ||
+      (authContext.activeStaff as any)?.role === 'Owner' ||
+      (authContext.activeStaff as any)?.role === 'Admin' ||
+      !!authContext.activeStaff; // Active staff or owner context
+
+    if (!isBizOwner) {
       return {
         type: 'REDIRECT_LOGIN',
         allowed: false,
-        message: 'Please sign in to access your business listing and setup.',
+        message: 'Business Owner authentication is required to access business setup and controls.',
         redirectUrl: `/login?returnUrl=${encodeURIComponent(pathname)}`,
       };
     }
