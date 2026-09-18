@@ -100,7 +100,7 @@ export default function GeographicDiscoveryPage({ mode, onNavigate }: Geographic
             </button>
           </div>
           {locationError && <div className='mt-4 rounded-xl bg-amber-50 border border-amber-200 p-3 text-sm text-amber-800'>{locationError}</div>}
-          {!origin && !locationError && <div className='mt-4 text-sm text-slate-500'>Requesting your location…</div>}
+          {!origin && !locationError && <div className='mt-4 text-sm text-slate-500'>Use your location to find nearby businesses.</div>}
           {origin && <div className='mt-4 flex items-center gap-2 text-xs text-emerald-700 font-bold'><LocateFixed className='w-4 h-4' /> Location ready · {origin.latitude.toFixed(4)}, {origin.longitude.toFixed(4)}</div>}
         </section>
 
