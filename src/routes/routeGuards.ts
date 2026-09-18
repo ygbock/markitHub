@@ -128,10 +128,8 @@ export function evaluateCanonicalRouteGuard(
   // 3. SUPER ADMIN PLATFORM REQUIRED (/superadmin/*)
   if (domain === 'SUPER_ADMIN' || auth === 'PLATFORM_ADMIN') {
     const isPlatformAdmin = 
-      authContext.platformIdentity?.isSuperAdmin ||
-      authContext.platformIdentity?.isPlatformAdmin ||
-      authContext.activeStaff?.role === 'Super Admin' ||
-      (authContext.activeStaff as any)?.isPlatformAdmin === true;
+      authContext.platformIdentity?.isSuperAdmin === true ||
+      authContext.platformIdentity?.isPlatformAdmin === true;
 
     if (!authContext.activeStaff && !authContext.platformUser) {
       return {
@@ -156,14 +154,17 @@ export function evaluateCanonicalRouteGuard(
 
   // 4. BUSINESS OWNER ONBOARDING (/business/:businessId/*)
   if (auth === 'BUSINESS_OWNER') {
-    // Phase 2 Correction: A customer identity ALONE must NOT satisfy BUSINESS_OWNER authorization!
-    // Must be an active staff member or explicit business owner/relationship
+    // Hard Rule: A customer or regular staff identity ALONE must NOT satisfy BUSINESS_OWNER authorization!
+    // Requires explicit business owner relationship or verified owner staff profile.
     const isBizOwner = 
       authContext.isBusinessOwner?.(params.businessId) ||
-      authContext.activeStaff?.isOwner ||
-      (authContext.activeStaff as any)?.role === 'Owner' ||
-      (authContext.activeStaff as any)?.role === 'Admin' ||
-      !!authContext.activeStaff; // Active staff or owner context
+      authContext.businessRelationships?.some(r => 
+        (!params.businessId || r.businessId === params.businessId) && 
+        r.relationshipType === 'owner' && 
+        r.status === 'active'
+      ) ||
+      authContext.activeStaff?.isOwner === true ||
+      (authContext.activeStaff as any)?.role === 'Owner';
 
     if (!isBizOwner) {
       return {
@@ -179,7 +180,7 @@ export function evaluateCanonicalRouteGuard(
   // 5. TENANT OPERATIONAL ROUTES (/tenant/:tenantId/*)
   if (domain === 'TENANT_OPERATIONS' || auth === 'TENANT_STAFF') {
     // A. Authenticate user
-    if (!authContext.activeStaff) {
+    if (!authContext.activeStaff && !authContext.platformUser) {
       return {
         type: 'REDIRECT_LOGIN',
         allowed: false,
@@ -188,12 +189,12 @@ export function evaluateCanonicalRouteGuard(
       };
     }
 
-    // Check staff account status
-    if (authContext.activeStaff.status?.toLowerCase() === 'suspended') {
+    // Check platform user / staff status
+    if ((authContext.platformUser?.status as string) === 'suspended' || authContext.activeStaff?.status?.toLowerCase() === 'suspended') {
       return {
         type: 'PERMISSION_DENIED',
         allowed: false,
-        message: 'Your staff account has been suspended by an administrator.',
+        message: 'Your account has been suspended by an administrator.',
       };
     }
 
@@ -209,11 +210,15 @@ export function evaluateCanonicalRouteGuard(
       };
     }
 
-    // C. Verify tenant membership
+    // C. Verify tenant membership authoritatively
+    const isSuperAdmin = authContext.platformIdentity?.isSuperAdmin === true;
     const isMember = 
-      authContext.activeStaff.role === 'Super Admin' || // Super Admin has platform-level emergency audit access
-      authContext.isStaffMemberOfTenant(authContext.activeStaff.id, tenant.id) ||
-      authContext.isStaffMemberOfTenant(authContext.activeStaff.id, tenant.slug);
+      isSuperAdmin || // Emergency audit access for Super Admin
+      (authContext.tenantMemberships && authContext.tenantMemberships.some(m => 
+        (m.tenantId === tenant.id || m.tenantId === tenant.slug || m.tenantId === `tenant-${tenant.id}`) && m.status === 'active'
+      )) ||
+      (authContext.activeStaff && authContext.isStaffMemberOfTenant(authContext.activeStaff.id, tenant.id)) ||
+      (authContext.activeStaff && authContext.isStaffMemberOfTenant(authContext.activeStaff.id, tenant.slug));
 
     if (!isMember) {
       return {

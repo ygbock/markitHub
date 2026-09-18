@@ -5,10 +5,11 @@ import {
   createUserWithEmailAndPassword, 
   signOut as firebaseSignOut, 
   sendPasswordResetEmail, 
+  confirmPasswordReset,
   sendEmailVerification,
   User as FirebaseUser 
 } from 'firebase/auth';
-import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, collection, query, where, getDocs } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
 import { User, TenantMembership, BusinessRelationship, PlatformIdentity } from '../types';
 
@@ -30,6 +31,7 @@ export interface MikitAuthContextType {
   signUpWithEmail: (email: string, pass: string, displayName?: string) => Promise<void>;
   signOut: () => Promise<void>;
   sendPasswordReset: (email: string) => Promise<void>;
+  confirmPasswordResetCode: (code: string, newPass: string) => Promise<void>;
   resendEmailVerification: () => Promise<void>;
   reloadUserStatus: () => Promise<void>;
 
@@ -48,7 +50,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [platformIdentity, setPlatformIdentity] = useState<PlatformIdentity | null>(null);
   const [status, setStatus] = useState<AuthStatus>('loading');
 
-  // Resolve platform user profile from users/{uid}
+  // Resolve platform user profile from users/{uid} (FAIL CLOSED)
   const resolvePlatformUser = useCallback(async (fbUser: FirebaseUser): Promise<User> => {
     try {
       const userDocRef = doc(db, 'users', fbUser.uid);
@@ -79,23 +81,70 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         };
-        await setDoc(userDocRef, newUser).catch((err) => {
-          console.warn('[AuthProvider] Non-blocking error initializing user doc:', err?.message);
-        });
+        await setDoc(userDocRef, newUser);
         return newUser;
       }
     } catch (err: any) {
-      console.warn('[AuthProvider] Error resolving users/{uid}:', err?.message);
-      // Fallback active user profile on network/permission error
+      console.error('[AuthProvider] Authoritative user resolution failed:', err?.message);
+      // FAIL CLOSED: Do NOT return an active user fallback on resolution error
+      throw new Error(`Authoritative user resolution failed for ${fbUser.uid}: ${err?.message}`);
+    }
+  }, []);
+
+  // Resolve platform identity authoritatively from platform_users/{uid} or users/{uid} fields (NO EMAIL HEURISTICS)
+  const resolvePlatformIdentity = useCallback(async (fbUser: FirebaseUser): Promise<PlatformIdentity> => {
+    try {
+      // 1. Check platform_users/{uid}
+      const platformDocRef = doc(db, 'platform_users', fbUser.uid);
+      const platformSnap = await getDoc(platformDocRef).catch(() => null);
+
+      if (platformSnap && platformSnap.exists()) {
+        const pData = platformSnap.data();
+        return {
+          uid: fbUser.uid,
+          role: pData.role || (pData.isSuperAdmin ? 'Super Admin' : 'Platform Operator'),
+          isPlatformAdmin: !!pData.isPlatformAdmin || !!pData.isSuperAdmin,
+          isSuperAdmin: !!pData.isSuperAdmin,
+        };
+      }
+
+      // 2. Check users/{uid} for explicit platform admin fields
+      const userDocRef = doc(db, 'users', fbUser.uid);
+      const userSnap = await getDoc(userDocRef).catch(() => null);
+
+      if (userSnap && userSnap.exists()) {
+        const uData = userSnap.data();
+        if (uData.isSuperAdmin === true || uData.role === 'Super Admin') {
+          return {
+            uid: fbUser.uid,
+            role: 'Super Admin',
+            isPlatformAdmin: true,
+            isSuperAdmin: true,
+          };
+        }
+        if (uData.isPlatformAdmin === true || uData.role === 'Platform Admin' || uData.role === 'Platform Operator') {
+          return {
+            uid: fbUser.uid,
+            role: 'Platform Operator',
+            isPlatformAdmin: true,
+            isSuperAdmin: false,
+          };
+        }
+      }
+
       return {
         uid: fbUser.uid,
-        email: fbUser.email || '',
-        displayName: fbUser.displayName || '',
-        photoURL: fbUser.photoURL || '',
-        emailVerified: fbUser.emailVerified,
-        status: 'active',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+        role: 'None',
+        isPlatformAdmin: false,
+        isSuperAdmin: false,
+      };
+    } catch (err: any) {
+      console.error('[AuthProvider] Error resolving platform identity:', err?.message);
+      return {
+        uid: fbUser.uid,
+        role: 'None',
+        isPlatformAdmin: false,
+        isSuperAdmin: false,
       };
     }
   }, []);
@@ -114,29 +163,70 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return;
       }
 
-      // Query or build tenant memberships for this user
-      // Standard mapping: match user email/uid against tenant staff records or memberships
+      // Query tenant_memberships
       const memberships: TenantMembership[] = [];
+      try {
+        const tmQuery = query(collection(db, 'tenant_memberships'), where('uid', '==', fbUser.uid));
+        const tmSnap = await getDocs(tmQuery);
+        tmSnap.forEach((docSnap) => {
+          memberships.push(docSnap.data() as TenantMembership);
+        });
+      } catch (e: any) {
+        console.warn('[AuthProvider] Could not query tenant_memberships collection:', e?.message);
+      }
+
+      try {
+        const subTmSnap = await getDocs(collection(db, 'users', fbUser.uid, 'tenant_memberships'));
+        subTmSnap.forEach((docSnap) => {
+          const m = docSnap.data() as TenantMembership;
+          if (!memberships.some(existing => existing.tenantId === m.tenantId)) {
+            memberships.push(m);
+          }
+        });
+      } catch (e: any) {
+        // silent catch
+      }
+
+      // Query business_relationships
       const relationships: BusinessRelationship[] = [];
+      try {
+        const brQuery = query(collection(db, 'business_relationships'), where('uid', '==', fbUser.uid));
+        const brSnap = await getDocs(brQuery);
+        brSnap.forEach((docSnap) => {
+          relationships.push(docSnap.data() as BusinessRelationship);
+        });
+      } catch (e: any) {
+        console.warn('[AuthProvider] Could not query business_relationships collection:', e?.message);
+      }
 
-      // Check for Super Admin platform identity
-      const isSuperAdminEmail = platformUser.email?.toLowerCase().includes('admin') || platformUser.email?.toLowerCase().includes('super');
-      const superAdminId: PlatformIdentity = {
-        uid: fbUser.uid,
-        role: isSuperAdminEmail ? 'Super Admin' : 'None',
-        isPlatformAdmin: isSuperAdminEmail,
-        isSuperAdmin: isSuperAdminEmail,
-      };
+      try {
+        const subBrSnap = await getDocs(collection(db, 'users', fbUser.uid, 'business_relationships'));
+        subBrSnap.forEach((docSnap) => {
+          const r = docSnap.data() as BusinessRelationship;
+          if (!relationships.some(existing => existing.businessId === r.businessId)) {
+            relationships.push(r);
+          }
+        });
+      } catch (e: any) {
+        // silent catch
+      }
 
-      setPlatformIdentity(superAdminId);
+      // Resolve platform identity authoritatively
+      const resolvedPlatformIdentity = await resolvePlatformIdentity(fbUser);
+
+      setPlatformIdentity(resolvedPlatformIdentity);
       setTenantMemberships(memberships);
       setBusinessRelationships(relationships);
       setStatus('authenticated');
     } catch (err: any) {
-      console.warn('[AuthProvider] Context resolution error:', err?.message);
-      setStatus('unauthenticated');
+      console.error('[AuthProvider] Fail closed on context resolution error:', err?.message);
+      setUser(null);
+      setTenantMemberships([]);
+      setBusinessRelationships([]);
+      setPlatformIdentity(null);
+      setStatus('suspended'); // Fail closed on resolution failure!
     }
-  }, [resolvePlatformUser]);
+  }, [resolvePlatformUser, resolvePlatformIdentity]);
 
   // Firebase auth state listener
   useEffect(() => {
@@ -197,7 +287,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setUser(newUser);
       setStatus('authenticated');
 
-      // Send email verification
       sendEmailVerification(fbUser).catch((err) => {
         console.warn('[AuthProvider] Verification email notice:', err?.message);
       });
@@ -224,6 +313,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     await sendPasswordResetEmail(auth, email);
   }, []);
 
+  const confirmPasswordResetCode = useCallback(async (code: string, newPass: string) => {
+    await confirmPasswordReset(auth, code, newPass);
+  }, []);
+
   const resendEmailVerification = useCallback(async () => {
     if (auth.currentUser) {
       await sendEmailVerification(auth.currentUser);
@@ -242,23 +335,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // Helper checks
   const isTenantMember = useCallback((tenantId: string): boolean => {
-    if (status !== 'authenticated' || !user || user.status === 'suspended') return false;
-    return tenantMemberships.some(m => (m.tenantId === tenantId || m.tenantId === `tenant-${tenantId}`) && m.status === 'active');
+    if (status !== 'authenticated' || !user || user.status !== 'active') return false;
+    return tenantMemberships.some(m => 
+      (m.tenantId === tenantId || m.tenantId === `tenant-${tenantId}` || tenantId.includes(m.tenantId)) && 
+      m.status === 'active'
+    );
   }, [status, user, tenantMemberships]);
 
   const isBusinessOwner = useCallback((businessId?: string): boolean => {
-    if (status !== 'authenticated' || !user || user.status === 'suspended') return false;
-    if (!businessId) return businessRelationships.some(r => r.relationshipType === 'owner' && r.status === 'active');
-    return businessRelationships.some(r => r.businessId === businessId && r.relationshipType === 'owner' && r.status === 'active');
+    if (status !== 'authenticated' || !user || user.status !== 'active') return false;
+    if (!businessId) {
+      return businessRelationships.some(r => r.relationshipType === 'owner' && r.status === 'active');
+    }
+    return businessRelationships.some(r => 
+      r.businessId === businessId && r.relationshipType === 'owner' && r.status === 'active'
+    );
   }, [status, user, businessRelationships]);
 
   const isSuperAdmin = useMemo(() => {
-    if (status !== 'authenticated' || !user || user.status === 'suspended') return false;
+    if (status !== 'authenticated' || !user || user.status !== 'active') return false;
     return !!platformIdentity?.isSuperAdmin;
   }, [status, user, platformIdentity]);
 
   const isPlatformAdmin = useMemo(() => {
-    if (status !== 'authenticated' || !user || user.status === 'suspended') return false;
+    if (status !== 'authenticated' || !user || user.status !== 'active') return false;
     return !!platformIdentity?.isPlatformAdmin;
   }, [status, user, platformIdentity]);
 
@@ -276,6 +376,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     signUpWithEmail,
     signOut,
     sendPasswordReset,
+    confirmPasswordResetCode,
     resendEmailVerification,
     reloadUserStatus,
     isTenantMember,
@@ -293,6 +394,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     signUpWithEmail,
     signOut,
     sendPasswordReset,
+    confirmPasswordResetCode,
     resendEmailVerification,
     reloadUserStatus,
     isTenantMember,
@@ -315,3 +417,4 @@ export const useAuth = () => {
 };
 
 export default AuthContext;
+

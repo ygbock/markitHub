@@ -252,3 +252,129 @@ test('Phase 2 Invariant 9: Tenant membership is required for tenant operational 
   assert.equal(decision.allowed, false, 'Non-tenant staff member must be denied tenant workspace access');
   assert.equal(decision.type, 'TENANT_MEMBERSHIP_REQUIRED');
 });
+
+// ============================================================================
+// SECTION 4: Phase 2 Remediation & Security Defect Verification
+// ============================================================================
+
+test('Remediation 1: Email containing "admin" or "super" DOES NOT grant Super Admin platform access without authoritative PlatformIdentity', () => {
+  const userWithAdminEmail: User = {
+    uid: 'sneaky-user-1',
+    email: 'superadmin.imposter@gmail.com', // Email contains "super" and "admin"
+    emailVerified: true,
+    status: 'active',
+  };
+
+  const imposterContext: RouteAuthContext = {
+    activeCustomer: null,
+    activeStaff: null,
+    tenantLookup: dummyTenantLookup,
+    isStaffMemberOfTenant: () => false,
+    platformUser: userWithAdminEmail,
+    platformIdentity: {
+      uid: 'sneaky-user-1',
+      role: 'None',
+      isPlatformAdmin: false,
+      isSuperAdmin: false,
+    },
+  };
+
+  const superAdminRoute = parseCanonicalRoute('/superadmin/dashboard');
+  const decision = evaluateCanonicalRouteGuard(superAdminRoute, imposterContext);
+
+  assert.equal(decision.allowed, false, 'Email string heuristic must NOT grant Super Admin access');
+  assert.equal(decision.type, 'SUPER_ADMIN_REQUIRED');
+});
+
+test('Remediation 2: Ordinary staff member WITHOUT owner relationship CANNOT access BUSINESS_OWNER routes (no activeStaff bypass)', () => {
+  const cashierStaff: StaffMember = {
+    id: 'cashier-99',
+    name: 'Cashier Charlie',
+    email: 'charlie@example.com',
+    role: 'Cashier',
+    pin: '1234',
+    isOwner: false,
+    status: 'Active',
+    avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d',
+  };
+
+  const cashierContext: RouteAuthContext = {
+    activeCustomer: null,
+    activeStaff: cashierStaff,
+    tenantLookup: dummyTenantLookup,
+    isStaffMemberOfTenant: () => true,
+    platformUser: {
+      uid: 'cashier-99',
+      email: 'charlie@example.com',
+      emailVerified: true,
+      status: 'active',
+    },
+    isBusinessOwner: () => false,
+    businessRelationships: [],
+  };
+
+  const bizRoute = parseCanonicalRoute('/business/biz-101/onboarding');
+  const decision = evaluateCanonicalRouteGuard(bizRoute, cashierContext);
+
+  assert.equal(decision.allowed, false, 'Ordinary staff member must NOT satisfy BUSINESS_OWNER guard without owner relationship');
+  assert.equal(decision.type, 'REDIRECT_LOGIN');
+});
+
+test('Remediation 3: Suspended platform user fails closed even if activeStaff PIN context is present', () => {
+  const suspendedPlatformUser: User = {
+    uid: 'suspended-staff-1',
+    email: 'suspended@example.com',
+    status: 'suspended',
+    emailVerified: true,
+  };
+
+  const staffContext: StaffMember = {
+    id: 'staff-active-pin',
+    name: 'Suspended Staff',
+    email: 'suspended@example.com',
+    role: 'Store Manager',
+    pin: '1234',
+    status: 'Active',
+    avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d',
+  };
+
+  const suspendedContext: RouteAuthContext = {
+    activeCustomer: null,
+    activeStaff: staffContext,
+    tenantLookup: dummyTenantLookup,
+    isStaffMemberOfTenant: () => true,
+    platformUser: suspendedPlatformUser,
+  };
+
+  const tenantRoute = parseCanonicalRoute('/tenant/nexus-retail/dashboard');
+  const decision = evaluateCanonicalRouteGuard(tenantRoute, suspendedContext);
+
+  assert.equal(decision.allowed, false, 'Suspended platform user MUST fail closed across operational routes');
+  assert.equal(decision.type, 'PERMISSION_DENIED');
+  assert.ok(decision.message?.toLowerCase().includes('suspended'));
+});
+
+test('Remediation 4: Unresolved tenant memberships deny operational tenant workspace access', () => {
+  const userNoMemberships: User = {
+    uid: 'user-no-membership',
+    email: 'unassigned@example.com',
+    status: 'active',
+    emailVerified: true,
+  };
+
+  const emptyMembershipContext: RouteAuthContext = {
+    activeCustomer: null,
+    activeStaff: null,
+    tenantLookup: dummyTenantLookup,
+    isStaffMemberOfTenant: () => false,
+    platformUser: userNoMemberships,
+    tenantMemberships: [],
+  };
+
+  const tenantRoute = parseCanonicalRoute('/tenant/nexus-retail/dashboard');
+  const decision = evaluateCanonicalRouteGuard(tenantRoute, emptyMembershipContext);
+
+  assert.equal(decision.allowed, false, 'Empty tenant memberships must deny access to tenant operational routes');
+  assert.equal(decision.type, 'TENANT_MEMBERSHIP_REQUIRED');
+});
+

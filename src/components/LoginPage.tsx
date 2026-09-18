@@ -185,14 +185,29 @@ export default function LoginPage({
       return;
     }
 
+    if (password.length < 6) {
+      setError('Password must be at least 6 characters long.');
+      return;
+    }
+
+    if (!resetCode.trim()) {
+      setError('Action code / reset code from email link is required.');
+      return;
+    }
+
     setLoading(true);
 
     try {
-      // Password reset action code verification
-      setSuccessMsg('Your password has been updated. Please sign in with your new password.');
-      setTimeout(() => navigateTo('/login'), 1500);
+      if (authContext) {
+        await authContext.confirmPasswordResetCode(resetCode.trim(), password);
+        setSuccessMsg('Your password has been successfully reset. Please sign in with your new password.');
+        setTimeout(() => navigateTo('/login'), 1500);
+      } else {
+        setSuccessMsg('Demo password reset complete!');
+        setTimeout(() => navigateTo('/login'), 1500);
+      }
     } catch (err: any) {
-      setError(err?.message || 'Failed to update password. Code may be expired.');
+      setError(err?.message || 'Failed to update password. Action code may be invalid or expired.');
     } finally {
       setLoading(false);
     }
@@ -397,9 +412,14 @@ export default function LoginPage({
                 {loginTab === 'staff' ? (
                   <form onSubmit={handleStaffPinSubmit} className="space-y-4" id="form-staff-login">
                     <div className="space-y-2">
-                      <label className="text-xs font-bold text-slate-300 uppercase tracking-wider block">
-                        Select Staff Operator Profile
-                      </label>
+                      <div className="flex items-center justify-between">
+                        <label className="text-xs font-bold text-slate-300 uppercase tracking-wider block">
+                          Select Staff Operator Profile
+                        </label>
+                        <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                          Demo PIN Mode
+                        </span>
+                      </div>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto pr-1">
                         {staffMembers.map((staff) => {
                           const isSelected = staff.id === selectedStaffId;
