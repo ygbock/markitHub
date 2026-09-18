@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { parseCanonicalRoute } from '../routes/canonicalRoutes';
 import { evaluateCanonicalRouteGuard, RouteAuthContext, TenantContextRecord } from '../routes/routeGuards';
 import { User, TenantMembership, BusinessRelationship, PlatformIdentity, StaffMember, Customer } from '../types';
@@ -456,3 +458,49 @@ test('Remediation 7: Unresolved or invalid user status in user document fails cl
   assert.equal(decision.type, 'PERMISSION_DENIED');
 });
 
+
+
+test('Remediation 8: Registration cannot authenticate without authoritative users/{uid} persistence', () => {
+  const authContextSource = readFileSync(resolve(process.cwd(), 'src/context/AuthContext.tsx'), 'utf8');
+
+  assert.doesNotMatch(
+    authContextSource,
+    /await setDoc\(doc\(db, 'users', fbUser\.uid\), newUser\)\.catch\(\(\) => \{\}\)/,
+    'Registration must not swallow authoritative users/{uid} write failures'
+  );
+  assert.match(
+    authContextSource,
+    /const resolved = await resolveAuthoritativeContext\(fbUser\);/,
+    'Registration must resolve the complete authoritative context before establishing an authenticated session'
+  );
+  assert.match(
+    authContextSource,
+    /if \(!resolved\) \{/,
+    'Registration must reject unresolved authoritative identity context'
+  );
+});
+
+test('Remediation 9: Authoritative relationship subcollection query failures cannot be treated as empty relationships', () => {
+  const authContextSource = readFileSync(resolve(process.cwd(), 'src/context/AuthContext.tsx'), 'utf8');
+
+  assert.doesNotMatch(
+    authContextSource,
+    /user tenant_memberships subcollection[\\s\\S]*?catch \(e: any\) \{[\\s\\S]*?\/\/ Subcollection is optional/,
+    'Tenant membership subcollection failures must not be silently treated as optional absence'
+  );
+  assert.doesNotMatch(
+    authContextSource,
+    /user business_relationships subcollection[\\s\\S]*?catch \(e: any\) \{[\\s\\S]*?\/\/ Subcollection is optional/,
+    'Business relationship subcollection failures must not be silently treated as optional absence'
+  );
+  assert.match(
+    authContextSource,
+    /user tenant_memberships query failed/,
+    'Tenant membership subcollection failures must propagate into fail-closed context resolution'
+  );
+  assert.match(
+    authContextSource,
+    /user business_relationships query failed/,
+    'Business relationship subcollection failures must propagate into fail-closed context resolution'
+  );
+});
