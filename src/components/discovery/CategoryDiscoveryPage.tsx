@@ -25,6 +25,28 @@ function CategoryCard({ category, onNavigate }: { category: DiscoveryCategory; o
   );
 }
 
+
+function CategoryTree({ categories, parentId, onNavigate }: { categories: DiscoveryCategory[]; parentId?: string | null; onNavigate: (path: string) => void }) {
+  const children = categories
+    .filter(item => (parentId == null ? item.parentId == null : item.parentId === parentId))
+    .sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name));
+
+  return (
+    <div className='space-y-3'>
+      {children.map(category => (
+        <div key={category.id}>
+          <CategoryCard category={category} onNavigate={onNavigate} />
+          {categories.some(item => item.parentId === category.id) && (
+            <div className='ml-5 mt-3 pl-4 border-l-2 border-slate-200'>
+              <CategoryTree categories={categories} parentId={category.id} onNavigate={onNavigate} />
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function CategoryDiscoveryPage({ mode, categorySlug, onNavigate }: CategoryDiscoveryPageProps) {
   const [categories, setCategories] = useState<DiscoveryCategory[]>([]);
   const [category, setCategory] = useState<DiscoveryCategory | null>(null);
@@ -113,9 +135,7 @@ export default function CategoryDiscoveryPage({ mode, categorySlug, onNavigate }
         {loading && <div className='py-16 flex justify-center items-center gap-2 text-slate-500'><Loader2 className='w-5 h-5 animate-spin' /> Loading categories…</div>}
 
         {!loading && mode === 'index' && (
-          <div className='grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5'>
-            {filteredCategories.map(item => <CategoryCard key={item.id} category={item} onNavigate={onNavigate} />)}
-          </div>
+          <CategoryTree categories={filteredCategories} parentId={null} onNavigate={onNavigate} />
         )}
 
         {!loading && mode === 'detail' && category && (
