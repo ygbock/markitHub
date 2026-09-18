@@ -1,4 +1,22 @@
-import test from 'node:test';
+imp
+ 
+test('Phase 3I Invariant 81: malformed business coordinates are excluded from geographic calculations', () => {
+  const source = readFileSync(resolve(process.cwd(), 'src/discovery/discoveryRepository.ts'), 'utf8');
+  assert.match(source, /Number\.isFinite\(latitude\)/);
+  assert.match(source, /Number\.isFinite\(longitude\)/);
+  assert.match(source, /latitude < -90 \|\| latitude > 90/);
+  assert.match(source, /longitude < -180 \|\| longitude > 180/);
+});
+
+test('Phase 3I Invariant 82: service slug discovery has an explicit collection-group query contract', () => {
+  const source = readFileSync(resolve(process.cwd(), 'src/discovery/discoveryRepository.ts'), 'utf8');
+  const indexes = readFileSync(resolve(process.cwd(), 'firestore.indexes.json'), 'utf8');
+  assert.match(source, /collectionGroup\(db, 'services'\)/);
+  assert.match(source, /where\('slug', '==', normalizedSlug\)/);
+  assert.match(indexes, /"collectionGroup": "services"/);
+  assert.match(indexes, /"fieldPath": "slug"/);
+});
+ort test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
