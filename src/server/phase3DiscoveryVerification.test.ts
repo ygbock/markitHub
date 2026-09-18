@@ -408,3 +408,81 @@ test('Phase 3G Remediation: geographic UI gives opt-in guidance instead of claim
   assert.match(source, /Use your location to find nearby businesses/);
   assert.doesNotMatch(source, /Requesting your location…/);
 });
+
+
+test('Phase 3H Invariant 59: category discovery exposes a canonical category slug lookup', () => {
+  const types = readFileSync(resolve(process.cwd(), 'src/discovery/types.ts'), 'utf8');
+  const repository = readFileSync(resolve(process.cwd(), 'src/discovery/discoveryRepository.ts'), 'utf8');
+  assert.match(types, /getCategoryBySlug/);
+  assert.match(repository, /async getCategoryBySlug/);
+  assert.match(repository, /where\('slug', '==', normalizedSlug\)/);
+  assert.match(repository, /where\('status', '==', 'active'\)/);
+});
+
+test('Phase 3H Invariant 60: category discovery preserves hierarchy fields and active-only visibility', () => {
+  const source = readFileSync(resolve(process.cwd(), 'src/discovery/discoveryRepository.ts'), 'utf8');
+  assert.match(source, /parentId: raw\.parent_id \?\? null/);
+  assert.match(source, /sortOrder: Number\(raw\.sort_order \?\? 0\)/);
+  assert.match(source, /where\('status', '==', 'active'\)/);
+  assert.match(source, /status: raw\.status === 'inactive' \? 'inactive' : 'active'/);
+});
+
+test('Phase 3H Invariant 61: canonical category routes render the dedicated category discovery experience', () => {
+  const source = readFileSync(resolve(process.cwd(), 'src/App.tsx'), 'utf8');
+  assert.match(source, /CategoryDiscoveryPage/);
+  assert.match(source, /currentRoute\.definition\.id === 'public\.categories'/);
+  assert.match(source, /currentRoute\.definition\.id === 'public\.category\.detail'/);
+});
+
+test('Phase 3H Invariant 62: category index and detail navigation use canonical category slugs', () => {
+  const source = readFileSync(resolve(process.cwd(), 'src/components/discovery/CategoryDiscoveryPage.tsx'), 'utf8');
+  assert.match(source, /onNavigate\('\/category\/' \+ category\.slug\)/);
+  assert.match(source, /categorySlug/);
+  assert.match(source, /getCategoryBySlug\(slug\)/);
+});
+
+test('Phase 3H Invariant 63: category detail connects authoritative category results to businesses, products, and services', () => {
+  const source = readFileSync(resolve(process.cwd(), 'src/components/discovery/CategoryDiscoveryPage.tsx'), 'utf8');
+  assert.match(source, /listBusinesses\(\{ limit: 100, filters: \{ categorySlug: slug \} \}\)/);
+  assert.match(source, /listProducts\(\{ limit: 100, filters: \{ categorySlug: slug \} \}\)/);
+  assert.match(source, /listServices\(\{ limit: 100, filters: \{ categorySlug: slug \} \}\)/);
+});
+
+test('Phase 3H Invariant 64: category hierarchy is navigable through parent/child relationships', () => {
+  const source = readFileSync(resolve(process.cwd(), 'src/components/discovery/CategoryDiscoveryPage.tsx'), 'utf8');
+  assert.match(source, /item\.parentId === category\.id/);
+  assert.match(source, /Subcategories/);
+  assert.match(source, /Explore category/);
+});
+
+test('Phase 3H Invariant 65: category discovery preserves listing-only businesses and does not require tenant activation', () => {
+  const repository = readFileSync(resolve(process.cwd(), 'src/discovery/discoveryRepository.ts'), 'utf8');
+  const page = readFileSync(resolve(process.cwd(), 'src/components/discovery/CategoryDiscoveryPage.tsx'), 'utf8');
+  assert.match(repository, /isTenant: Array\.isArray\(raw\.tenantIds\)/);
+  assert.match(page, /listBusinesses\(\{ limit: 100, filters: \{ categorySlug: slug \} \}\)/);
+  assert.doesNotMatch(page, /tenantId.*required/);
+});
+
+test('Phase 3H Invariant 66: category discovery is read-only and bounded', () => {
+  const repository = readFileSync(resolve(process.cwd(), 'src/discovery/discoveryRepository.ts'), 'utf8');
+  const page = readFileSync(resolve(process.cwd(), 'src/components/discovery/CategoryDiscoveryPage.tsx'), 'utf8');
+  assert.ok(!/\b(setDoc|addDoc|updateDoc|deleteDoc)\b/.test(repository));
+  assert.ok(!/\b(setDoc|addDoc|updateDoc|deleteDoc)\b/.test(page));
+  assert.match(repository, /firestoreLimit\(3\)/);
+  assert.match(repository, /Math\.min\(limit \* 3, MAX_LIMIT\)/);
+});
+
+test('Phase 3H Invariant 67: category index searches authoritative category records rather than static discovery data', () => {
+  const page = readFileSync(resolve(process.cwd(), 'src/components/discovery/CategoryDiscoveryPage.tsx'), 'utf8');
+  assert.match(page, /discoveryRepository\.listCategories/);
+  assert.doesNotMatch(page, /DISCOVERY_CATEGORIES/);
+  assert.doesNotMatch(page, /discoveryData/);
+});
+
+test('Phase 3H Invariant 68: category result navigation remains entity-owned and does not cross into tenant operations', () => {
+  const source = readFileSync(resolve(process.cwd(), 'src/components/discovery/CategoryDiscoveryPage.tsx'), 'utf8');
+  assert.match(source, /'\/business\/'/);
+  assert.match(source, /'\/product\/'/);
+  assert.match(source, /'\/service\/'/);
+  assert.doesNotMatch(source, /\/tenant\//);
+});
