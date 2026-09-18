@@ -546,3 +546,44 @@ test('Phase 3I Invariant 75: discovery result cards expose practical business tr
   assert.match(source, /ratingAverage/);
   assert.match(source, /reviewCount/);
 });
+
+
+test('Phase 3I Invariant 76: unified search presents a single search action and an explicit opt-in location action', () => {
+  const source = readFileSync(resolve(process.cwd(), 'src/components/discovery/UnifiedSearchPage.tsx'), 'utf8');
+  const form = source.match(/<form onSubmit=\{submit\}[\s\S]*?<\/form>/)?.[0] || '';
+  assert.equal((form.match(/type='submit'/g) || []).length, 1);
+  assert.match(form, /Use my location/);
+  assert.match(form, /navigator\.geolocation\.getCurrentPosition/);
+});
+
+test('Phase 3I Invariant 77: location filter state counts as one user-facing filter even though it stores coordinates separately', () => {
+  const source = readFileSync(resolve(process.cwd(), 'src/components/discovery/UnifiedSearchPage.tsx'), 'utf8');
+  assert.match(source, /!\['latitude', 'longitude'\]\.includes\(key\)/);
+  assert.match(source, /const hasLocation = filters\.latitude != null && filters\.longitude != null/);
+  assert.match(source, /values\.length \+ \(hasLocation \? 1 : 0\)/);
+});
+
+test('Phase 3I Invariant 78: discovery location filtering is explicitly scoped to authoritative business location data', () => {
+  const source = readFileSync(resolve(process.cwd(), 'src/components/discovery/UnifiedSearchPage.tsx'), 'utf8');
+  const repository = readFileSync(resolve(process.cwd(), 'src/discovery/discoveryRepository.ts'), 'utf8');
+  assert.match(source, /Location filtering applies to business results/);
+  assert.match(repository, /filters\.latitude != null && filters\.longitude != null/);
+  assert.match(repository, /item\.locations\.some/);
+});
+
+test('Phase 3I Invariant 79: public discovery reads remain bounded before client-side ranking and filtering', () => {
+  const source = readFileSync(resolve(process.cwd(), 'src/discovery/discoveryRepository.ts'), 'utf8');
+  assert.match(source, /const MAX_LIMIT = 100/);
+  assert.match(source, /Math\.min\(limit \* 3, MAX_LIMIT\)/);
+  assert.match(source, /firestoreLimit\(Math\.min\(limit \* 3, MAX_LIMIT\)\)/);
+  assert.match(source, /candidateLimit = Math\.min\(boundedLimit\(queryOptions\.limit\) \* 3, MAX_LIMIT\)/);
+});
+
+test('Phase 3I Invariant 80: discovery UI remains read-only, canonical, and responsive across result types', () => {
+  const ui = readFileSync(resolve(process.cwd(), 'src/components/discovery/UnifiedSearchPage.tsx'), 'utf8');
+  const repository = readFileSync(resolve(process.cwd(), 'src/discovery/discoveryRepository.ts'), 'utf8');
+  assert.ok(!/\b(setDoc|addDoc|updateDoc|deleteDoc)\b/.test(ui));
+  assert.ok(!/\b(setDoc|addDoc|updateDoc|deleteDoc)\b/.test(repository));
+  assert.match(ui, /grid-cols-1 lg:grid-cols-\[280px_1fr\]/);
+  for (const path of ['/business/', '/product/', '/service/', '/category/']) assert.match(ui, new RegExp("'" + path.replace('/', '\\/') + "'"));
+});
