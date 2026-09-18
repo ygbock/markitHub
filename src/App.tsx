@@ -50,6 +50,7 @@ import { useMikitRouter } from './routes/useMikitRouter';
 import { evaluateCanonicalRouteGuard, TenantContextRecord } from './routes/routeGuards';
 import PublicDiscoveryShell from './components/discovery/PublicDiscoveryShell';
 import UnifiedSearchPage from './components/discovery/UnifiedSearchPage';
+import GeographicDiscoveryPage from './components/discovery/GeographicDiscoveryPage';
 import ListingBusinessShell from './components/business/ListingBusinessShell';
 import CustomerAccountShell from './components/customer/CustomerAccountShell';
 import RouteGuardShell from './components/routing/RouteGuardShell';
@@ -1513,12 +1514,20 @@ export default function App() {
       )}
 
       {/* 2b. Public Discovery Domain (/ or /discover, /business/:slug, /nearby) */}
-      {activeDomain === 'PUBLIC_DISCOVERY' && currentRoute.definition.id !== 'public.search' && (
+      {activeDomain === 'PUBLIC_DISCOVERY' && currentRoute.definition.id !== 'public.search' && currentRoute.definition.id !== 'public.nearby' && currentRoute.definition.id !== 'public.map' && (
         <PublicDiscoveryShell
           businessSlug={currentRoute.params.businessSlug}
           products={products}
           onNavigate={navigate}
           onOpenLogin={() => navigate(`/login?returnUrl=${encodeURIComponent(currentRoute.pathname)}`)}
+        />
+      )}
+
+      {/* 2b-geo. Canonical geographic discovery (/nearby, /map) */}
+      {activeDomain === 'PUBLIC_DISCOVERY' && (currentRoute.definition.id === 'public.nearby' || currentRoute.definition.id === 'public.map') && (
+        <GeographicDiscoveryPage
+          mode={currentRoute.definition.id === 'public.nearby' ? 'nearby' : 'map'}
+          onNavigate={navigate}
         />
       )}
 
