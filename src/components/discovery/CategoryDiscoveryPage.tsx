@@ -439,10 +439,10 @@ export default function CategoryDiscoveryPage({ categorySlug, onNavigate }: Cate
                     </h2>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
-                    {products.map(product => (
+                    {products.map(prod => (
                       <button
-                        key={product.id}
-                        onClick={() => onNavigate(product.slug ? '/product/' + product.slug : `/products`)}
+                        key={prod.id}
+                        onClick={() => onNavigate(prod.slug ? '/product/' + prod.slug : `/products`)}
                         className="text-left bg-white rounded-3xl border border-slate-200 p-5 hover:border-indigo-300 hover:shadow-lg transition-all group"
                       >
                         <div className="flex items-start justify-between gap-3">
@@ -450,15 +450,15 @@ export default function CategoryDiscoveryPage({ categorySlug, onNavigate }: Cate
                             <Package className="w-5 h-5" />
                           </div>
                           <span className="text-sm font-black text-indigo-600">
-                            {product.currency || '$'}{product.price.toFixed(2)}
+                            {prod.currency || '$'}{prod.price.toFixed(2)}
                           </span>
                         </div>
                         <h3 className="font-bold text-base text-slate-900 mt-3 group-hover:text-indigo-600 transition-colors">
-                          {product.name}
+                          {prod.name}
                         </h3>
-                        <p className="text-sm text-slate-500 mt-1 line-clamp-2">{product.description || 'Quality product offering.'}</p>
+                        <p className="text-sm text-slate-500 mt-1 line-clamp-2">{prod.description || 'Quality product offering.'}</p>
                         <div className="flex items-center justify-between mt-4 pt-3 border-t border-slate-100 text-xs text-slate-500">
-                          <span>{product.brand || 'Available in stock'}</span>
+                          <span>{prod.brand || 'Available in stock'}</span>
                           <span className="flex items-center gap-1 text-indigo-600 font-bold">
                             View Product <ArrowRight className="w-3 h-3" />
                           </span>
@@ -478,23 +478,105 @@ export default function CategoryDiscoveryPage({ categorySlug, onNavigate }: Cate
                     </h2>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
-                    {services.map(service => (
+                    {services.map(serv => (
                       <button
-                        key={service.id}
-                        onClick={() => onNavigate(service.slug ? '/service/' + service.slug : `/services`)}
+                        key={serv.id}
+                        onClick={() => onNavigate(serv.slug ? '/service/' + serv.slug : `/services`)}
                         className="text-left bg-white rounded-3xl border border-slate-200 p-5 hover:border-indigo-300 hover:shadow-lg transition-all group"
                       >
                         <div className="flex items-start justify-between gap-3">
                           <div className="w-10 h-10 rounded-xl bg-sky-50 text-sky-600 flex items-center justify-center shrink-0">
                             <Wrench className="w-5 h-5" />
                           </div>
-                          {service.price != null && (
+                          {serv.price != null && (
                             <span className="text-sm font-black text-indigo-600">
-                              {service.currency || '$'}{service.price.toFixed(2)}
+                              {serv.currency || '$'}{serv.price.toFixed(2)}
                             </span>
                           )}
                         </div>
                         <h3 className="font-bold text-base text-slate-900 mt-3 group-hover:text-indigo-600 transition-colors">
-                          {service.name}
+                          {serv.name}
                         </h3>
-                        <p className="text-sm text-slate-500 mt-1 line-clamp-2">{service.description || 'Professional service.'}</p>
+                        <p className="text-sm text-slate-500 mt-1 line-clamp-2">{serv.description || 'Professional service.'}</p>
+                        <div className="flex items-center justify-between mt-4 pt-3 border-t border-slate-100 text-xs text-slate-500">
+                          <span>{serv.durationMinutes ? `${serv.durationMinutes} mins` : 'Available for booking'}</span>
+                          <span className="flex items-center gap-1 text-indigo-600 font-bold">
+                            View Service <ArrowRight className="w-3 h-3" />
+                          </span>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </section>
+              )}
+            </div>
+          )}
+        </main>
+      </div>
+    );
+  }
+
+  // INDEX VIEW (/categories)
+  return (
+    <div className="min-h-screen bg-slate-50 text-slate-900" id="categories-index-root">
+      <header className="bg-slate-950 text-white px-4 sm:px-6 lg:px-10 py-6 border-b border-slate-800">
+        <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-4">
+          <button
+            onClick={() => onNavigate('/')}
+            className="flex items-center gap-2 text-sm font-bold text-indigo-300 hover:text-white"
+          >
+            <ArrowLeft className="w-4 h-4" /> MikitHub
+          </button>
+          <div className="text-right">
+            <h1 className="text-xl sm:text-2xl font-black">All Categories</h1>
+            <p className="text-xs text-slate-300">Browse businesses, products, and services by industry.</p>
+          </div>
+        </div>
+      </header>
+
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-10 py-8">
+        {/* Search Bar */}
+        <div className="bg-white rounded-3xl border border-slate-200 p-4 sm:p-5 mb-8">
+          <div className="relative">
+            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              placeholder="Filter categories by name or keyword…"
+              className="w-full pl-10 pr-4 py-3 rounded-2xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+            />
+          </div>
+        </div>
+
+        {indexLoading && (
+          <div className="py-24 flex items-center justify-center gap-2 text-slate-500">
+            <Loader2 className="w-5 h-5 animate-spin" /> Loading categories…
+          </div>
+        )}
+
+        {!indexLoading && indexError && (
+          <div className="p-6 rounded-3xl bg-rose-50 border border-rose-200 text-rose-800 text-center">
+            {indexError}
+          </div>
+        )}
+
+        {!indexLoading && !indexError && filteredIndexCategories.length === 0 && (
+          <div className="p-12 rounded-3xl bg-white border border-slate-200 text-center">
+            <FolderTree className="w-10 h-10 mx-auto text-slate-300 mb-2" />
+            <h3 className="font-bold text-base text-slate-800">No categories found</h3>
+            <p className="text-xs text-slate-500 mt-1">Try adjusting your search query.</p>
+          </div>
+        )}
+
+        {!indexLoading && !indexError && filteredIndexCategories.length > 0 && (
+          <CategoryTree
+            categories={filteredIndexCategories}
+            parentId={null}
+            onNavigate={onNavigate}
+          />
+        )}
+      </main>
+    </div>
+  );
+}
