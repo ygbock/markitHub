@@ -50,10 +50,6 @@ export default function GeographicDiscoveryPage({ mode, onNavigate }: Geographic
   };
 
   useEffect(() => {
-    requestLocation();
-  }, []);
-
-  useEffect(() => {
     if (!origin) {
       setBusinesses([]);
       return;
