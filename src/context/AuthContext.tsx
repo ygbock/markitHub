@@ -157,7 +157,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   // Resolve memberships & relationships for authenticated UID
-  const resolveAuthoritativeContext = useCallback(async (fbUser: FirebaseUser) => {
+  const resolveAuthoritativeContext = useCallback(async (fbUser: FirebaseUser): Promise<boolean> => {
     try {
       const platformUser = await resolvePlatformUser(fbUser);
       setUser(platformUser);
@@ -167,7 +167,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setTenantMemberships([]);
         setBusinessRelationships([]);
         setPlatformIdentity(null);
-        return;
+        return true;
       }
 
       // Query tenant_memberships (FAIL CLOSED on Firestore error)
@@ -192,7 +192,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           }
         });
       } catch (e: any) {
-        // Subcollection is optional
+        console.error('[AuthProvider] Failed to query user tenant_memberships subcollection:', e?.message);
+        throw new Error(`user tenant_memberships query failed: ${e?.message}`);
       }
 
       // Query business_relationships (FAIL CLOSED on Firestore error)
@@ -217,7 +218,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           }
         });
       } catch (e: any) {
-        // Subcollection is optional
+        console.error('[AuthProvider] Failed to query user business_relationships subcollection:', e?.message);
+        throw new Error(`user business_relationships query failed: ${e?.message}`);
       }
 
       // Resolve platform identity authoritatively (FAIL CLOSED on Firestore error)
@@ -227,6 +229,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setTenantMemberships(memberships);
       setBusinessRelationships(relationships);
       setStatus('authenticated');
+      return true;
     } catch (err: any) {
       console.error('[AuthProvider] Fail closed on context resolution error:', err?.message);
       setUser(null);
@@ -234,6 +237,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setBusinessRelationships([]);
       setPlatformIdentity(null);
       setStatus('suspended'); // Fail closed on resolution failure!
+      return false;
     }
   }, [resolvePlatformUser, resolvePlatformIdentity]);
 
@@ -267,7 +271,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const cred = await signInWithEmailAndPassword(auth, email, pass);
       setFirebaseUser(cred.user);
-      await resolveAuthoritativeContext(cred.user);
+      const resolved = await resolveAuthoritativeContext(cred.user);
+      if (!resolved) {
+        await firebaseSignOut(auth);
+        setFirebaseUser(null);
+        throw new Error('Authentication succeeded, but authoritative MikitHub identity could not be resolved. Access denied.');
+      }
     } catch (err: any) {
       setStatus('unauthenticated');
       throw err;
@@ -290,11 +299,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         updatedAt: new Date().toISOString(),
       };
 
-      await setDoc(doc(db, 'users', fbUser.uid), newUser).catch(() => {});
-      
+      // The Firebase account is not considered a MikitHub-authenticated session
+      // until the authoritative platform user document has been persisted and
+      // the complete authorization context has been resolved successfully.
+      await setDoc(doc(db, 'users', fbUser.uid), newUser);
+
       setFirebaseUser(fbUser);
-      setUser(newUser);
-      setStatus('authenticated');
+      const resolved = await resolveAuthoritativeContext(fbUser);
+      if (!resolved) {
+        await firebaseSignOut(auth);
+        setFirebaseUser(null);
+        throw new Error('Registration succeeded in Firebase, but authoritative MikitHub identity could not be resolved. Access denied.');
+      }
 
       sendEmailVerification(fbUser).catch((err) => {
         console.warn('[AuthProvider] Verification email notice:', err?.message);
@@ -303,7 +319,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setStatus('unauthenticated');
       throw err;
     }
-  }, []);
+  }, [resolveAuthoritativeContext]);
 
   const signOut = useCallback(async () => {
     try {
