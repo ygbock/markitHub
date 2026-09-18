@@ -388,8 +388,8 @@ test('Phase 3G Remediation: computeOpenNow handles open, closed, boundary, and m
 test('Phase 3G Remediation: computeOpenNow supports midnight-crossing ranges and rejects malformed hours', () => {
   const hours = { monday: '22:00-02:00' };
   assert.equal(computeOpenNow(hours, new Date(2026, 8, 14, 22, 30)), true);
-  assert.equal(computeOpenNow(hours, new Date(2026, 8, 14, 1, 59)), true);
-  assert.equal(computeOpenNow(hours, new Date(2026, 8, 14, 2, 0)), false);
+  assert.equal(computeOpenNow(hours, new Date(2026, 8, 15, 1, 59)), true);
+  assert.equal(computeOpenNow(hours, new Date(2026, 8, 15, 2, 0)), false);
   assert.equal(parseOperatingHours('not-a-time'), null);
   assert.equal(parseOperatingHours('25:00-17:00'), null);
 });
