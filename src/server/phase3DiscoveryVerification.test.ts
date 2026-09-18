@@ -432,6 +432,8 @@ test('Phase 3H Invariant 61: canonical category routes render the dedicated cate
   assert.match(source, /CategoryDiscoveryPage/);
   assert.match(source, /currentRoute\.definition\.id === 'public\.categories'/);
   assert.match(source, /currentRoute\.definition\.id === 'public\.category\.detail'/);
+  assert.match(source, /currentRoute\.definition\.id !== 'public\.categories'/);
+  assert.match(source, /currentRoute\.definition\.id !== 'public\.category\.detail'/);
 });
 
 test('Phase 3H Invariant 62: category index and detail navigation use canonical category slugs', () => {
