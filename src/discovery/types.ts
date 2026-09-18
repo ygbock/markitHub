@@ -138,6 +138,8 @@ export interface DiscoveryRepository {
   getBusinessBySlug(slug: string): Promise<DiscoveryBusiness | null>;
   getProductById(id: string): Promise<DiscoveryProduct | null>;
   getProductBySlug(slug: string): Promise<DiscoveryProduct | null>;
+  getServiceById(id: string): Promise<DiscoveryService | null>;
+  getServiceBySlug(slug: string): Promise<DiscoveryService | null>;
   listProducts(query?: DiscoveryQuery): Promise<DiscoverySearchResult<DiscoveryProduct>>;
   listServices(query?: DiscoveryQuery): Promise<DiscoverySearchResult<DiscoveryService>>;
   listCategories(query?: DiscoveryQuery): Promise<DiscoverySearchResult<DiscoveryCategory>>;
