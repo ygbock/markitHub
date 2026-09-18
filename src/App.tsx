@@ -1515,7 +1515,7 @@ export default function App() {
       )}
 
       {/* 2b. Public Discovery Domain (/ or /discover, /business/:slug, /nearby) */}
-      {activeDomain === 'PUBLIC_DISCOVERY' && currentRoute.definition.id !== 'public.search' && currentRoute.definition.id !== 'public.nearby' && currentRoute.definition.id !== 'public.map' && (
+      {activeDomain === 'PUBLIC_DISCOVERY' && currentRoute.definition.id !== 'public.search' && currentRoute.definition.id !== 'public.nearby' && currentRoute.definition.id !== 'public.map' && currentRoute.definition.id !== 'public.categories' && currentRoute.definition.id !== 'public.category.detail' && (
         <PublicDiscoveryShell
           businessSlug={currentRoute.params.businessSlug}
           products={products}
