@@ -195,6 +195,26 @@ function matchesCategory(item: DiscoveryCategory, filters: DiscoveryFilters = {}
   return textMatches(item.name, filters.text) || textMatches(item.slug, filters.text) || textMatches(item.description, filters.text);
 }
 
+function sortBusinesses(items: DiscoveryBusiness[], queryOptions: DiscoveryQuery): DiscoveryBusiness[] {
+  const filters = queryOptions.filters || {};
+  const origin = filters.latitude != null && filters.longitude != null
+    ? { latitude: filters.latitude, longitude: filters.longitude }
+    : null;
+  const withDistance = (item: DiscoveryBusiness) => {
+    if (!origin) return Number.POSITIVE_INFINITY;
+    const distances = item.locations.filter(l => l.geo).map(l => distanceKm(origin, l.geo!));
+    return distances.length ? Math.min(...distances) : Number.POSITIVE_INFINITY;
+  };
+  return [...items].sort((a, b) => {
+    switch (queryOptions.sort) {
+      case 'name': return a.name.localeCompare(b.name);
+      case 'distance': return withDistance(a) - withDistance(b);
+      case 'rating': return b.ratingAverage - a.ratingAverage || b.reviewCount - a.reviewCount;
+      default: return Number(b.isFeatured) - Number(a.isFeatured) || b.ratingAverage - a.ratingAverage || a.name.localeCompare(b.name);
+    }
+  });
+}
+
 function paginate<T>(items: T[], queryOptions: DiscoveryQuery = {}): DiscoverySearchResult<T> {
   const offset = Math.max(queryOptions.offset ?? 0, 0);
   const take = boundedLimit(queryOptions.limit);
@@ -220,11 +240,32 @@ export class FirestoreDiscoveryRepository implements DiscoveryRepository {
   async listBusinesses(queryOptions: DiscoveryQuery = {}): Promise<DiscoverySearchResult<DiscoveryBusiness>> {
     const take = boundedLimit(queryOptions.limit);
     const snapshot = await getDocs(query(collection(db, 'businesses'), where('status', '==', 'active'), ...constraintsForPublicCollection(take)));
-    const items = snapshot.docs
+    const items = sortBusinesses(snapshot.docs
       .map(docSnap => normalizeBusiness({ id: docSnap.id, ...docSnap.data() } as Business & Record<string, unknown>))
       .filter((item): item is DiscoveryBusiness => item !== null)
-      .filter(item => matchesBusiness(item, queryOptions.filters));
+      .filter(item => matchesBusiness(item, queryOptions.filters)), queryOptions);
     return paginate(items, queryOptions);
+  }
+
+  async getBusinessById(id: string): Promise<DiscoveryBusiness | null> {
+    const result = await this.listBusinesses({ limit: MAX_LIMIT, filters: { businessId: id } });
+    return result.items[0] || null;
+  }
+
+  async getBusinessBySlug(slug: string): Promise<DiscoveryBusiness | null> {
+    const normalizedSlug = slug.trim().toLowerCase();
+    if (!normalizedSlug) return null;
+    const snapshot = await getDocs(query(
+      collection(db, 'businesses'),
+      where('status', '==', 'active'),
+      where('listing.slug', '==', normalizedSlug),
+      firestoreLimit(3),
+    ));
+    for (const docSnap of snapshot.docs) {
+      const item = normalizeBusiness({ id: docSnap.id, ...docSnap.data() } as Business & Record<string, unknown>);
+      if (item) return item;
+    }
+    return null;
   }
 
   async listProducts(queryOptions: DiscoveryQuery = {}): Promise<DiscoverySearchResult<DiscoveryProduct>> {
