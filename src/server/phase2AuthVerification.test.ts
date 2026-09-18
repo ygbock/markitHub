@@ -117,7 +117,6 @@ test('Phase 2 Invariant 5: Suspended Platform Users fail closed across all route
     activeCustomer: null,
     activeStaff: null,
     tenantLookup: dummyTenantLookup,
-    isStaffMemberOfTenant: () => true,
     platformUser: suspendedUser,
   };
 
@@ -149,7 +148,6 @@ test('Phase 2 Invariant 6: Customer identity alone CANNOT satisfy BUSINESS_OWNER
     activeCustomer: mockCustomer,
     activeStaff: null,
     tenantLookup: dummyTenantLookup,
-    isStaffMemberOfTenant: () => false,
     platformUser: {
       uid: 'cust-1',
       email: 'customer@example.com',
@@ -182,7 +180,6 @@ test('Phase 2 Invariant 7: Business Owner access allowed for verified business o
     activeCustomer: null,
     activeStaff: ownerStaff,
     tenantLookup: dummyTenantLookup,
-    isStaffMemberOfTenant: () => true,
     platformUser: {
       uid: 'staff-owner-1',
       email: 'owner@example.com',
@@ -213,7 +210,6 @@ test('Phase 2 Invariant 8: Super Admin platform routes require platform admin id
     activeCustomer: null,
     activeStaff: regularStaff,
     tenantLookup: dummyTenantLookup,
-    isStaffMemberOfTenant: () => true,
     platformIdentity: {
       uid: 'staff-2',
       role: 'None',
@@ -244,7 +240,6 @@ test('Phase 2 Invariant 9: Tenant membership is required for tenant operational 
     activeCustomer: null,
     activeStaff: externalStaff,
     tenantLookup: dummyTenantLookup,
-    isStaffMemberOfTenant: (_staffId, _tenantId) => false, // NOT a member of nexus-retail
     tenantMemberships: [],
   };
 
@@ -271,7 +266,6 @@ test('Remediation 1: Email containing "admin" or "super" DOES NOT grant Super Ad
     activeCustomer: null,
     activeStaff: null,
     tenantLookup: dummyTenantLookup,
-    isStaffMemberOfTenant: () => false,
     platformUser: userWithAdminEmail,
     platformIdentity: {
       uid: 'sneaky-user-1',
@@ -304,7 +298,6 @@ test('Remediation 2: Ordinary staff member WITHOUT owner relationship CANNOT acc
     activeCustomer: null,
     activeStaff: cashierStaff,
     tenantLookup: dummyTenantLookup,
-    isStaffMemberOfTenant: () => true,
     platformUser: {
       uid: 'cashier-99',
       email: 'charlie@example.com',
@@ -344,7 +337,6 @@ test('Remediation 3: Suspended platform user fails closed even if activeStaff PI
     activeCustomer: null,
     activeStaff: staffContext,
     tenantLookup: dummyTenantLookup,
-    isStaffMemberOfTenant: () => true,
     platformUser: suspendedPlatformUser,
   };
 
@@ -368,7 +360,6 @@ test('Remediation 4: Unresolved tenant memberships deny operational tenant works
     activeCustomer: null,
     activeStaff: null,
     tenantLookup: dummyTenantLookup,
-    isStaffMemberOfTenant: () => false,
     platformUser: userNoMemberships,
     tenantMemberships: [],
   };
@@ -395,7 +386,6 @@ test('Remediation 5: Legacy activeStaff alone CANNOT grant tenant operational ac
     activeCustomer: null,
     activeStaff: staffMember,
     tenantLookup: dummyTenantLookup,
-    isStaffMemberOfTenant: () => true, // Legacy lookup returns true!
     platformUser: {
       uid: 'staff-legacy-only',
       email: 'legacy@example.com',
@@ -424,7 +414,6 @@ test('Remediation 6: Suspended platform user fails closed on Customer account ro
     activeCustomer: null,
     activeStaff: null,
     tenantLookup: dummyTenantLookup,
-    isStaffMemberOfTenant: () => false,
     platformUser: suspendedCustomerUser,
   };
 
@@ -447,7 +436,6 @@ test('Remediation 7: Unresolved or invalid user status in user document fails cl
     activeCustomer: null,
     activeStaff: null,
     tenantLookup: dummyTenantLookup,
-    isStaffMemberOfTenant: () => false,
     platformUser: malformedUser,
   };
 
@@ -503,4 +491,61 @@ test('Remediation 9: Authoritative relationship subcollection query failures can
     /user business_relationships query failed/,
     'Business relationship subcollection failures must propagate into fail-closed context resolution'
   );
+});
+
+
+test('Remediation 10: Legacy staff membership callback cannot authorize tenant routes when authoritative memberships are unresolved', () => {
+  const context: RouteAuthContext = {
+    activeCustomer: null,
+    activeStaff: {
+      id: 'legacy-staff',
+      name: 'Legacy Staff',
+      email: 'legacy@example.com',
+      role: 'Store Manager',
+      pin: '1234',
+      status: 'Active',
+      avatar: '',
+    },
+    tenantLookup: dummyTenantLookup,
+    platformUser: {
+      uid: 'legacy-staff',
+      email: 'legacy@example.com',
+      status: 'active',
+      emailVerified: true,
+    },
+    tenantMemberships: undefined,
+  };
+
+  const tenantRoute = parseCanonicalRoute('/tenant/nexus-retail/dashboard');
+  const decision = evaluateCanonicalRouteGuard(tenantRoute, context);
+
+  assert.equal(decision.allowed, false);
+  assert.equal(decision.type, 'TENANT_MEMBERSHIP_REQUIRED');
+});
+
+test('Remediation 11: Tenant operational routes require an explicit tenant ID and never default to nexus-retail', () => {
+  const context: RouteAuthContext = {
+    activeCustomer: null,
+    activeStaff: null,
+    tenantLookup: dummyTenantLookup,
+    platformUser: {
+      uid: 'platform-user',
+      email: 'user@example.com',
+      status: 'active',
+      emailVerified: true,
+    },
+    platformIdentity: {
+      uid: 'platform-user',
+      role: 'Platform Operator',
+      isPlatformAdmin: true,
+      isSuperAdmin: false,
+    },
+    tenantMemberships: [],
+  };
+
+  const route = parseCanonicalRoute('/tenant//dashboard');
+  const decision = evaluateCanonicalRouteGuard(route, context);
+
+  assert.equal(decision.allowed, false);
+  assert.equal(decision.type, 'TENANT_NOT_FOUND');
 });
