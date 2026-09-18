@@ -128,17 +128,10 @@ export default function App() {
     authContextState = null;
   }
 
-  const isStaffMemberOfTenant = useCallback((staffId: string, tenantId: string): boolean => {
-    if (activeStaff.role === 'Super Admin') return true;
-    if (authContextState?.isTenantMember(tenantId)) return true;
-    return tenantId === 'nexus-retail';
-  }, [activeStaff, authContextState]);
-
   const authContext = useMemo(() => ({
     activeCustomer,
     activeStaff,
     tenantLookup,
-    isStaffMemberOfTenant,
     platformUser: authContextState?.user || null,
     platformIdentity: authContextState?.platformIdentity || null,
     tenantMemberships: authContextState?.tenantMemberships || [],
@@ -147,8 +140,7 @@ export default function App() {
   }), [
     activeCustomer, 
     activeStaff, 
-    tenantLookup, 
-    isStaffMemberOfTenant,
+    tenantLookup,
     authContextState?.user,
     authContextState?.platformIdentity,
     authContextState?.tenantMemberships,
