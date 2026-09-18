@@ -155,10 +155,6 @@ export default function UnifiedSearchPage({ initialQuery = '', onNavigate }: Uni
     );
   };
 
-  const businessResults = results?.businesses.items ?? [];
-  const productResults = results?.products.items ?? [];
-  const serviceResults = results?.services.items ?? [];
-
   return (
     <div className='min-h-screen bg-slate-50 text-slate-900' id='unified-search-root'>
       <header className='bg-slate-950 text-white px-4 sm:px-6 lg:px-10 py-6'>
