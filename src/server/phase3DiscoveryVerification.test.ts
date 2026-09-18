@@ -260,3 +260,61 @@ test('Phase 3E Invariant 38: unified search remains read-only and uses the canon
   assert.ok(!/\b(setDoc|addDoc|updateDoc|deleteDoc)\b/.test(repository));
   assert.match(ui, /import \{ discoveryRepository \} from '\.\.\/\.\.\/discovery\/discoveryRepository'/);
 });
+
+
+test('Phase 3F Invariant 39: discovery filters expose the canonical filter vocabulary', () => {
+  const source = readFileSync(resolve(process.cwd(), 'src/discovery/types.ts'), 'utf8');
+  for (const field of ['categorySlug', 'verifiedOnly', 'featuredOnly', 'openNow', 'availableOnly', 'minPrice', 'maxPrice', 'latitude', 'longitude', 'radiusKm']) {
+    assert.match(source, new RegExp(field + '\\?'));
+  }
+});
+
+test('Phase 3F Invariant 40: filter input is normalized and invalid numeric bounds are rejected', () => {
+  const source = readFileSync(resolve(process.cwd(), 'src/discovery/discoveryRepository.ts'), 'utf8');
+  assert.match(source, /function normalizeFilters/);
+  assert.match(source, /Number\.isFinite\(normalized\.minPrice\)/);
+  assert.match(source, /Number\.isFinite\(normalized\.maxPrice\)/);
+  assert.match(source, /normalized\.minPrice > normalized\.maxPrice/);
+});
+
+test('Phase 3F Invariant 41: geographic filter inputs validate coordinate ranges and cap radius', () => {
+  const source = readFileSync(resolve(process.cwd(), 'src/discovery/discoveryRepository.ts'), 'utf8');
+  assert.match(source, /normalized\.latitude! < -90/);
+  assert.match(source, /normalized\.longitude! > 180/);
+  assert.match(source, /Math\.min\(Math\.max\(normalized\.radiusKm, 1\), 100\)/);
+});
+
+test('Phase 3F Invariant 42: business filters cover category, verification, featured, open-now, and geographic radius', () => {
+  const source = readFileSync(resolve(process.cwd(), 'src/discovery/discoveryRepository.ts'), 'utf8');
+  for (const field of ['filters.categorySlug', 'filters.verifiedOnly', 'filters.featuredOnly', 'filters.openNow', 'filters.latitude', 'filters.longitude', 'filters.radiusKm']) {
+    assert.ok(source.includes(field), 'missing business filter: ' + field);
+  }
+});
+
+test('Phase 3F Invariant 43: product and service filters cover tenant/business/category and price constraints', () => {
+  const source = readFileSync(resolve(process.cwd(), 'src/discovery/discoveryRepository.ts'), 'utf8');
+  for (const field of ['filters.categorySlug', 'filters.tenantId', 'filters.businessId', 'filters.minPrice', 'filters.maxPrice']) {
+    assert.ok(source.includes(field), 'missing commerce/service filter: ' + field);
+  }
+  assert.match(source, /filters\.availableOnly/);
+});
+
+test('Phase 3F Invariant 44: category filtering is applied to category results as well as business/product/service results', () => {
+  const source = readFileSync(resolve(process.cwd(), 'src/discovery/discoveryRepository.ts'), 'utf8');
+  assert.match(source, /if \(filters\.categorySlug && item\.slug !== filters\.categorySlug\) return false/);
+});
+
+test('Phase 3F Invariant 45: canonical search UI exposes filter controls and a reset path', () => {
+  const source = readFileSync(resolve(process.cwd(), 'src/components/discovery/UnifiedSearchPage.tsx'), 'utf8');
+  for (const label of ['Category', 'Minimum price', 'Maximum price', 'Radius (km)', 'Verified businesses', 'Featured', 'Open now', 'Available now']) {
+    assert.match(source, new RegExp(label.replace(/[()]/g, '\\\\$&')));
+  }
+  assert.match(source, /Reset discovery filters/);
+  assert.match(source, /setFilters\(DEFAULT_FILTERS\)/);
+});
+
+test('Phase 3F Invariant 46: filter state is passed through the canonical discovery repository on search', () => {
+  const source = readFileSync(resolve(process.cwd(), 'src/components/discovery/UnifiedSearchPage.tsx'), 'utf8');
+  assert.match(source, /filters: \{ \.\.\.filters, text: submittedQuery \|\| undefined \}/);
+  assert.match(source, /sort,/);
+});
