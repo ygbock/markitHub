@@ -130,12 +130,16 @@ export function normalizeDiscoveryLocation(raw: Partial<BusinessLocation> & { [k
     addressLine1: raw.addressLine1,
     city: raw.city,
     country: raw.country,
-    geo: raw.geo && typeof raw.geo === 'object'
-      ? {
-          latitude: Number((raw.geo as Record<string, unknown>).latitude),
-          longitude: Number((raw.geo as Record<string, unknown>).longitude),
-        }
-      : undefined,
+    geo: (() => {
+      if (!raw.geo || typeof raw.geo !== 'object') return undefined;
+      const latitude = Number((raw.geo as Record<string, unknown>).latitude);
+      const longitude = Number((raw.geo as Record<string, unknown>).longitude);
+      if (!Number.isFinite(latitude) || !Number.isFinite(longitude) ||
+          latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) {
+        return undefined;
+      }
+      return { latitude, longitude };
+    })(),
     phone: raw.phone,
     isActive: raw.isActive,
     isOpenNow: typeof raw.isOpenNow === 'boolean' ? raw.isOpenNow : computeOpenNow(raw.operatingHours),
