@@ -100,6 +100,23 @@ export default function BusinessOnboardingShell({
           
           {/* Completed State */}
           {completedRecord ? (
+            completedRecord.registrationError ? (
+              <div className="text-center py-8 space-y-6">
+                <div className="w-16 h-16 rounded-2xl bg-rose-500/20 border border-rose-500/40 text-rose-400 mx-auto flex items-center justify-center shadow-lg">
+                  <ShieldCheck className="w-10 h-10" />
+                </div>
+                <div>
+                  <h2 className="text-2xl font-black text-white">Registration Could Not Be Completed</h2>
+                  <p className="text-sm text-slate-400 mt-2 max-w-md mx-auto">{completedRecord.registrationError}</p>
+                </div>
+                <button
+                  onClick={() => setCompletedRecord(null)}
+                  className="px-6 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs transition-all cursor-pointer"
+                >
+                  Return to Registration
+                </button>
+              </div>
+            ) : (
             <div className="text-center py-8 space-y-6">
               <div className="w-16 h-16 rounded-2xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 mx-auto flex items-center justify-center shadow-lg">
                 <CheckCircle2 className="w-10 h-10" />
@@ -158,6 +175,7 @@ export default function BusinessOnboardingShell({
                 </button>
               </div>
             </div>
+            )
           ) : (
             /* Multi-step Form */
             <div className="space-y-6">
