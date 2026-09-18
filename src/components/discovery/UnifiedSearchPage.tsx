@@ -12,19 +12,31 @@ const ENTITY_LABELS: Record<DiscoveryEntityType, string> = { business: 'Business
 
 function resultPath(result: DiscoverySearchItem): string {
   switch (result.type) {
-    case 'business': return '/business/' + result.item.slug;
+    case 'business': return '/business/' + (result.item as { slug?: string }).slug;
     case 'product': return '/product/' + result.item.id;
     case 'service': return '/service/' + result.item.id;
-    case 'category': return '/category/' + result.item.slug;
+    case 'category': return '/category/' + (result.item as { slug?: string }).slug;
   }
 }
 
 function resultDescription(result: DiscoverySearchItem): string {
   switch (result.type) {
-    case 'business': return result.item.headline || result.item.description;
-    case 'product': return result.item.description || 'Product available from a MikitHub business.';
-    case 'service': return result.item.description || 'Service offered by a MikitHub provider.';
-    case 'category': return result.item.description || 'Browse businesses and offerings in this category.';
+    case 'business': {
+      const b = result.item as { headline?: string; description?: string };
+      return b.headline || b.description || '';
+    }
+    case 'product': {
+      const p = result.item as { description?: string };
+      return p.description || 'Product available from a MikitHub business.';
+    }
+    case 'service': {
+      const s = result.item as { description?: string };
+      return s.description || 'Service offered by a MikitHub provider.';
+    }
+    case 'category': {
+      const c = result.item as { description?: string };
+      return c.description || 'Browse businesses and offerings in this category.';
+    }
   }
 }
 
@@ -99,7 +111,15 @@ export default function UnifiedSearchPage({ initialQuery = '', onNavigate }: Uni
           {rankedResults.map(result => <button key={result.type + '-' + result.item.id} onClick={() => onNavigate(resultPath(result))} className='text-left bg-white rounded-3xl border border-slate-200 p-5 hover:border-indigo-300 hover:shadow-lg transition-all group'>
             <div className='flex items-start justify-between gap-3'><div className='w-11 h-11 rounded-2xl bg-indigo-50 text-indigo-700 flex items-center justify-center shrink-0'>{result.type === 'business' && <Building2 className='w-5 h-5' />}{result.type === 'product' && <Package className='w-5 h-5' />}{result.type === 'service' && <Wrench className='w-5 h-5' />}{result.type === 'category' && <FolderTree className='w-5 h-5' />}</div><span className='text-[10px] uppercase tracking-wider font-black text-slate-400'>{ENTITY_LABELS[result.type]}</span></div>
             <h2 className='font-bold text-base mt-4 group-hover:text-indigo-600'>{result.item.name}</h2><p className='text-sm text-slate-500 mt-1 line-clamp-2'>{resultDescription(result)}</p>
-            {result.type === 'business' && <div className='flex items-center gap-2 mt-4 text-xs text-slate-500'>{result.item.isVerified && <span className='flex items-center gap-1 text-emerald-700 font-bold'><ShieldCheck className='w-3.5 h-3.5' /> Verified</span>}<span className='flex items-center gap-1'><Star className='w-3.5 h-3.5 text-amber-500' /> {result.item.ratingAverage.toFixed(1)} ({result.item.reviewCount})</span></div>}
+            {result.type === 'business' && (() => {
+              const b = result.item as import('../../discovery/types').DiscoveryBusiness;
+              return (
+                <div className='flex items-center gap-2 mt-4 text-xs text-slate-500'>
+                  {b.isVerified && <span className='flex items-center gap-1 text-emerald-700 font-bold'><ShieldCheck className='w-3.5 h-3.5' /> Verified</span>}
+                  <span className='flex items-center gap-1'><Star className='w-3.5 h-3.5 text-amber-500' /> {b.ratingAverage.toFixed(1)} ({b.reviewCount})</span>
+                </div>
+              );
+            })()}
             <div className='mt-4 flex items-center gap-1 text-xs font-bold text-indigo-600'>View result <ArrowRight className='w-3.5 h-3.5' /></div>
           </button>)}
         </div>}
