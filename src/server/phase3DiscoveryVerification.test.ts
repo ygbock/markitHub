@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { distanceKm } from '../discovery/discoveryRepository';
+import { computeOpenNow, distanceKm, parseOperatingHours } from '../discovery/discoveryRepository';
 
 test('Phase 3A Invariant 1: discovery domain exposes all four canonical entity types', async () => {
   const source = readFileSync(resolve(process.cwd(), 'src/discovery/types.ts'), 'utf8');
@@ -371,14 +371,12 @@ test('Phase 3G Invariant 53: geographic discovery remains read-only', () => {
 
 
 test('Phase 3G Remediation: operating-hours parser accepts standard HH:MM ranges', () => {
-  const { parseOperatingHours } = require('../discovery/discoveryRepository') as typeof import('../discovery/discoveryRepository');
   assert.deepEqual(parseOperatingHours('09:00-17:00'), { open: 540, close: 1020 });
   assert.deepEqual(parseOperatingHours('09:00 – 17:00'), { open: 540, close: 1020 });
   assert.deepEqual(parseOperatingHours('09:00—17:00'), { open: 540, close: 1020 });
 });
 
 test('Phase 3G Remediation: computeOpenNow handles open, closed, boundary, and missing days', () => {
-  const { computeOpenNow } = require('../discovery/discoveryRepository') as typeof import('../discovery/discoveryRepository');
   const hours = { monday: '09:00-17:00' };
   assert.equal(computeOpenNow(hours, new Date(2026, 8, 14, 8, 59)), false);
   assert.equal(computeOpenNow(hours, new Date(2026, 8, 14, 9, 0)), true);
@@ -388,7 +386,6 @@ test('Phase 3G Remediation: computeOpenNow handles open, closed, boundary, and m
 });
 
 test('Phase 3G Remediation: computeOpenNow supports midnight-crossing ranges and rejects malformed hours', () => {
-  const { computeOpenNow, parseOperatingHours } = require('../discovery/discoveryRepository') as typeof import('../discovery/discoveryRepository');
   const hours = { monday: '22:00-02:00' };
   assert.equal(computeOpenNow(hours, new Date(2026, 8, 14, 22, 30)), true);
   assert.equal(computeOpenNow(hours, new Date(2026, 8, 14, 1, 59)), true);
