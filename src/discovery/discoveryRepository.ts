@@ -96,13 +96,29 @@ export function computeOpenNow(operatingHours: unknown, now = new Date()): boole
   if (!operatingHours || typeof operatingHours !== 'object' || Array.isArray(operatingHours)) return undefined;
   const hours = operatingHours as Record<string, unknown>;
   const dayNames = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
-  const today = dayNames[now.getDay()];
-  const range = parseOperatingHours(hours[today] ?? hours[today.slice(0, 3)]);
-  if (!range) return undefined;
+  const dayIndex = now.getDay();
+  const today = dayNames[dayIndex];
   const minutes = now.getHours() * 60 + now.getMinutes();
-  return range.open < range.close
-    ? minutes >= range.open && minutes < range.close
-    : minutes >= range.open || minutes < range.close;
+  const range = parseOperatingHours(hours[today] ?? hours[today.slice(0, 3)]);
+
+  if (range) {
+    if (range.open < range.close) {
+      return minutes >= range.open && minutes < range.close;
+    }
+    // An overnight range belongs to the day on which it opens.
+    return minutes >= range.open;
+  }
+
+  // If today's schedule is absent, an overnight range from yesterday may
+  // still cover the current early-morning period.
+  const previousDayIndex = (dayIndex + 6) % 7;
+  const previousDay = dayNames[previousDayIndex];
+  const previousRange = parseOperatingHours(hours[previousDay] ?? hours[previousDay.slice(0, 3)]);
+  if (previousRange && previousRange.open > previousRange.close) {
+    return minutes < previousRange.close;
+  }
+
+  return undefined;
 }
 
 export function normalizeDiscoveryLocation(raw: Partial<BusinessLocation> & { [key: string]: any }): DiscoveryLocation {
