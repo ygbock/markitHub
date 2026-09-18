@@ -138,27 +138,6 @@ export default function UnifiedSearchPage({ initialQuery = '', onNavigate }: Uni
 
   const filterCount = activeFilterCount(filters);
 
-  const useMyLocation = () => {
-    if (!navigator.geolocation) {
-      setLocationStatus('error');
-      return;
-    }
-    setLocationStatus('loading');
-    navigator.geolocation.getCurrentPosition(
-      position => {
-        setFilters(current => ({
-          ...current,
-          latitude: position.coords.latitude,
-          longitude: position.coords.longitude,
-          radiusKm: current.radiusKm ?? 10,
-        }));
-        setLocationStatus('idle');
-      },
-      error => setLocationStatus(error.code === error.PERMISSION_DENIED ? 'denied' : 'error'),
-      { enableHighAccuracy: false, maximumAge: 300000, timeout: 10000 },
-    );
-  };
-
   return (
     <div className='min-h-screen bg-slate-50 text-slate-900' id='unified-search-root'>
       <header className='bg-slate-950 text-white px-4 sm:px-6 lg:px-10 py-6'>
