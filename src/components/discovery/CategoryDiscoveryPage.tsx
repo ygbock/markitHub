@@ -129,18 +129,9 @@ export default function CategoryDiscoveryPage({ categorySlug, onNavigate }: Cate
         // Load all category-linked result types with the canonical discovery filters.
         const slug = cat.slug;
         const [businesses, products, services] = await Promise.all([
-          discoveryRepository.listBusinesses({
-            limit: 100,
-            filters: { categorySlug: slug },
-          }),
-          discoveryRepository.listProducts({
-            limit: 100,
-            filters: { categorySlug: slug },
-          }),
-          discoveryRepository.listServices({
-            limit: 100,
-            filters: { categorySlug: slug },
-          }),
+          discoveryRepository.listBusinesses({ limit: 100, filters: { categorySlug: slug } }),
+          discoveryRepository.listProducts({ limit: 100, filters: { categorySlug: slug } }),
+          discoveryRepository.listServices({ limit: 100, filters: { categorySlug: slug } }),
         ]);
 
         const allCategories = await discoveryRepository.listCategories({ limit: 100 });
