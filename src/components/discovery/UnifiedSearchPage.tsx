@@ -48,7 +48,11 @@ function resultDescription(result: DiscoverySearchItem): string {
 }
 
 function activeFilterCount(filters: DiscoveryFilters): number {
-  return Object.values(filters).filter(value => value !== undefined && value !== '' && value !== false).length;
+  const values = Object.entries(filters).filter(([key, value]) =>
+    !['latitude', 'longitude'].includes(key) && value !== undefined && value !== '' && value !== false,
+  );
+  const hasLocation = filters.latitude != null && filters.longitude != null;
+  return values.length + (hasLocation ? 1 : 0);
 }
 
 export default function UnifiedSearchPage({ initialQuery = '', onNavigate }: UnifiedSearchPageProps) {
@@ -250,7 +254,7 @@ export default function UnifiedSearchPage({ initialQuery = '', onNavigate }: Uni
               </div>
 
               <div className='sm:col-span-2 lg:col-span-4 text-[11px] text-slate-400'>
-                Distance and “open now” are applied from authoritative business location data. A radius without a latitude/longitude origin is intentionally ignored.
+                Distance and “open now” are applied from authoritative business location data. Location filtering applies to business results; products and services retain their business linkage for entity navigation. A radius without a latitude/longitude origin is intentionally ignored.
               </div>
             </div>
           )}
