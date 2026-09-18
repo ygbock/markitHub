@@ -136,12 +136,14 @@ function normalizeProduct(raw: Product & Record<string, unknown>, id: string, te
   };
 }
 
-function normalizeService(raw: DocumentData, id: string): DiscoveryService | null {
-  if (raw.published === false || raw.status === 'inactive' || raw.status === 'archived') return null;
-  if (raw.isPublished === false) return null;
+function normalizeService(raw: DocumentData, id: string, tenantId?: string): DiscoveryService | null {
+  const status = String(raw.status ?? 'active').toLowerCase();
+  const published = raw.published === true || raw.isPublished === true || raw.storefrontStatus === 'Published';
+  if (!published || ['inactive', 'archived', 'suspended', 'draft'].includes(status)) return null;
+  if (raw.publishTargets?.website === false) return null;
   return {
     id,
-    tenantId: raw.tenantId,
+    tenantId: tenantId || raw.tenantId,
     businessId: raw.businessId,
     name: String(raw.name || ''),
     slug: raw.slug,
@@ -320,11 +322,40 @@ export class FirestoreDiscoveryRepository implements DiscoveryRepository {
     return paginate(items, queryOptions);
   }
 
+  async getServiceById(id: string): Promise<DiscoveryService | null> {
+    const clean = id.trim();
+    if (!clean) return null;
+    const snapshot = await getDocs(query(collectionGroup(db, 'services'), firestoreLimit(100)));
+    for (const docSnap of snapshot.docs) {
+      if (docSnap.id !== clean) continue;
+      const tenantId = docSnap.ref.parent.parent?.id;
+      const item = normalizeService(docSnap.data(), docSnap.id, tenantId);
+      if (item) return item;
+    }
+    return null;
+  }
+
+  async getServiceBySlug(slug: string): Promise<DiscoveryService | null> {
+    const normalizedSlug = slug.trim().toLowerCase();
+    if (!normalizedSlug) return null;
+    const snapshot = await getDocs(query(
+      collectionGroup(db, 'services'),
+      where('slug', '==', normalizedSlug),
+      firestoreLimit(3),
+    ));
+    for (const docSnap of snapshot.docs) {
+      const tenantId = docSnap.ref.parent.parent?.id;
+      const item = normalizeService(docSnap.data(), docSnap.id, tenantId);
+      if (item) return item;
+    }
+    return null;
+  }
+
   async listServices(queryOptions: DiscoveryQuery = {}): Promise<DiscoverySearchResult<DiscoveryService>> {
     const take = boundedLimit(queryOptions.limit);
     const snapshot = await getDocs(query(collectionGroup(db, 'services'), ...constraintsForPublicCollection(take)));
     const items = snapshot.docs
-      .map(docSnap => normalizeService(docSnap.data(), docSnap.id))
+      .map(docSnap => normalizeService(docSnap.data(), docSnap.id, docSnap.ref.parent.parent?.id))
       .filter((item): item is DiscoveryService => item !== null)
       .filter(item => matchesService(item, queryOptions.filters));
     return paginate(items, queryOptions);
