@@ -9,7 +9,7 @@ test('Phase 4 Invariant 1: public business profile is owned by the canonical pub
   const routes = read('src/routes/canonicalRoutes.ts');
   const app = read('src/App.tsx');
   const page = read('src/components/discovery/PublicBusinessProfilePage.tsx');
-  assert.match(routes, /id: 'public\\.business\\.profile'[\\s\\S]*pattern: '\\/business\\\/:businessSlug'[\\s\\S]*domain: 'PUBLIC_DISCOVERY'/);
+  assert.match(routes, /id: 'public\.business\.profile'[\s\S]*pattern: '\/business\/:businessSlug'[\s\S]*domain: 'PUBLIC_DISCOVERY'/);
   assert.match(app, /currentRoute\\.definition\\.id === 'public\\.business\\.profile'/);
   assert.match(app, /PublicBusinessProfilePage/);
   assert.match(page, /onNavigate\\('\/businesses'\\)/);
