@@ -439,10 +439,10 @@ export default function CategoryDiscoveryPage({ categorySlug, onNavigate }: Cate
                     </h2>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
-                    {products.map(prod => (
+                    {productucts.map(product => (
                       <button
-                        key={prod.id}
-                        onClick={() => onNavigate(prod.slug ? '/product/' + prod.slug : `/products`)}
+                        key={product.id}
+                        onClick={() => onNavigate(product.slug ? '/productuct/' + product.slug : `/productucts`)}
                         className="text-left bg-white rounded-3xl border border-slate-200 p-5 hover:border-indigo-300 hover:shadow-lg transition-all group"
                       >
                         <div className="flex items-start justify-between gap-3">
@@ -450,15 +450,15 @@ export default function CategoryDiscoveryPage({ categorySlug, onNavigate }: Cate
                             <Package className="w-5 h-5" />
                           </div>
                           <span className="text-sm font-black text-indigo-600">
-                            {prod.currency || '$'}{prod.price.toFixed(2)}
+                            {product.currency || '$'}{product.price.toFixed(2)}
                           </span>
                         </div>
                         <h3 className="font-bold text-base text-slate-900 mt-3 group-hover:text-indigo-600 transition-colors">
-                          {prod.name}
+                          {product.name}
                         </h3>
-                        <p className="text-sm text-slate-500 mt-1 line-clamp-2">{prod.description || 'Quality product offering.'}</p>
+                        <p className="text-sm text-slate-500 mt-1 line-clamp-2">{product.description || 'Quality productuct offering.'}</p>
                         <div className="flex items-center justify-between mt-4 pt-3 border-t border-slate-100 text-xs text-slate-500">
-                          <span>{prod.brand || 'Available in stock'}</span>
+                          <span>{product.brand || 'Available in stock'}</span>
                           <span className="flex items-center gap-1 text-indigo-600 font-bold">
                             View Product <ArrowRight className="w-3 h-3" />
                           </span>
@@ -478,28 +478,28 @@ export default function CategoryDiscoveryPage({ categorySlug, onNavigate }: Cate
                     </h2>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
-                    {services.map(serv => (
+                    {serviceices.map(service => (
                       <button
-                        key={serv.id}
-                        onClick={() => onNavigate(serv.slug ? '/service/' + serv.slug : `/services`)}
+                        key={service.id}
+                        onClick={() => onNavigate(service.slug ? '/serviceice/' + service.slug : `/serviceices`)}
                         className="text-left bg-white rounded-3xl border border-slate-200 p-5 hover:border-indigo-300 hover:shadow-lg transition-all group"
                       >
                         <div className="flex items-start justify-between gap-3">
                           <div className="w-10 h-10 rounded-xl bg-sky-50 text-sky-600 flex items-center justify-center shrink-0">
                             <Wrench className="w-5 h-5" />
                           </div>
-                          {serv.price != null && (
+                          {service.price != null && (
                             <span className="text-sm font-black text-indigo-600">
-                              {serv.currency || '$'}{serv.price.toFixed(2)}
+                              {service.currency || '$'}{service.price.toFixed(2)}
                             </span>
                           )}
                         </div>
                         <h3 className="font-bold text-base text-slate-900 mt-3 group-hover:text-indigo-600 transition-colors">
-                          {serv.name}
+                          {service.name}
                         </h3>
-                        <p className="text-sm text-slate-500 mt-1 line-clamp-2">{serv.description || 'Professional service.'}</p>
+                        <p className="text-sm text-slate-500 mt-1 line-clamp-2">{service.description || 'Professional serviceice.'}</p>
                         <div className="flex items-center justify-between mt-4 pt-3 border-t border-slate-100 text-xs text-slate-500">
-                          <span>{serv.durationMinutes ? `${serv.durationMinutes} mins` : 'Available for booking'}</span>
+                          <span>{service.durationMinutes ? `${service.durationMinutes} mins` : 'Available for booking'}</span>
                           <span className="flex items-center gap-1 text-indigo-600 font-bold">
                             View Service <ArrowRight className="w-3 h-3" />
                           </span>
@@ -529,7 +529,7 @@ export default function CategoryDiscoveryPage({ categorySlug, onNavigate }: Cate
           </button>
           <div className="text-right">
             <h1 className="text-xl sm:text-2xl font-black">All Categories</h1>
-            <p className="text-xs text-slate-300">Browse businesses, products, and services by industry.</p>
+            <p className="text-xs text-slate-300">Browse businesses, products, and serviceices by industry.</p>
           </div>
         </div>
       </header>
