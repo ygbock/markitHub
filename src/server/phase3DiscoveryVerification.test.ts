@@ -318,3 +318,53 @@ test('Phase 3F Invariant 46: filter state is passed through the canonical discov
   assert.match(source, /filters: \{ \.\.\.filters, text: submittedQuery \|\| undefined \}/);
   assert.match(source, /sort,/);
 });
+
+
+test('Phase 3G Invariant 47: geographic discovery has a dedicated canonical nearby/map UI', () => {
+  const source = readFileSync(resolve(process.cwd(), 'src/components/discovery/GeographicDiscoveryPage.tsx'), 'utf8');
+  assert.match(source, /mode: 'nearby' \| 'map'/);
+  assert.match(source, /navigator\.geolocation/);
+  assert.match(source, /discoveryRepository\.listBusinesses/);
+});
+
+test('Phase 3G Invariant 48: browser geolocation is opt-in through the platform geolocation API with permission-denied handling', () => {
+  const source = readFileSync(resolve(process.cwd(), 'src/components/discovery/GeographicDiscoveryPage.tsx'), 'utf8');
+  assert.match(source, /getCurrentPosition/);
+  assert.match(source, /PERMISSION_DENIED/);
+  assert.match(source, /Use my location/);
+});
+
+test('Phase 3G Invariant 49: nearby discovery uses authoritative coordinates and a bounded radius', () => {
+  const source = readFileSync(resolve(process.cwd(), 'src/components/discovery/GeographicDiscoveryPage.tsx'), 'utf8');
+  assert.match(source, /radiusKm/);
+  assert.match(source, /latitude: origin\.latitude, longitude: origin\.longitude/);
+  assert.match(source, /\[5, 10, 25, 50, 100\]/);
+});
+
+test('Phase 3G Invariant 50: geographic routes bypass the static discovery shell and render the geographic experience', () => {
+  const source = readFileSync(resolve(process.cwd(), 'src/App.tsx'), 'utf8');
+  assert.match(source, /currentRoute\.definition\.id === 'public\.nearby'/);
+  assert.match(source, /currentRoute\.definition\.id === 'public\.map'/);
+  assert.match(source, /GeographicDiscoveryPage/);
+  assert.match(source, /currentRoute\.definition\.id !== 'public\.nearby'/);
+  assert.match(source, /currentRoute\.definition\.id !== 'public\.map'/);
+});
+
+test('Phase 3G Invariant 51: nearby results navigate to canonical business profiles', () => {
+  const source = readFileSync(resolve(process.cwd(), 'src/components/discovery/GeographicDiscoveryPage.tsx'), 'utf8');
+  assert.match(source, /onNavigate\('\/business\/' \+ business\.slug\)/);
+});
+
+test('Phase 3G Invariant 52: discovery location normalization derives open-now from authoritative operating hours when explicit state is absent', () => {
+  const source = readFileSync(resolve(process.cwd(), 'src/discovery/discoveryRepository.ts'), 'utf8');
+  assert.match(source, /function computeOpenNow/);
+  assert.match(source, /raw\.isOpenNow === 'boolean'/);
+  assert.match(source, /computeOpenNow\(raw\.operatingHours\)/);
+});
+
+test('Phase 3G Invariant 53: geographic discovery remains read-only', () => {
+  const repository = readFileSync(resolve(process.cwd(), 'src/discovery/discoveryRepository.ts'), 'utf8');
+  const ui = readFileSync(resolve(process.cwd(), 'src/components/discovery/GeographicDiscoveryPage.tsx'), 'utf8');
+  assert.ok(!/\b(setDoc|addDoc|updateDoc|deleteDoc)\b/.test(repository));
+  assert.ok(!/\b(setDoc|addDoc|updateDoc|deleteDoc)\b/.test(ui));
+});
