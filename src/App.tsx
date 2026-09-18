@@ -1515,21 +1515,17 @@ export default function App() {
       )}
 
       {/* 2b. Public Discovery Domain (/ or /discover, /business/:slug, /nearby) */}
-      {activeDomain === 'PUBLIC_DISCOVERY' && currentRoute.definition.id !== 'public.search' && currentRoute.definition.id !== 'public.nearby' && currentRoute.definition.id !== 'public.map' && currentRoute.definition.id !== 'public.categories' && currentRoute.definition.id !== 'public.category.detail' && (
+      {activeDomain === 'PUBLIC_DISCOVERY' && 
+        currentRoute.definition.id !== 'public.search' && 
+        currentRoute.definition.id !== 'public.nearby' && 
+        currentRoute.definition.id !== 'public.map' && 
+        currentRoute.definition.id !== 'public.categories' && 
+        currentRoute.definition.id !== 'public.category.detail' && (
         <PublicDiscoveryShell
           businessSlug={currentRoute.params.businessSlug}
           products={products}
           onNavigate={navigate}
           onOpenLogin={() => navigate(`/login?returnUrl=${encodeURIComponent(currentRoute.pathname)}`)}
-        />
-      )}
-
-      {/* 2b-category. Canonical category discovery (/categories, /category/:categorySlug) */}
-      {activeDomain === 'PUBLIC_DISCOVERY' && (currentRoute.definition.id === 'public.categories' || currentRoute.definition.id === 'public.category.detail') && (
-        <CategoryDiscoveryPage
-          mode={currentRoute.definition.id === 'public.categories' ? 'index' : 'detail'}
-          categorySlug={currentRoute.params.categorySlug}
-          onNavigate={navigate}
         />
       )}
 
@@ -1545,6 +1541,14 @@ export default function App() {
       {activeDomain === 'PUBLIC_DISCOVERY' && currentRoute.definition.id === 'public.search' && (
         <UnifiedSearchPage
           initialQuery={currentRoute.query.q || ''}
+          onNavigate={navigate}
+        />
+      )}
+
+      {/* 2b-category. Canonical category index & detail (/categories, /category/:categorySlug) */}
+      {activeDomain === 'PUBLIC_DISCOVERY' && (currentRoute.definition.id === 'public.categories' || currentRoute.definition.id === 'public.category.detail') && (
+        <CategoryDiscoveryPage
+          categorySlug={currentRoute.params.categorySlug}
           onNavigate={navigate}
         />
       )}

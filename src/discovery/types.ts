@@ -150,6 +150,8 @@ export interface DiscoveryRepository {
   getCategoryBySlug(slug: string): Promise<DiscoveryCategory | null>;
   listProducts(query?: DiscoveryQuery): Promise<DiscoverySearchResult<DiscoveryProduct>>;
   listServices(query?: DiscoveryQuery): Promise<DiscoverySearchResult<DiscoveryService>>;
+  getCategoryById(id: string): Promise<DiscoveryCategory | null>;
+  getCategoryBySlug(slug: string): Promise<DiscoveryCategory | null>;
   listCategories(query?: DiscoveryQuery): Promise<DiscoverySearchResult<DiscoveryCategory>>;
   search(query: DiscoveryQuery): Promise<UnifiedDiscoveryResults>;
 }

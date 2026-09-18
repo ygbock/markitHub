@@ -487,6 +487,25 @@ export class FirestoreDiscoveryRepository implements DiscoveryRepository {
     return paginate(items, normalizedQuery);
   }
 
+  async getCategoryById(id: string): Promise<DiscoveryCategory | null> {
+    if (!id) return null;
+    const docSnap = await getDoc(doc(db, 'categories', id));
+    if (!docSnap.exists()) return null;
+    const raw = docSnap.data() as Category;
+    if (raw.status === 'inactive') return null;
+    return {
+      id: docSnap.id,
+      name: raw.name || '',
+      slug: raw.slug || docSnap.id,
+      description: raw.description,
+      image: raw.image,
+      icon: raw.icon,
+      parentId: raw.parent_id ?? null,
+      sortOrder: Number(raw.sort_order ?? 0),
+      status: 'active',
+    };
+  }
+
   async getCategoryBySlug(slug: string): Promise<DiscoveryCategory | null> {
     const normalizedSlug = slug.trim().toLowerCase();
     if (!normalizedSlug) return null;
