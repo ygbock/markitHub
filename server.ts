@@ -110,9 +110,9 @@ declare global {
   }
 }
 
-// Cloud Run (and AI Studio publishing) supplies PORT at runtime.
-// Keep 3000 as the local-development fallback.
-const PORT = Number.parseInt(process.env.PORT || '3000', 10);
+// Container ingress reverse proxy exclusively forwards traffic to port 3000.
+// Do not read process.env.PORT as Cloud Run sets it to 8080.
+const PORT = 3000;
 const HOST = '0.0.0.0';
 
 // Initialize Gemini SDK with telemetry header
