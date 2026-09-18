@@ -226,6 +226,52 @@ function sortBusinesses(items: DiscoveryBusiness[], queryOptions: DiscoveryQuery
   });
 }
 
+function searchScore(value: unknown, queryText: string): number {
+  const haystack = String(value ?? '').trim().toLowerCase();
+  const needle = queryText.trim().toLowerCase();
+  if (!haystack || !needle) return 0;
+  if (haystack === needle) return 100;
+  if (haystack.startsWith(needle)) return 75;
+  if (haystack.includes(needle)) return 45;
+  const tokens = needle.split(/\\s+/).filter(Boolean);
+  const matched = tokens.filter(token => haystack.includes(token)).length;
+  return tokens.length ? (matched / tokens.length) * 25 : 0;
+}
+
+function scoreDiscoveryItem(type: 'business' | 'product' | 'service' | 'category', item: any, queryText: string): number {
+  if (!queryText.trim()) return 0;
+  switch (type) {
+    case 'business':
+      return Math.max(
+        searchScore(item.name, queryText) + 8,
+        searchScore(item.headline, queryText) + 5,
+        searchScore(item.categories, queryText),
+        searchScore(item.tags, queryText),
+      ) + (item.isVerified ? 1 : 0) + (item.isFeatured ? 1 : 0);
+    case 'product':
+      return Math.max(
+        searchScore(item.name, queryText) + 8,
+        searchScore(item.brand, queryText) + 5,
+        searchScore(item.category, queryText),
+        searchScore(item.tags, queryText),
+        searchScore(item.description, queryText),
+      ) + (item.featured ? 1 : 0);
+    case 'service':
+      return Math.max(
+        searchScore(item.name, queryText) + 8,
+        searchScore(item.category, queryText),
+        searchScore(item.tags, queryText),
+        searchScore(item.description, queryText),
+      );
+    case 'category':
+      return Math.max(
+        searchScore(item.name, queryText) + 8,
+        searchScore(item.slug, queryText) + 5,
+        searchScore(item.description, queryText),
+      );
+  }
+}
+
 function paginate<T>(items: T[], queryOptions: DiscoveryQuery = {}): DiscoverySearchResult<T> {
   const offset = Math.max(queryOptions.offset ?? 0, 0);
   const take = boundedLimit(queryOptions.limit);
@@ -384,13 +430,33 @@ export class FirestoreDiscoveryRepository implements DiscoveryRepository {
 
   async search(queryOptions: DiscoveryQuery = {}): Promise<UnifiedDiscoveryResults> {
     const types = queryOptions.types ?? ['business', 'product', 'service', 'category'];
+    const candidateLimit = Math.min(boundedLimit(queryOptions.limit) * 3, MAX_LIMIT);
+    const candidateQuery = { ...queryOptions, limit: candidateLimit, offset: 0, sort: 'relevance' as const };
+    const empty = { items: [], total: 0, hasMore: false };
     const [businesses, products, services, categories] = await Promise.all([
-      types.includes('business') ? this.listBusinesses(queryOptions) : Promise.resolve({ items: [], total: 0, hasMore: false }),
-      types.includes('product') ? this.listProducts(queryOptions) : Promise.resolve({ items: [], total: 0, hasMore: false }),
-      types.includes('service') ? this.listServices(queryOptions) : Promise.resolve({ items: [], total: 0, hasMore: false }),
-      types.includes('category') ? this.listCategories(queryOptions) : Promise.resolve({ items: [], total: 0, hasMore: false }),
+      types.includes('business') ? this.listBusinesses(candidateQuery) : Promise.resolve(empty),
+      types.includes('product') ? this.listProducts(candidateQuery) : Promise.resolve(empty),
+      types.includes('service') ? this.listServices(candidateQuery) : Promise.resolve(empty),
+      types.includes('category') ? this.listCategories(candidateQuery) : Promise.resolve(empty),
     ]);
-    return { businesses, products, services, categories };
+
+    const text = queryOptions.filters?.text?.trim() ?? '';
+    const rankedResults = [
+      ...businesses.items.map(item => ({ type: 'business' as const, item, score: scoreDiscoveryItem('business', item, text) })),
+      ...products.items.map(item => ({ type: 'product' as const, item, score: scoreDiscoveryItem('product', item, text) })),
+      ...services.items.map(item => ({ type: 'service' as const, item, score: scoreDiscoveryItem('service', item, text) })),
+      ...categories.items.map(item => ({ type: 'category' as const, item, score: scoreDiscoveryItem('category', item, text) })),
+    ]
+      .sort((a, b) => b.score - a.score || a.item.name.localeCompare(b.item.name))
+      .slice(0, boundedLimit(queryOptions.limit));
+
+    return {
+      businesses: paginate(businesses.items, queryOptions),
+      products: paginate(products.items, queryOptions),
+      services: paginate(services.items, queryOptions),
+      categories: paginate(categories.items, queryOptions),
+      rankedResults,
+    };
   }
 }
 
