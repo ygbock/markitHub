@@ -32,7 +32,6 @@ export interface RouteAuthContext {
   activeCustomer: Customer | null;
   activeStaff: StaffMember | null;
   tenantLookup: (tenantIdOrSlug: string) => TenantContextRecord | null;
-  isStaffMemberOfTenant: (staffId: string, tenantId: string) => boolean;
   platformUser?: User | null;
   platformIdentity?: PlatformIdentity | null;
   tenantMemberships?: TenantMembership[];
@@ -131,7 +130,10 @@ export function evaluateCanonicalRouteGuard(
       return { type: 'PERMISSION_DENIED', allowed: false, message: 'Your account status is not active.' };
     }
 
-    const targetTenantId = params.tenantId || 'nexus-retail';
+    const targetTenantId = params.tenantId;
+    if (!targetTenantId) {
+      return { type: 'TENANT_NOT_FOUND', allowed: false, message: 'A tenant ID is required for tenant operational routes.' };
+    }
     const tenant = authContext.tenantLookup(targetTenantId);
     if (!tenant) {
       return { type: 'TENANT_NOT_FOUND', allowed: false, message: `Tenant "${targetTenantId}" does not exist on the platform.` };
@@ -141,10 +143,7 @@ export function evaluateCanonicalRouteGuard(
     const hasAuthoritativeMembership = !!authContext.tenantMemberships?.some(m =>
       (m.tenantId === tenant.id || m.tenantId === tenant.slug || m.tenantId === `tenant-${tenant.id}`) && m.status === 'active'
     );
-    const hasLegacyMembership = authContext.tenantMemberships === undefined && authContext.activeStaff
-      ? (authContext.isStaffMemberOfTenant(authContext.activeStaff.id, tenant.id) || authContext.isStaffMemberOfTenant(authContext.activeStaff.id, tenant.slug))
-      : false;
-    const isMember = isSuperAdmin || hasAuthoritativeMembership || hasLegacyMembership;
+    const isMember = isSuperAdmin || hasAuthoritativeMembership;
 
     if (!isMember) {
       return { type: 'TENANT_MEMBERSHIP_REQUIRED', allowed: false, message: `You do not have active staff membership in tenant "${tenant.name}".`, tenant };
