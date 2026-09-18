@@ -112,3 +112,50 @@ test('Phase 3B Invariant 18: distance sorting uses real business location coordi
   assert.match(source, /case 'distance': return withDistance\\(a\\) - withDistance\\(b\\)/);
   assert.match(source, /item\\.locations\\.filter\\(l => l\\.geo\\)/);
 });
+
+
+test('Phase 3C Invariant 19: product discovery derives tenant ownership from the Firestore product path when available', () => {
+  const source = readFileSync(resolve(process.cwd(), 'src/discovery/discoveryRepository.ts'), 'utf8');
+  assert.match(source, /docSnap\.ref\.parent\.parent\?\.id/);
+  assert.match(source, /tenantId: tenantId/);
+});
+
+test('Phase 3C Invariant 20: publicly discoverable products must be active and published, with explicit website opt-out respected', () => {
+  const source = readFileSync(resolve(process.cwd(), 'src/discovery/discoveryRepository.ts'), 'utf8');
+  assert.match(source, /status !== 'Active'/);
+  assert.match(source, /published = ecommerce\?\.published === true/);
+  assert.match(source, /publishTargets\?\.website === false/);
+});
+
+test('Phase 3C Invariant 21: product availability includes variant stock and explicit backorder policy', () => {
+  const source = readFileSync(resolve(process.cwd(), 'src/discovery/discoveryRepository.ts'), 'utf8');
+  assert.match(source, /variant\.available \?\? variant\.onHand \?\? variant\.stock/);
+  assert.match(source, /raw\.allowBackorder === true/);
+});
+
+test('Phase 3C Invariant 22: product discovery supports canonical ID and slug lookups', () => {
+  const source = readFileSync(resolve(process.cwd(), 'src/discovery/types.ts'), 'utf8');
+  assert.match(source, /getProductById/);
+  assert.match(source, /getProductBySlug/);
+  const repository = readFileSync(resolve(process.cwd(), 'src/discovery/discoveryRepository.ts'), 'utf8');
+  assert.match(repository, /where\('ecommerce\.slug', '==', normalizedSlug\)/);
+});
+
+test('Phase 3C Invariant 23: product discovery supports category, brand, price, availability, featured, tenant, and business filters', () => {
+  const source = readFileSync(resolve(process.cwd(), 'src/discovery/discoveryRepository.ts'), 'utf8');
+  assert.ok(source.includes('filters.categorySlug'));
+  assert.ok(source.includes('filters.tenantId'));
+  assert.ok(source.includes('filters.businessId'));
+  assert.ok(source.includes('filters.availableOnly'));
+  assert.ok(source.includes('filters.minPrice'));
+  assert.ok(source.includes('filters.maxPrice'));
+  assert.ok(source.includes('filters.featuredOnly'));
+  assert.ok(source.includes('textMatches(item.brand'));
+});
+
+test('Phase 3C Invariant 24: product lookup and discovery remain read-only and bounded', () => {
+  const source = readFileSync(resolve(process.cwd(), 'src/discovery/discoveryRepository.ts'), 'utf8');
+  assert.ok(!/\b(setDoc|addDoc|updateDoc|deleteDoc)\b/.test(source));
+  assert.match(source, /firestoreLimit\(3\)/);
+  assert.match(source, /firestoreLimit\(100\)/);
+});
