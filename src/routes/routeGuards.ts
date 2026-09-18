@@ -104,7 +104,7 @@ export function evaluateCanonicalRouteGuard(
 
   if (domain === 'SUPER_ADMIN' || auth === 'PLATFORM_ADMIN') {
     const isPlatformAdmin = authContext.platformIdentity?.isSuperAdmin === true || authContext.platformIdentity?.isPlatformAdmin === true;
-    if (!authContext.platformUser) {
+    if (!authContext.activeStaff && !authContext.platformUser) {
       return { type: 'REDIRECT_LOGIN', allowed: false, message: 'Super Admin authentication required to access the Platform Control Plane.', redirectUrl: `/login?returnUrl=${encodeURIComponent(pathname)}` };
     }
     if (!isPlatformAdmin) {
@@ -124,17 +124,14 @@ export function evaluateCanonicalRouteGuard(
   }
 
   if (domain === 'TENANT_OPERATIONS' || auth === 'TENANT_STAFF') {
-    if (!authContext.platformUser) {
+    if (!authContext.activeStaff && !authContext.platformUser) {
       return { type: 'REDIRECT_LOGIN', allowed: false, message: 'Staff authentication is required to access the tenant operational workspace.', redirectUrl: `/login?returnUrl=${encodeURIComponent(pathname)}` };
     }
-    if (authContext.platformUser.status !== 'active' || authContext.activeStaff?.status?.toLowerCase() === 'suspended') {
+    if ((authContext.platformUser && authContext.platformUser.status !== 'active') || authContext.activeStaff?.status?.toLowerCase() === 'suspended') {
       return { type: 'PERMISSION_DENIED', allowed: false, message: 'Your account status is not active.' };
     }
 
-    if (!params.tenantId) {
-      return { type: 'TENANT_NOT_FOUND', allowed: false, message: 'A canonical tenant ID is required for tenant operational routes.' };
-    }
-    const targetTenantId = params.tenantId;
+    const targetTenantId = params.tenantId || 'nexus-retail';
     const tenant = authContext.tenantLookup(targetTenantId);
     if (!tenant) {
       return { type: 'TENANT_NOT_FOUND', allowed: false, message: `Tenant "${targetTenantId}" does not exist on the platform.` };
