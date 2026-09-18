@@ -82,6 +82,29 @@ function distanceKm(a: { latitude: number; longitude: number }, b: { latitude: n
   return 6371 * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
 }
 
+function parseOperatingHours(value: unknown): { open: number; close: number } | null {
+  if (typeof value !== 'string') return null;
+  const match = value.trim().match(/^(\\d{1,2}):(\\d{2})\\s*(?:-|–|—)\\s*(\\d{1,2}):(\\d{2})$/);
+  if (!match) return null;
+  const open = Number(match[1]) * 60 + Number(match[2]);
+  const close = Number(match[3]) * 60 + Number(match[4]);
+  if (open > 1439 || close > 1439 || open === close) return null;
+  return { open, close };
+}
+
+function computeOpenNow(operatingHours: unknown, now = new Date()): boolean | undefined {
+  if (!operatingHours || typeof operatingHours !== 'object' || Array.isArray(operatingHours)) return undefined;
+  const hours = operatingHours as Record<string, unknown>;
+  const dayNames = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+  const today = dayNames[now.getDay()];
+  const range = parseOperatingHours(hours[today] ?? hours[today.slice(0, 3)]);
+  if (!range) return undefined;
+  const minutes = now.getHours() * 60 + now.getMinutes();
+  return range.open < range.close
+    ? minutes >= range.open && minutes < range.close
+    : minutes >= range.open || minutes < range.close;
+}
+
 function normalizeLocation(raw: Partial<BusinessLocation> & { [key: string]: any }): DiscoveryLocation {
   return {
     id: raw.id,
@@ -99,6 +122,7 @@ function normalizeLocation(raw: Partial<BusinessLocation> & { [key: string]: any
       : undefined,
     phone: raw.phone,
     isActive: raw.isActive,
+    isOpenNow: typeof raw.isOpenNow === 'boolean' ? raw.isOpenNow : computeOpenNow(raw.operatingHours),
   };
 }
 
