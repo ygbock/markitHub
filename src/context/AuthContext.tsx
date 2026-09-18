@@ -58,13 +58,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       if (userSnap.exists()) {
         const data = userSnap.data();
+        // Strict fail closed check: Status MUST be explicitly 'active' or 'suspended'
+        if (!data || typeof data.status !== 'string' || (data.status !== 'active' && data.status !== 'suspended')) {
+          console.error(`[AuthProvider] User ${fbUser.uid} document status is invalid or missing: "${data?.status}"`);
+          throw new Error(`Authoritative user status invalid or missing for ${fbUser.uid}: "${data?.status}"`);
+        }
         const resolvedUser: User = {
           uid: fbUser.uid,
           email: fbUser.email || data.email || '',
           displayName: fbUser.displayName || data.displayName || '',
           photoURL: fbUser.photoURL || data.photoURL || '',
           emailVerified: fbUser.emailVerified || !!data.emailVerified,
-          status: data.status === 'suspended' ? 'suspended' : 'active',
+          status: data.status,
           createdAt: data.createdAt || new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         };
@@ -91,62 +96,64 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, []);
 
-  // Resolve platform identity authoritatively from platform_users/{uid} or users/{uid} fields (NO EMAIL HEURISTICS)
+  // Resolve platform identity authoritatively from platform_users/{uid} or users/{uid} fields (NO SWALLOWING ERRORS)
   const resolvePlatformIdentity = useCallback(async (fbUser: FirebaseUser): Promise<PlatformIdentity> => {
+    // 1. Check platform_users/{uid}
+    const platformDocRef = doc(db, 'platform_users', fbUser.uid);
+    let platformSnap;
     try {
-      // 1. Check platform_users/{uid}
-      const platformDocRef = doc(db, 'platform_users', fbUser.uid);
-      const platformSnap = await getDoc(platformDocRef).catch(() => null);
-
-      if (platformSnap && platformSnap.exists()) {
-        const pData = platformSnap.data();
-        return {
-          uid: fbUser.uid,
-          role: pData.role || (pData.isSuperAdmin ? 'Super Admin' : 'Platform Operator'),
-          isPlatformAdmin: !!pData.isPlatformAdmin || !!pData.isSuperAdmin,
-          isSuperAdmin: !!pData.isSuperAdmin,
-        };
-      }
-
-      // 2. Check users/{uid} for explicit platform admin fields
-      const userDocRef = doc(db, 'users', fbUser.uid);
-      const userSnap = await getDoc(userDocRef).catch(() => null);
-
-      if (userSnap && userSnap.exists()) {
-        const uData = userSnap.data();
-        if (uData.isSuperAdmin === true || uData.role === 'Super Admin') {
-          return {
-            uid: fbUser.uid,
-            role: 'Super Admin',
-            isPlatformAdmin: true,
-            isSuperAdmin: true,
-          };
-        }
-        if (uData.isPlatformAdmin === true || uData.role === 'Platform Admin' || uData.role === 'Platform Operator') {
-          return {
-            uid: fbUser.uid,
-            role: 'Platform Operator',
-            isPlatformAdmin: true,
-            isSuperAdmin: false,
-          };
-        }
-      }
-
-      return {
-        uid: fbUser.uid,
-        role: 'None',
-        isPlatformAdmin: false,
-        isSuperAdmin: false,
-      };
+      platformSnap = await getDoc(platformDocRef);
     } catch (err: any) {
-      console.error('[AuthProvider] Error resolving platform identity:', err?.message);
+      console.error('[AuthProvider] Failed to fetch platform_users/{uid}:', err?.message);
+      throw new Error(`Platform identity query failed for ${fbUser.uid}: ${err?.message}`);
+    }
+
+    if (platformSnap && platformSnap.exists()) {
+      const pData = platformSnap.data();
       return {
         uid: fbUser.uid,
-        role: 'None',
-        isPlatformAdmin: false,
-        isSuperAdmin: false,
+        role: pData.role || (pData.isSuperAdmin ? 'Super Admin' : 'Platform Operator'),
+        isPlatformAdmin: !!pData.isPlatformAdmin || !!pData.isSuperAdmin,
+        isSuperAdmin: !!pData.isSuperAdmin,
       };
     }
+
+    // 2. Check users/{uid} for explicit platform admin fields
+    const userDocRef = doc(db, 'users', fbUser.uid);
+    let userSnap;
+    try {
+      userSnap = await getDoc(userDocRef);
+    } catch (err: any) {
+      console.error('[AuthProvider] Failed to fetch users/{uid} for platform identity:', err?.message);
+      throw new Error(`User platform identity query failed for ${fbUser.uid}: ${err?.message}`);
+    }
+
+    if (userSnap && userSnap.exists()) {
+      const uData = userSnap.data();
+      if (uData.isSuperAdmin === true || uData.role === 'Super Admin') {
+        return {
+          uid: fbUser.uid,
+          role: 'Super Admin',
+          isPlatformAdmin: true,
+          isSuperAdmin: true,
+        };
+      }
+      if (uData.isPlatformAdmin === true || uData.role === 'Platform Admin' || uData.role === 'Platform Operator') {
+        return {
+          uid: fbUser.uid,
+          role: 'Platform Operator',
+          isPlatformAdmin: true,
+          isSuperAdmin: false,
+        };
+      }
+    }
+
+    return {
+      uid: fbUser.uid,
+      role: 'None',
+      isPlatformAdmin: false,
+      isSuperAdmin: false,
+    };
   }, []);
 
   // Resolve memberships & relationships for authenticated UID
@@ -163,7 +170,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return;
       }
 
-      // Query tenant_memberships
+      // Query tenant_memberships (FAIL CLOSED on Firestore error)
       const memberships: TenantMembership[] = [];
       try {
         const tmQuery = query(collection(db, 'tenant_memberships'), where('uid', '==', fbUser.uid));
@@ -172,7 +179,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           memberships.push(docSnap.data() as TenantMembership);
         });
       } catch (e: any) {
-        console.warn('[AuthProvider] Could not query tenant_memberships collection:', e?.message);
+        console.error('[AuthProvider] Failed to query tenant_memberships collection:', e?.message);
+        throw new Error(`tenant_memberships query failed: ${e?.message}`);
       }
 
       try {
@@ -184,10 +192,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           }
         });
       } catch (e: any) {
-        // silent catch
+        // Subcollection is optional
       }
 
-      // Query business_relationships
+      // Query business_relationships (FAIL CLOSED on Firestore error)
       const relationships: BusinessRelationship[] = [];
       try {
         const brQuery = query(collection(db, 'business_relationships'), where('uid', '==', fbUser.uid));
@@ -196,7 +204,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           relationships.push(docSnap.data() as BusinessRelationship);
         });
       } catch (e: any) {
-        console.warn('[AuthProvider] Could not query business_relationships collection:', e?.message);
+        console.error('[AuthProvider] Failed to query business_relationships collection:', e?.message);
+        throw new Error(`business_relationships query failed: ${e?.message}`);
       }
 
       try {
@@ -208,10 +217,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           }
         });
       } catch (e: any) {
-        // silent catch
+        // Subcollection is optional
       }
 
-      // Resolve platform identity authoritatively
+      // Resolve platform identity authoritatively (FAIL CLOSED on Firestore error)
       const resolvedPlatformIdentity = await resolvePlatformIdentity(fbUser);
 
       setPlatformIdentity(resolvedPlatformIdentity);

@@ -122,6 +122,13 @@ export function evaluateCanonicalRouteGuard(
         redirectUrl: `/login?returnUrl=${encodeURIComponent(pathname)}`,
       };
     }
+    if (authContext.platformUser && authContext.platformUser.status !== 'active') {
+      return {
+        type: 'PERMISSION_DENIED',
+        allowed: false,
+        message: 'Your account status is not active.',
+      };
+    }
     return { type: 'ALLOW', allowed: true };
   }
 
@@ -190,11 +197,11 @@ export function evaluateCanonicalRouteGuard(
     }
 
     // Check platform user / staff status
-    if ((authContext.platformUser?.status as string) === 'suspended' || authContext.activeStaff?.status?.toLowerCase() === 'suspended') {
+    if ((authContext.platformUser && authContext.platformUser.status !== 'active') || authContext.activeStaff?.status?.toLowerCase() === 'suspended') {
       return {
         type: 'PERMISSION_DENIED',
         allowed: false,
-        message: 'Your account has been suspended by an administrator.',
+        message: 'Your account status is not active.',
       };
     }
 
@@ -212,13 +219,19 @@ export function evaluateCanonicalRouteGuard(
 
     // C. Verify tenant membership authoritatively
     const isSuperAdmin = authContext.platformIdentity?.isSuperAdmin === true;
-    const isMember = 
-      isSuperAdmin || // Emergency audit access for Super Admin
-      (authContext.tenantMemberships && authContext.tenantMemberships.some(m => 
-        (m.tenantId === tenant.id || m.tenantId === tenant.slug || m.tenantId === `tenant-${tenant.id}`) && m.status === 'active'
-      )) ||
-      (authContext.activeStaff && authContext.isStaffMemberOfTenant(authContext.activeStaff.id, tenant.id)) ||
-      (authContext.activeStaff && authContext.isStaffMemberOfTenant(authContext.activeStaff.id, tenant.slug));
+
+    // Authoritative TenantMembership check
+    const hasAuthoritativeMembership = !!(authContext.tenantMemberships && authContext.tenantMemberships.some(m => 
+      (m.tenantId === tenant.id || m.tenantId === tenant.slug || m.tenantId === `tenant-${tenant.id}`) && m.status === 'active'
+    ));
+
+    // Legacy fallback ONLY when tenantMemberships array property is omitted from route context
+    const hasLegacyMembership = authContext.tenantMemberships === undefined && authContext.activeStaff ? (
+      authContext.isStaffMemberOfTenant(authContext.activeStaff.id, tenant.id) ||
+      authContext.isStaffMemberOfTenant(authContext.activeStaff.id, tenant.slug)
+    ) : false;
+
+    const isMember = isSuperAdmin || hasAuthoritativeMembership || hasLegacyMembership;
 
     if (!isMember) {
       return {

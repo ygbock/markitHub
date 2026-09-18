@@ -378,3 +378,81 @@ test('Remediation 4: Unresolved tenant memberships deny operational tenant works
   assert.equal(decision.type, 'TENANT_MEMBERSHIP_REQUIRED');
 });
 
+test('Remediation 5: Legacy activeStaff alone CANNOT grant tenant operational access when tenantMemberships is present as empty array []', () => {
+  const staffMember: StaffMember = {
+    id: 'staff-legacy-only',
+    name: 'Legacy Staff',
+    email: 'legacy@example.com',
+    role: 'Store Manager',
+    pin: '1234',
+    status: 'Active',
+    avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d',
+  };
+
+  const context: RouteAuthContext = {
+    activeCustomer: null,
+    activeStaff: staffMember,
+    tenantLookup: dummyTenantLookup,
+    isStaffMemberOfTenant: () => true, // Legacy lookup returns true!
+    platformUser: {
+      uid: 'staff-legacy-only',
+      email: 'legacy@example.com',
+      status: 'active',
+      emailVerified: true,
+    },
+    tenantMemberships: [], // Authoritative membership array is empty!
+  };
+
+  const tenantRoute = parseCanonicalRoute('/tenant/nexus-retail/dashboard');
+  const decision = evaluateCanonicalRouteGuard(tenantRoute, context);
+
+  assert.equal(decision.allowed, false, 'Authoritative empty tenantMemberships must override legacy isStaffMemberOfTenant fallback');
+  assert.equal(decision.type, 'TENANT_MEMBERSHIP_REQUIRED');
+});
+
+test('Remediation 6: Suspended platform user fails closed on Customer account routes (/account/*)', () => {
+  const suspendedCustomerUser: User = {
+    uid: 'suspended-customer-1',
+    email: 'suspended.customer@example.com',
+    status: 'suspended',
+    emailVerified: true,
+  };
+
+  const context: RouteAuthContext = {
+    activeCustomer: null,
+    activeStaff: null,
+    tenantLookup: dummyTenantLookup,
+    isStaffMemberOfTenant: () => false,
+    platformUser: suspendedCustomerUser,
+  };
+
+  const accountRoute = parseCanonicalRoute('/account/orders');
+  const decision = evaluateCanonicalRouteGuard(accountRoute, context);
+
+  assert.equal(decision.allowed, false, 'Suspended platform user MUST fail closed on customer account routes');
+  assert.equal(decision.type, 'PERMISSION_DENIED');
+});
+
+test('Remediation 7: Unresolved or invalid user status in user document fails closed', () => {
+  // Mock malformed user profile where status is missing/invalid
+  const malformedUser: any = {
+    uid: 'corrupt-user-uid',
+    email: 'corrupt@example.com',
+    status: 'invalid_status_value', // Not 'active' or 'suspended'
+  };
+
+  const context: RouteAuthContext = {
+    activeCustomer: null,
+    activeStaff: null,
+    tenantLookup: dummyTenantLookup,
+    isStaffMemberOfTenant: () => false,
+    platformUser: malformedUser,
+  };
+
+  const accountRoute = parseCanonicalRoute('/account/profile');
+  const decision = evaluateCanonicalRouteGuard(accountRoute, context);
+
+  assert.equal(decision.allowed, false, 'Invalid or non-active user status must fail closed');
+  assert.equal(decision.type, 'PERMISSION_DENIED');
+});
+

@@ -41,7 +41,9 @@ export default function LoginPage({
   };
 
   const [viewMode, setViewMode] = useState<IdentityViewMode>(() => getInitialMode(currentPath));
-  const [loginTab, setLoginTab] = useState<'staff' | 'customer'>('staff');
+  const [loginMode, setLoginMode] = useState<'staff' | 'customer'>('staff');
+  const loginTab = loginMode;
+  const setLoginTab = setLoginMode;
 
   // Safely consume AuthContext (with fallback for isolated component renders)
   let authContext: ReturnType<typeof useAuth> | null = null;
@@ -198,14 +200,12 @@ export default function LoginPage({
     setLoading(true);
 
     try {
-      if (authContext) {
-        await authContext.confirmPasswordResetCode(resetCode.trim(), password);
-        setSuccessMsg('Your password has been successfully reset. Please sign in with your new password.');
-        setTimeout(() => navigateTo('/login'), 1500);
-      } else {
-        setSuccessMsg('Demo password reset complete!');
-        setTimeout(() => navigateTo('/login'), 1500);
+      if (!authContext) {
+        throw new Error('Authentication context unavailable.');
       }
+      await authContext.confirmPasswordResetCode(resetCode.trim(), password);
+      setSuccessMsg('Your password has been successfully reset. Please sign in with your new password.');
+      setTimeout(() => navigateTo('/login'), 1500);
     } catch (err: any) {
       setError(err?.message || 'Failed to update password. Action code may be invalid or expired.');
     } finally {
@@ -390,6 +390,7 @@ export default function LoginPage({
                   <div className="flex bg-slate-950 p-1 rounded-xl border border-white/10 text-xs">
                     <button
                       type="button"
+                      id="tab-login-staff"
                       onClick={() => setLoginTab('staff')}
                       className={`px-3 py-1 rounded-lg font-bold transition-all ${
                         loginTab === 'staff' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'
@@ -399,6 +400,7 @@ export default function LoginPage({
                     </button>
                     <button
                       type="button"
+                      id="tab-login-customer"
                       onClick={() => setLoginTab('customer')}
                       className={`px-3 py-1 rounded-lg font-bold transition-all ${
                         loginTab === 'customer' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'
