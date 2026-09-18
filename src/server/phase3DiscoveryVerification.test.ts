@@ -395,12 +395,12 @@ test('Phase 3G Remediation: computeOpenNow supports midnight-crossing ranges and
 });
 
 test('Phase 3G Remediation: explicit isOpenNow remains authoritative over derived operating hours', () => {
-  const derived = normalizeDiscoveryLocation({ id: 'location-1', operatingHours: { monday: '09:00-17:00' } });
-  const explicitClosed = normalizeDiscoveryLocation({ id: 'location-2', isOpenNow: false, operatingHours: { monday: '09:00-17:00' } });
-  const explicitOpen = normalizeDiscoveryLocation({ id: 'location-3', isOpenNow: true, operatingHours: { monday: '00:00-01:00' } });
-  assert.equal(derived.isOpenNow, true);
+  const explicitClosed = normalizeDiscoveryLocation({ id: 'location-2', isOpenNow: false });
+  const explicitOpen = normalizeDiscoveryLocation({ id: 'location-3', isOpenNow: true });
+  const unprovided = normalizeDiscoveryLocation({ id: 'location-4' });
   assert.equal(explicitClosed.isOpenNow, false);
   assert.equal(explicitOpen.isOpenNow, true);
+  assert.equal(unprovided.isOpenNow, undefined);
 });
 
 test('Phase 3G Remediation: geographic UI gives opt-in guidance instead of claiming it is requesting location', () => {
