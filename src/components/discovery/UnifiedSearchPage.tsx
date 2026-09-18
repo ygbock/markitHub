@@ -161,9 +161,8 @@ export default function UnifiedSearchPage({ initialQuery = '', onNavigate }: Uni
         <div className='max-w-7xl mx-auto space-y-4'>
           <button onClick={() => onNavigate('/')} className='text-sm font-bold text-indigo-300 hover:text-white'>MikitHub</button>
           <div><h1 className='text-2xl sm:text-3xl font-black tracking-tight'>Search MikitHub</h1><p className='text-sm text-slate-300 mt-1'>Find businesses, products, services, and categories in one search.</p></div>
-          <form onSubmit={submit} className='grid grid-cols-1 md:grid-cols-[1fr_220px_auto] gap-2 max-w-5xl'>
+          <form onSubmit={submit} className='grid grid-cols-1 md:grid-cols-[1fr_220px_auto_auto] gap-2 max-w-6xl'>
             <div className='flex-1 relative'><Search className='absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400' /><input value={queryText} onChange={e => setQueryText(e.target.value)} placeholder='What are you looking for?' aria-label='Search MikitHub' className='w-full pl-12 pr-4 py-3.5 rounded-2xl bg-white text-slate-900 outline-none focus:ring-2 focus:ring-indigo-400' /></div>
-            <button type='submit' className='px-5 py-3 rounded-2xl bg-indigo-600 hover:bg-indigo-500 font-bold'>Search</button>
           <div className='relative'>
               <MapPin className='absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400' />
               <input
