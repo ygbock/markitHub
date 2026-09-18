@@ -157,3 +157,46 @@ test('Phase 3C Invariant 24: product lookup and discovery remain read-only and b
   assert.match(source, /firestoreLimit\(3\)/);
   assert.match(source, /firestoreLimit\(100\)/);
 });
+
+
+test('Phase 3D Invariant 25: service discovery exposes canonical ID and slug lookup methods', () => {
+  const types = readFileSync(resolve(process.cwd(), 'src/discovery/types.ts'), 'utf8');
+  assert.match(types, /getServiceById/);
+  assert.match(types, /getServiceBySlug/);
+  const repository = readFileSync(resolve(process.cwd(), 'src/discovery/discoveryRepository.ts'), 'utf8');
+  assert.match(repository, /where\('slug', '==', normalizedSlug\)/);
+});
+
+test('Phase 3D Invariant 26: publicly discoverable services require explicit publication and reject inactive lifecycle states', () => {
+  const source = readFileSync(resolve(process.cwd(), 'src/discovery/discoveryRepository.ts'), 'utf8');
+  assert.match(source, /published = raw\.published === true/);
+  assert.match(source, /\['inactive', 'archived', 'suspended', 'draft'\]/);
+  assert.match(source, /publishTargets\?\.website === false/);
+});
+
+test('Phase 3D Invariant 27: service tenant ownership is derived from the Firestore path when available', () => {
+  const source = readFileSync(resolve(process.cwd(), 'src/discovery/discoveryRepository.ts'), 'utf8');
+  assert.match(source, /normalizeService\(docSnap\.data\(\), docSnap\.id, docSnap\.ref\.parent\.parent\?\.id\)/);
+  assert.match(source, /tenantId: tenantId \|\| raw\.tenantId/);
+});
+
+test('Phase 3D Invariant 28: service discovery preserves business linkage, booking capability, pricing, duration, and media', () => {
+  const source = readFileSync(resolve(process.cwd(), 'src/discovery/discoveryRepository.ts'), 'utf8');
+  for (const field of ['businessId: raw.businessId', 'bookingEnabled: raw.bookingEnabled !== false', 'durationMinutes:', 'price:', 'imageUrl: raw.imageUrl']) {
+    assert.ok(source.includes(field), 'missing service field: ' + field);
+  }
+});
+
+test('Phase 3D Invariant 29: service discovery supports category, tenant, business, text, and price filters', () => {
+  const source = readFileSync(resolve(process.cwd(), 'src/discovery/discoveryRepository.ts'), 'utf8');
+  for (const field of ['filters.categorySlug', 'filters.tenantId', 'filters.businessId', 'filters.minPrice', 'filters.maxPrice', 'filters.text']) {
+    assert.ok(source.includes(field), 'missing service filter: ' + field);
+  }
+});
+
+test('Phase 3D Invariant 30: service discovery remains read-only and bounded', () => {
+  const source = readFileSync(resolve(process.cwd(), 'src/discovery/discoveryRepository.ts'), 'utf8');
+  assert.ok(!/\b(setDoc|addDoc|updateDoc|deleteDoc)\b/.test(source));
+  assert.match(source, /firestoreLimit\(3\)/);
+  assert.match(source, /Math\.min\(limit \* 3, MAX_LIMIT\)/);
+});
