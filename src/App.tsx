@@ -52,6 +52,7 @@ import PublicDiscoveryShell from './components/discovery/PublicDiscoveryShell';
 import UnifiedSearchPage from './components/discovery/UnifiedSearchPage';
 import GeographicDiscoveryPage from './components/discovery/GeographicDiscoveryPage';
 import CategoryDiscoveryPage from './components/discovery/CategoryDiscoveryPage';
+import PublicBusinessProfilePage from './components/discovery/PublicBusinessProfilePage';
 import ListingBusinessShell from './components/business/ListingBusinessShell';
 import CustomerAccountShell from './components/customer/CustomerAccountShell';
 import RouteGuardShell from './components/routing/RouteGuardShell';
@@ -1514,13 +1515,23 @@ export default function App() {
         </div>
       )}
 
+      {/* 2b-business. Canonical public business profile (/business/:businessSlug) */}
+      {activeDomain === 'PUBLIC_DISCOVERY' && currentRoute.definition.id === 'public.business.profile' && (
+        <PublicBusinessProfilePage
+          businessSlug={currentRoute.params.businessSlug}
+          onNavigate={navigate}
+          onOpenLogin={() => navigate(`/login?returnUrl=${encodeURIComponent(currentRoute.pathname)}`)}
+        />
+      )}
+
       {/* 2b. Public Discovery Domain (/ or /discover, /business/:slug, /nearby) */}
       {activeDomain === 'PUBLIC_DISCOVERY' && 
         currentRoute.definition.id !== 'public.search' && 
         currentRoute.definition.id !== 'public.nearby' && 
         currentRoute.definition.id !== 'public.map' && 
         currentRoute.definition.id !== 'public.categories' && 
-        currentRoute.definition.id !== 'public.category.detail' && (
+        currentRoute.definition.id !== 'public.category.detail' && 
+        currentRoute.definition.id !== 'public.business.profile' && (
         <PublicDiscoveryShell
           businessSlug={currentRoute.params.businessSlug}
           products={products}
