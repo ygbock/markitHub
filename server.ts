@@ -684,12 +684,10 @@ async function startServer() {
       let replayed = false;
 
       await db.runTransaction(async (transaction) => {
-        const [priorRequest, businessSnap, locationSnap, planSnap] = await Promise.all([
-          transaction.get(requestRef),
-          transaction.get(businessRef),
-          transaction.get(locationRef),
-          transaction.get(planRef),
-        ]);
+        const priorRequest = await transaction.get(requestRef);
+        const businessSnap = await transaction.get(businessRef);
+        const locationSnap = await transaction.get(locationRef);
+        const planSnap = await transaction.get(planRef);
 
         if (priorRequest.exists) {
           const priorTenantId = String(priorRequest.data()?.tenantId || '').trim();
@@ -710,8 +708,11 @@ async function startServer() {
           throw Object.assign(new Error('Business is not eligible for tenant provisioning.'), { statusCode: 409 });
         }
 
-        if (!locationSnap.exists) throw Object.assign(new Error('Business location not found.'), { statusCode: 404 });
-        const location = { id: locationSnap.id, ...locationSnap.data() } as any;
+        const embeddedLocation = Array.isArray(business.locations)
+          ? business.locations.find((candidate: any) => String(candidate?.id || '') === request.locationId)
+          : null;
+        if (!locationSnap.exists && !embeddedLocation) throw Object.assign(new Error('Business location not found.'), { statusCode: 404 });
+        const location = (locationSnap.exists ? { id: locationSnap.id, ...locationSnap.data() } : { ...embeddedLocation, id: request.locationId }) as any;
         if (String(location.businessId || business.id) !== business.id) {
           throw Object.assign(new Error('Business location does not belong to the requested business.'), { statusCode: 403 });
         }
@@ -744,7 +745,13 @@ async function startServer() {
           createdAt: records.tenant.createdAt,
         });
         transaction.set(businessRef, records.businessPatch, { merge: true });
-        transaction.set(locationRef, records.locationPatch, { merge: true });
+        transaction.set(locationRef, { ...location, ...records.locationPatch, businessId: business.id }, { merge: true });
+        if (Array.isArray(business.locations)) {
+          const locations = business.locations.map((candidate: any) =>
+            String(candidate?.id || '') === request.locationId ? { ...candidate, ...records.locationPatch, businessId: business.id } : candidate,
+          );
+          transaction.set(businessRef, { locations }, { merge: true });
+        }
 
         const audit = createAuthoritativeAuditRecord({
           tenantId: records.tenant.id,
