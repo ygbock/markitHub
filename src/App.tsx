@@ -51,6 +51,7 @@ import { evaluateCanonicalRouteGuard, TenantContextRecord } from './routes/route
 import PublicDiscoveryShell from './components/discovery/PublicDiscoveryShell';
 import UnifiedSearchPage from './components/discovery/UnifiedSearchPage';
 import GeographicDiscoveryPage from './components/discovery/GeographicDiscoveryPage';
+import CategoryDiscoveryPage from './components/discovery/CategoryDiscoveryPage';
 import ListingBusinessShell from './components/business/ListingBusinessShell';
 import CustomerAccountShell from './components/customer/CustomerAccountShell';
 import RouteGuardShell from './components/routing/RouteGuardShell';
@@ -1520,6 +1521,15 @@ export default function App() {
           products={products}
           onNavigate={navigate}
           onOpenLogin={() => navigate(`/login?returnUrl=${encodeURIComponent(currentRoute.pathname)}`)}
+        />
+      )}
+
+      {/* 2b-category. Canonical category discovery (/categories, /category/:categorySlug) */}
+      {activeDomain === 'PUBLIC_DISCOVERY' && (currentRoute.definition.id === 'public.categories' || currentRoute.definition.id === 'public.category.detail') && (
+        <CategoryDiscoveryPage
+          mode={currentRoute.definition.id === 'public.categories' ? 'index' : 'detail'}
+          categorySlug={currentRoute.params.categorySlug}
+          onNavigate={navigate}
         />
       )}
 
