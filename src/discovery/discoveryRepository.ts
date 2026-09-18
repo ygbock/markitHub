@@ -483,6 +483,32 @@ export class FirestoreDiscoveryRepository implements DiscoveryRepository {
     return paginate(items, normalizedQuery);
   }
 
+  async getCategoryBySlug(slug: string): Promise<DiscoveryCategory | null> {
+    const normalizedSlug = slug.trim().toLowerCase();
+    if (!normalizedSlug) return null;
+    const snapshot = await getDocs(query(
+      collection(db, 'categories'),
+      where('status', '==', 'active'),
+      where('slug', '==', normalizedSlug),
+      firestoreLimit(3),
+    ));
+    for (const docSnap of snapshot.docs) {
+      const raw = docSnap.data() as Category;
+      return {
+        id: docSnap.id,
+        name: raw.name,
+        slug: raw.slug || docSnap.id,
+        description: raw.description,
+        image: raw.image,
+        icon: raw.icon,
+        parentId: raw.parent_id ?? null,
+        sortOrder: Number(raw.sort_order ?? 0),
+        status: raw.status === 'inactive' ? 'inactive' : 'active',
+      };
+    }
+    return null;
+  }
+
   async listCategories(queryOptions: DiscoveryQuery = {}): Promise<DiscoverySearchResult<DiscoveryCategory>> {
     const take = boundedLimit(queryOptions.limit);
     const normalizedQuery = { ...queryOptions, filters: normalizeFilters(queryOptions.filters) };
