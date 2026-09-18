@@ -1,5 +1,6 @@
 import React from 'react';
 import BusinessOnboardingShell from '../components/business/BusinessOnboardingShell';
+import { getAuth } from 'firebase/auth';
 
 /**
  * ShellOnboardingAdapter Interface (Authoritative Adapter Contract)
@@ -55,19 +56,85 @@ export const ShellOnboardingAdapter: React.FC<ShellOnboardingAdapterProps> = ({
     if (typeof window !== 'undefined') window.location.href = path;
   });
 
-  const handleComplete = (businessData: any, choice: 'LISTING_ONLY' | 'LISTING_AND_STORE') => {
-    if (onComplete) {
-      onComplete();
-    }
-    // Canonical route translation:
-    // LISTING_AND_STORE: navigate to tenant dashboard ONLY when authoritative tenantId exists.
-    // businessData.id is a business identity — it must NOT be used as a tenantId fallback.
-    if (choice === 'LISTING_AND_STORE' && businessData?.tenantId) {
-      navigate(`/tenant/${businessData.tenantId}/dashboard`);
-    } else {
-      // LISTING_ONLY (or LISTING_AND_STORE without tenantId): canonical business destination
-      const slug = businessData?.businessSlug || businessData?.slug || businessData?.id || businessId;
-      navigate(slug ? `/business/${slug}` : '/');
+  const handleComplete = async (businessData: any, choice: 'LISTING_ONLY' | 'LISTING_AND_STORE') => {
+    try {
+      const user = getAuth().currentUser;
+      if (!user) throw new Error('Authentication is required to register a business.');
+
+      const token = await user.getIdToken();
+      const idempotencyKey = `business-registration-${user.uid}-${businessData.businessSlug || businessData.name}`;
+      const registrationResponse = await fetch('/api/business/register', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+          'Idempotency-Key': idempotencyKey,
+        },
+        body: JSON.stringify({
+          businessName: businessData.name,
+          category: businessData.category,
+          tagline: businessData.tagline,
+          about: businessData.about,
+          address: businessData.address,
+          city: businessData.city,
+          phone: businessData.phone,
+          email: businessData.email,
+          openingHours: businessData.openingHours,
+        }),
+      });
+
+      const registration = await registrationResponse.json();
+      if (!registrationResponse.ok || !registration?.business?.id) {
+        throw new Error(registration?.error || 'Business registration failed.');
+      }
+
+      let destination = `/business/${registration.business.listing.slug}`;
+      let completed = {
+        ...businessData,
+        id: registration.business.id,
+        businessSlug: registration.business.listing.slug,
+        tenantId: undefined,
+        isTenant: false,
+      };
+
+      if (choice === 'LISTING_AND_STORE') {
+        const tenantKey = `tenant-provisioning-${registration.business.id}-${businessData.address}`;
+        const tenantResponse = await fetch('/api/business/provision-tenant', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+            'Idempotency-Key': tenantKey,
+          },
+          body: JSON.stringify({
+            businessId: registration.business.id,
+            locationId: registration.business.locations?.[0]?.id,
+            planId: 'starter',
+            billingInterval: 'monthly',
+            trialDays: 14,
+          }),
+        });
+        const provisioning = await tenantResponse.json();
+        if (!tenantResponse.ok || !provisioning?.tenant?.id) {
+          throw new Error(provisioning?.error || 'Tenant provisioning failed.');
+        }
+        completed = {
+          ...completed,
+          tenantId: provisioning.tenant.id,
+          isTenant: true,
+        };
+        destination = `/tenant/${provisioning.tenant.id}/dashboard`;
+      }
+
+      setCompletedRecord(completed);
+      if (onComplete) onComplete();
+      navigate(destination);
+    } catch (error: any) {
+      setCompletedRecord({
+        ...businessData,
+        registrationError: error?.message || 'Unable to complete business registration.',
+        isTenant: false,
+      });
     }
   };
 
