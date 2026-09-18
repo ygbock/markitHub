@@ -453,6 +453,8 @@ test('Phase 3H Invariant 63: category detail connects authoritative category res
 test('Phase 3H Invariant 64: category hierarchy is navigable through parent/child relationships', () => {
   const source = readFileSync(resolve(process.cwd(), 'src/components/discovery/CategoryDiscoveryPage.tsx'), 'utf8');
   assert.match(source, /item\.parentId === category\.id/);
+  assert.match(source, /parentId == null/);
+  assert.match(source, /CategoryTree/);
   assert.match(source, /Subcategories/);
   assert.match(source, /Explore category/);
 });
