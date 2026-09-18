@@ -82,7 +82,7 @@ function distanceKm(a: { latitude: number; longitude: number }, b: { latitude: n
   return 6371 * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
 }
 
-function parseOperatingHours(value: unknown): { open: number; close: number } | null {
+export function parseOperatingHours(value: unknown): { open: number; close: number } | null {
   if (typeof value !== 'string') return null;
   const match = value.trim().match(/^(\\d{1,2}):(\\d{2})\\s*(?:-|–|—)\\s*(\\d{1,2}):(\\d{2})$/);
   if (!match) return null;
@@ -92,7 +92,7 @@ function parseOperatingHours(value: unknown): { open: number; close: number } | 
   return { open, close };
 }
 
-function computeOpenNow(operatingHours: unknown, now = new Date()): boolean | undefined {
+export function computeOpenNow(operatingHours: unknown, now = new Date()): boolean | undefined {
   if (!operatingHours || typeof operatingHours !== 'object' || Array.isArray(operatingHours)) return undefined;
   const hours = operatingHours as Record<string, unknown>;
   const dayNames = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
