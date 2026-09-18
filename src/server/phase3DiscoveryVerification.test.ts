@@ -307,7 +307,7 @@ test('Phase 3F Invariant 44: category filtering is applied to category results a
 test('Phase 3F Invariant 45: canonical search UI exposes filter controls and a reset path', () => {
   const source = readFileSync(resolve(process.cwd(), 'src/components/discovery/UnifiedSearchPage.tsx'), 'utf8');
   for (const label of ['Category', 'Minimum price', 'Maximum price', 'Radius (km)', 'Verified businesses', 'Featured', 'Open now', 'Available now']) {
-    assert.match(source, new RegExp(label.replace(/[()]/g, '\\\\$&')));
+    assert.ok(source.includes(label), 'missing label: ' + label);
   }
   assert.match(source, /Reset discovery filters/);
   assert.match(source, /setFilters\(DEFAULT_FILTERS\)/);
