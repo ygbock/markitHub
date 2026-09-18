@@ -125,11 +125,18 @@ export interface DiscoverySearchResult<T> {
   hasMore: boolean;
 }
 
+export interface DiscoverySearchItem {
+  type: DiscoveryEntityType;
+  item: DiscoveryBusiness | DiscoveryProduct | DiscoveryService | DiscoveryCategory;
+  score: number;
+}
+
 export interface UnifiedDiscoveryResults {
   businesses: DiscoverySearchResult<DiscoveryBusiness>;
   products: DiscoverySearchResult<DiscoveryProduct>;
   services: DiscoverySearchResult<DiscoveryService>;
   categories: DiscoverySearchResult<DiscoveryCategory>;
+  rankedResults: DiscoverySearchItem[];
 }
 
 export interface DiscoveryRepository {
