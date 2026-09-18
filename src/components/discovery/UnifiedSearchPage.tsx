@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ArrowRight, Building2, Check, Filter, FolderTree, Loader2, Package, RotateCcw, Search, ShieldCheck, Star, Wrench } from 'lucide-react';
+import { ArrowRight, Building2, Check, Filter, FolderTree, Loader2, MapPin, Navigation, Package, RotateCcw, Search, ShieldCheck, Star, Wrench } from 'lucide-react';
 import { discoveryRepository } from '../../discovery/discoveryRepository';
 import type { DiscoveryEntityType, DiscoveryFilters, DiscoverySearchItem, DiscoverySort, UnifiedDiscoveryResults } from '../../discovery/types';
 
@@ -63,6 +63,7 @@ export default function UnifiedSearchPage({ initialQuery = '', onNavigate }: Uni
   const [filters, setFilters] = useState<DiscoveryFilters>(DEFAULT_FILTERS);
   const [sort, setSort] = useState<DiscoverySort>('relevance');
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [locationStatus, setLocationStatus] = useState<'idle' | 'loading' | 'denied' | 'error'>('idle');
 
   useEffect(() => {
     setQueryText(initialQuery);
@@ -133,16 +134,57 @@ export default function UnifiedSearchPage({ initialQuery = '', onNavigate }: Uni
 
   const filterCount = activeFilterCount(filters);
 
+  const useMyLocation = () => {
+    if (!navigator.geolocation) {
+      setLocationStatus('error');
+      return;
+    }
+    setLocationStatus('loading');
+    navigator.geolocation.getCurrentPosition(
+      position => {
+        setFilters(current => ({
+          ...current,
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+          radiusKm: current.radiusKm ?? 10,
+        }));
+        setLocationStatus('idle');
+      },
+      error => setLocationStatus(error.code === error.PERMISSION_DENIED ? 'denied' : 'error'),
+      { enableHighAccuracy: false, maximumAge: 300000, timeout: 10000 },
+    );
+  };
+
+  const businessResults = results?.businesses.items ?? [];
+  const productResults = results?.products.items ?? [];
+  const serviceResults = results?.services.items ?? [];
+
   return (
     <div className='min-h-screen bg-slate-50 text-slate-900' id='unified-search-root'>
       <header className='bg-slate-950 text-white px-4 sm:px-6 lg:px-10 py-6'>
         <div className='max-w-7xl mx-auto space-y-4'>
           <button onClick={() => onNavigate('/')} className='text-sm font-bold text-indigo-300 hover:text-white'>MikitHub</button>
           <div><h1 className='text-2xl sm:text-3xl font-black tracking-tight'>Search MikitHub</h1><p className='text-sm text-slate-300 mt-1'>Find businesses, products, services, and categories in one search.</p></div>
-          <form onSubmit={submit} className='flex gap-2 max-w-3xl'>
+          <form onSubmit={submit} className='grid grid-cols-1 md:grid-cols-[1fr_220px_auto] gap-2 max-w-5xl'>
             <div className='flex-1 relative'><Search className='absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400' /><input value={queryText} onChange={e => setQueryText(e.target.value)} placeholder='What are you looking for?' aria-label='Search MikitHub' className='w-full pl-12 pr-4 py-3.5 rounded-2xl bg-white text-slate-900 outline-none focus:ring-2 focus:ring-indigo-400' /></div>
             <button type='submit' className='px-5 py-3 rounded-2xl bg-indigo-600 hover:bg-indigo-500 font-bold'>Search</button>
+          <div className='relative'>
+              <MapPin className='absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400' />
+              <input
+                value={filters.latitude != null && filters.longitude != null ? 'Using your location' : ''}
+                readOnly
+                placeholder='Where?'
+                aria-label='Discovery location'
+                className='w-full pl-12 pr-3 py-3.5 rounded-2xl bg-white text-slate-900'
+              />
+            </div>
+            <button type='button' onClick={useMyLocation} disabled={locationStatus === 'loading'} className='px-4 py-3.5 rounded-2xl bg-white/10 border border-white/20 hover:bg-white/15 font-bold text-sm flex items-center justify-center gap-2'>
+              <Navigation className='w-4 h-4' /> {locationStatus === 'loading' ? 'Locating…' : 'Use my location'}
+            </button>
+            <button type='submit' className='px-5 py-3 rounded-2xl bg-indigo-600 hover:bg-indigo-500 font-bold'>Search</button>
           </form>
+          {locationStatus === 'denied' && <p className='text-xs text-amber-300'>Location access was denied. You can still search without location.</p>}
+          {locationStatus === 'error' && <p className='text-xs text-amber-300'>Location is unavailable. You can still search without location.</p>}
         </div>
       </header>
 
@@ -223,8 +265,17 @@ export default function UnifiedSearchPage({ initialQuery = '', onNavigate }: Uni
         {!loading && error && <div className='p-5 rounded-2xl bg-rose-50 border border-rose-200 text-rose-800'>{error}</div>}
         {!loading && !error && submittedQuery && rankedResults.length === 0 && <div className='p-10 rounded-3xl bg-white border border-slate-200 text-center'><Search className='w-8 h-8 mx-auto text-slate-300 mb-3' /><h2 className='font-bold text-lg'>No results found</h2><p className='text-sm text-slate-500 mt-1'>Try changing the search or filters.</p></div>}
         {!loading && !error && !submittedQuery && <div className='p-10 rounded-3xl bg-white border border-slate-200 text-center'><Search className='w-8 h-8 mx-auto text-slate-300 mb-3' /><h2 className='font-bold text-lg'>Start with what you need</h2><p className='text-sm text-slate-500 mt-1'>Search across the MikitHub discovery graph.</p></div>}
-        {!loading && !error && rankedResults.length > 0 && <div className='grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5'>
-          {rankedResults.map(result => <button key={result.type + '-' + result.item.id} onClick={() => onNavigate(resultPath(result))} className='text-left bg-white rounded-3xl border border-slate-200 p-5 hover:border-indigo-300 hover:shadow-lg transition-all group'>
+        {!loading && !error && rankedResults.length > 0 && <div className='grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-6'>
+          <aside className='hidden lg:block bg-white rounded-3xl border border-slate-200 p-5 h-fit sticky top-5'>
+            <div className='flex items-center gap-2 font-black'><Filter className='w-4 h-4 text-indigo-600' /> Refine results</div>
+            <p className='text-xs text-slate-500 mt-2'>{counts.all} results across businesses, products, services, and categories.</p>
+            <button onClick={() => setFiltersOpen(true)} className='mt-4 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-bold hover:bg-slate-50'>Open filters</button>
+          </aside>
+          <div className='space-y-4'>
+            {activeType !== 'all' && (
+              <div className='text-sm font-black text-slate-700'>{ENTITY_LABELS[activeType]} results</div>
+            )}
+            {rankedResults.map(result => <button key={result.type + '-' + result.item.id} onClick={() => onNavigate(resultPath(result))} className='w-full text-left bg-white rounded-3xl border border-slate-200 p-5 hover:border-indigo-300 hover:shadow-lg transition-all group'>
             <div className='flex items-start justify-between gap-3'><div className='w-11 h-11 rounded-2xl bg-indigo-50 text-indigo-700 flex items-center justify-center shrink-0'>{result.type === 'business' && <Building2 className='w-5 h-5' />}{result.type === 'product' && <Package className='w-5 h-5' />}{result.type === 'service' && <Wrench className='w-5 h-5' />}{result.type === 'category' && <FolderTree className='w-5 h-5' />}</div><span className='text-[10px] uppercase tracking-wider font-black text-slate-400'>{ENTITY_LABELS[result.type]}</span></div>
             <h2 className='font-bold text-base mt-4 group-hover:text-indigo-600'>{result.item.name}</h2><p className='text-sm text-slate-500 mt-1 line-clamp-2'>{resultDescription(result)}</p>
             {result.type === 'business' && (() => {
@@ -238,6 +289,7 @@ export default function UnifiedSearchPage({ initialQuery = '', onNavigate }: Uni
             })()}
             <div className='mt-4 flex items-center gap-1 text-xs font-bold text-indigo-600'>View result <ArrowRight className='w-3.5 h-3.5' /></div>
           </button>)}
+          </div>
         </div>}
       </main>
     </div>
