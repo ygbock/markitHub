@@ -497,3 +497,52 @@ test('Phase 3H Invariant 69: category slug lookup has an explicit Firestore comp
   assert.match(indexes, /"fieldPath": "status"/);
   assert.match(indexes, /"fieldPath": "slug"/);
 });
+
+
+test('Phase 3I Invariant 70: unified discovery provides directory-style list results with canonical entity navigation', () => {
+  const source = readFileSync(resolve(process.cwd(), 'src/components/discovery/UnifiedSearchPage.tsx'), 'utf8');
+  assert.match(source, /grid-cols-1 lg:grid-cols-\[280px_1fr\]/);
+  assert.match(source, /resultPath/);
+  assert.match(source, /\/business\//);
+  assert.match(source, /\/product\//);
+  assert.match(source, /\/service\//);
+  assert.match(source, /\/category\//);
+});
+
+test('Phase 3I Invariant 71: unified discovery exposes explicit search location and opt-in browser geolocation', () => {
+  const source = readFileSync(resolve(process.cwd(), 'src/components/discovery/UnifiedSearchPage.tsx'), 'utf8');
+  assert.match(source, /placeholder='Where\?'/);
+  assert.match(source, /navigator\.geolocation/);
+  assert.match(source, /Use my location/);
+  assert.match(source, /latitude: position\.coords\.latitude/);
+  assert.match(source, /longitude: position\.coords\.longitude/);
+});
+
+test('Phase 3I Invariant 72: location search supplies a bounded radius and preserves location-free search fallback', () => {
+  const source = readFileSync(resolve(process.cwd(), 'src/components/discovery/UnifiedSearchPage.tsx'), 'utf8');
+  assert.match(source, /radiusKm: current\.radiusKm \?\? 10/);
+  assert.match(source, /Location access was denied/);
+  assert.match(source, /still search without location/);
+});
+
+test('Phase 3I Invariant 73: discovery remains authoritative and read-only at the UI boundary', () => {
+  const source = readFileSync(resolve(process.cwd(), 'src/components/discovery/UnifiedSearchPage.tsx'), 'utf8');
+  assert.match(source, /discoveryRepository\.search/);
+  assert.doesNotMatch(source, /DISCOVERY_BUSINESSES|DISCOVERY_CATEGORIES/);
+  assert.doesNotMatch(source, /\\b(setDoc|addDoc|updateDoc|deleteDoc)\\b/);
+});
+
+test('Phase 3I Invariant 74: discovery filters remain available from the directory results experience', () => {
+  const source = readFileSync(resolve(process.cwd(), 'src/components/discovery/UnifiedSearchPage.tsx'), 'utf8');
+  for (const label of ['Category', 'Minimum price', 'Maximum price', 'Radius (km)', 'Verified businesses', 'Featured', 'Open now', 'Available now']) {
+    assert.ok(source.includes(label), 'missing filter: ' + label);
+  }
+  assert.match(source, /Reset discovery filters/);
+});
+
+test('Phase 3I Invariant 75: discovery result cards expose practical business trust and rating information', () => {
+  const source = readFileSync(resolve(process.cwd(), 'src/components/discovery/UnifiedSearchPage.tsx'), 'utf8');
+  assert.match(source, /Verified/);
+  assert.match(source, /ratingAverage/);
+  assert.match(source, /reviewCount/);
+});
