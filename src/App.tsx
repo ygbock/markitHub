@@ -49,6 +49,7 @@ import { getOrderDeliveryTelemetry, flagOrderAsDelivered, buildAdminRefundNotifi
 import { useMikitRouter } from './routes/useMikitRouter';
 import { evaluateCanonicalRouteGuard, TenantContextRecord } from './routes/routeGuards';
 import PublicDiscoveryShell from './components/discovery/PublicDiscoveryShell';
+import UnifiedSearchPage from './components/discovery/UnifiedSearchPage';
 import ListingBusinessShell from './components/business/ListingBusinessShell';
 import CustomerAccountShell from './components/customer/CustomerAccountShell';
 import RouteGuardShell from './components/routing/RouteGuardShell';
@@ -1511,13 +1512,21 @@ export default function App() {
         </div>
       )}
 
-      {/* 2b. Public Discovery Domain (/ or /discover, /search, /business/:slug, /nearby) */}
-      {activeDomain === 'PUBLIC_DISCOVERY' && (
+      {/* 2b. Public Discovery Domain (/ or /discover, /business/:slug, /nearby) */}
+      {activeDomain === 'PUBLIC_DISCOVERY' && currentRoute.definition.id !== 'public.search' && (
         <PublicDiscoveryShell
           businessSlug={currentRoute.params.businessSlug}
           products={products}
           onNavigate={navigate}
           onOpenLogin={() => navigate(`/login?returnUrl=${encodeURIComponent(currentRoute.pathname)}`)}
+        />
+      )}
+
+      {/* 2b-search. Canonical cross-entity search (/search) */}
+      {activeDomain === 'PUBLIC_DISCOVERY' && currentRoute.definition.id === 'public.search' && (
+        <UnifiedSearchPage
+          initialQuery={currentRoute.query.q || ''}
+          onNavigate={navigate}
         />
       )}
 
