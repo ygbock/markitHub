@@ -109,10 +109,13 @@ export interface DiscoveryFilters {
   radiusKm?: number;
 }
 
+export type DiscoverySort = 'relevance' | 'rating' | 'distance' | 'name';
+
 export interface DiscoveryQuery {
   filters?: DiscoveryFilters;
   limit?: number;
   offset?: number;
+  sort?: DiscoverySort;
   types?: DiscoveryEntityType[];
 }
 
@@ -131,6 +134,8 @@ export interface UnifiedDiscoveryResults {
 
 export interface DiscoveryRepository {
   listBusinesses(query?: DiscoveryQuery): Promise<DiscoverySearchResult<DiscoveryBusiness>>;
+  getBusinessById(id: string): Promise<DiscoveryBusiness | null>;
+  getBusinessBySlug(slug: string): Promise<DiscoveryBusiness | null>;
   listProducts(query?: DiscoveryQuery): Promise<DiscoverySearchResult<DiscoveryProduct>>;
   listServices(query?: DiscoveryQuery): Promise<DiscoverySearchResult<DiscoveryService>>;
   listCategories(query?: DiscoveryQuery): Promise<DiscoverySearchResult<DiscoveryCategory>>;
