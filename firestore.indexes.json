@@ -209,6 +209,16 @@
           "order": "ASCENDING"
         }
       ]
+    },
+    {
+      "collectionGroup": "products",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "ecommerce.slug",
+          "order": "ASCENDING"
+        }
+      ]
     }
   ],
   "fieldOverrides": []
