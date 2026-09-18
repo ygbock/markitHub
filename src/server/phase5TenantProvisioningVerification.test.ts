@@ -117,3 +117,38 @@ test('Phase 5 Invariant 10: business tenant activation is additive for multi-loc
   assert.deepEqual(records.businessPatch.tenantIds, ['tenant-existing', 'tenant-new']);
   assert.equal(records.tenant.isPrimaryBranch, false);
 });
+
+
+test('Phase 5 Invariant 11: server provisioning endpoint is authenticated and transactionally binds business, branch, tenant, subscription, membership, and audit', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { resolve } = await import('node:path');
+  const source = readFileSync(resolve(process.cwd(), 'server.ts'), 'utf8');
+  assert.match(source, /app\.post\('\/api\/business\/provision-tenant', requireServerAuth/);
+  assert.match(source, /db\.runTransaction\(async \(transaction\)/);
+  assert.match(source, /transaction\.create\(tenantRef, records\.tenant\)/);
+  assert.match(source, /transaction\.create\(subscriptionRef, records\.subscription\)/);
+  assert.match(source, /transaction\.create\(membershipRef, records\.membership\)/);
+  assert.match(source, /transaction\.create\(requestRef/);
+  assert.match(source, /transaction\.create\(db\.collection\('audit_logs'\)\.doc\(audit\.id\), audit\)/);
+});
+
+test('Phase 5 Invariant 12: server provisioning enforces authoritative business ownership and rejects already provisioned branches', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { resolve } = await import('node:path');
+  const source = readFileSync(resolve(process.cwd(), 'server.ts'), 'utf8');
+  assert.match(source, /business\.ownerUid.*req\.user\?\.uid/);
+  assert.match(source, /Only the authoritative business owner may provision a tenant/);
+  assert.match(source, /location\.tenantId/);
+  assert.match(source, /already has an operational tenant/);
+  assert.match(source, /plan\.status !== 'active'/);
+});
+
+test('Phase 5 Invariant 13: provisioning idempotency is keyed by a SHA-256 digest and replays the existing tenant', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { resolve } = await import('node:path');
+  const source = readFileSync(resolve(process.cwd(), 'server.ts'), 'utf8');
+  assert.match(source, /hashProvisioningIdempotencyKey\(request\.idempotencyKey\)/);
+  assert.match(source, /platform_provisioning_requests/);
+  assert.match(source, /priorRequest\.exists/);
+  assert.match(source, /replayed/);
+});
