@@ -1,14 +1,21 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ArrowRight, Building2, FolderTree, Loader2, Package, Search, ShieldCheck, Star, Wrench } from 'lucide-react';
+import { ArrowRight, Building2, Check, Filter, FolderTree, Loader2, Package, RotateCcw, Search, ShieldCheck, Star, Wrench } from 'lucide-react';
 import { discoveryRepository } from '../../discovery/discoveryRepository';
-import type { DiscoveryEntityType, DiscoverySearchItem, UnifiedDiscoveryResults } from '../../discovery/types';
+import type { DiscoveryEntityType, DiscoveryFilters, DiscoverySearchItem, DiscoverySort, UnifiedDiscoveryResults } from '../../discovery/types';
 
 interface UnifiedSearchPageProps {
   initialQuery?: string;
   onNavigate: (path: string) => void;
 }
 
-const ENTITY_LABELS: Record<DiscoveryEntityType, string> = { business: 'Businesses', product: 'Products', service: 'Services', category: 'Categories' };
+const ENTITY_LABELS: Record<DiscoveryEntityType, string> = {
+  business: 'Businesses',
+  product: 'Products',
+  service: 'Services',
+  category: 'Categories',
+};
+
+const DEFAULT_FILTERS: DiscoveryFilters = {};
 
 function resultPath(result: DiscoverySearchItem): string {
   switch (result.type) {
@@ -40,13 +47,22 @@ function resultDescription(result: DiscoverySearchItem): string {
   }
 }
 
+function activeFilterCount(filters: DiscoveryFilters): number {
+  return Object.values(filters).filter(value => value !== undefined && value !== '' && value !== false).length;
+}
+
 export default function UnifiedSearchPage({ initialQuery = '', onNavigate }: UnifiedSearchPageProps) {
   const [queryText, setQueryText] = useState(initialQuery);
   const [submittedQuery, setSubmittedQuery] = useState(initialQuery.trim());
   const [results, setResults] = useState<UnifiedDiscoveryResults | null>(null);
+  const [categories, setCategories] = useState<Array<{ id: string; name: string; slug: string }>>([]);
   const [loading, setLoading] = useState(false);
+  const [categoryLoading, setCategoryLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeType, setActiveType] = useState<DiscoveryEntityType | 'all'>('all');
+  const [filters, setFilters] = useState<DiscoveryFilters>(DEFAULT_FILTERS);
+  const [sort, setSort] = useState<DiscoverySort>('relevance');
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   useEffect(() => {
     setQueryText(initialQuery);
@@ -55,15 +71,31 @@ export default function UnifiedSearchPage({ initialQuery = '', onNavigate }: Uni
 
   useEffect(() => {
     let cancelled = false;
+    setCategoryLoading(true);
+    void discoveryRepository.listCategories({ limit: 100, sort: 'name' })
+      .then(response => {
+        if (!cancelled) setCategories(response.items.map(category => ({ id: category.id, name: category.name, slug: category.slug })));
+      })
+      .catch(() => {
+        if (!cancelled) setCategories([]);
+      })
+      .finally(() => {
+        if (!cancelled) setCategoryLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
     const run = async () => {
       setLoading(true);
       setError(null);
       try {
         const response = await discoveryRepository.search({
-          filters: { text: submittedQuery || undefined },
+          filters: { ...filters, text: submittedQuery || undefined },
           limit: 24,
           types: activeType === 'all' ? undefined : [activeType],
-          sort: 'relevance',
+          sort,
         });
         if (!cancelled) setResults(response);
       } catch (err) {
@@ -74,18 +106,32 @@ export default function UnifiedSearchPage({ initialQuery = '', onNavigate }: Uni
     };
     void run();
     return () => { cancelled = true; };
-  }, [submittedQuery, activeType]);
+  }, [submittedQuery, activeType, filters, sort]);
 
-  const rankedResults = useMemo(() => {
-    if (!results) return [];
-    return results.rankedResults;
-  }, [results]);
-
-  const submit = (event: React.FormEvent) => { event.preventDefault(); setSubmittedQuery(queryText.trim()); };
+  const rankedResults = useMemo(() => results?.rankedResults ?? [], [results]);
   const counts = results ? {
     all: results.businesses.total + results.products.total + results.services.total + results.categories.total,
-    business: results.businesses.total, product: results.products.total, service: results.services.total, category: results.categories.total,
+    business: results.businesses.total,
+    product: results.products.total,
+    service: results.services.total,
+    category: results.categories.total,
   } : { all: 0, business: 0, product: 0, service: 0, category: 0 };
+
+  const setFilter = <K extends keyof DiscoveryFilters>(key: K, value: DiscoveryFilters[K]) => {
+    setFilters(current => ({ ...current, [key]: value === '' ? undefined : value }));
+  };
+
+  const resetFilters = () => {
+    setFilters(DEFAULT_FILTERS);
+    setSort('relevance');
+  };
+
+  const submit = (event: React.FormEvent) => {
+    event.preventDefault();
+    setSubmittedQuery(queryText.trim());
+  };
+
+  const filterCount = activeFilterCount(filters);
 
   return (
     <div className='min-h-screen bg-slate-50 text-slate-900' id='unified-search-root'>
@@ -99,13 +145,83 @@ export default function UnifiedSearchPage({ initialQuery = '', onNavigate }: Uni
           </form>
         </div>
       </header>
+
       <main className='max-w-7xl mx-auto px-4 sm:px-6 lg:px-10 py-8'>
-        <div className='flex flex-wrap gap-2 mb-6'>
-          {(['all', 'business', 'product', 'service', 'category'] as const).map(type => <button key={type} onClick={() => setActiveType(type)} className={'px-4 py-2 rounded-full text-xs font-bold border ' + (activeType === type ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-700 border-slate-200')}>{type === 'all' ? 'All' : ENTITY_LABELS[type]} ({counts[type]})</button>)}
+        <div className='flex flex-wrap gap-2 mb-4'>
+          {(['all', 'business', 'product', 'service', 'category'] as const).map(type => (
+            <button key={type} onClick={() => setActiveType(type)} className={'px-4 py-2 rounded-full text-xs font-bold border ' + (activeType === type ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-700 border-slate-200')}>
+              {type === 'all' ? 'All' : ENTITY_LABELS[type]} ({counts[type]})
+            </button>
+          ))}
         </div>
+
+        <section className='bg-white rounded-3xl border border-slate-200 mb-7'>
+          <div className='flex items-center justify-between gap-3 p-4'>
+            <button onClick={() => setFiltersOpen(open => !open)} className='flex items-center gap-2 text-sm font-black text-slate-800'>
+              <Filter className='w-4 h-4 text-indigo-600' /> Filters{filterCount > 0 && <span className='rounded-full bg-indigo-100 text-indigo-700 px-2 py-0.5 text-[10px]'>{filterCount}</span>}
+            </button>
+            <div className='flex items-center gap-2'>
+              <label htmlFor='discovery-sort' className='text-xs font-bold text-slate-500'>Sort</label>
+              <select id='discovery-sort' value={sort} onChange={e => setSort(e.target.value as DiscoverySort)} className='rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold'>
+                <option value='relevance'>Relevance</option>
+                <option value='rating'>Rating</option>
+                <option value='distance'>Distance</option>
+                <option value='name'>Name</option>
+              </select>
+              {filterCount > 0 && <button onClick={resetFilters} aria-label='Reset discovery filters' className='p-2 rounded-xl border border-slate-200 hover:bg-slate-50'><RotateCcw className='w-4 h-4' /></button>}
+            </div>
+          </div>
+
+          {filtersOpen && (
+            <div className='border-t border-slate-100 p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4'>
+              <label className='space-y-1.5'>
+                <span className='text-[11px] font-black uppercase tracking-wide text-slate-500'>Category</span>
+                <select value={filters.categorySlug ?? ''} onChange={e => setFilter('categorySlug', e.target.value)} className='w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm'>
+                  <option value=''>All categories</option>
+                  {categories.map(category => <option key={category.id} value={category.slug}>{category.name}</option>)}
+                </select>
+                {categoryLoading && <span className='text-[10px] text-slate-400'>Loading categories…</span>}
+              </label>
+
+              <label className='space-y-1.5'>
+                <span className='text-[11px] font-black uppercase tracking-wide text-slate-500'>Minimum price</span>
+                <input type='number' min='0' step='0.01' value={filters.minPrice ?? ''} onChange={e => setFilter('minPrice', e.target.value === '' ? undefined : Number(e.target.value))} className='w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm' />
+              </label>
+
+              <label className='space-y-1.5'>
+                <span className='text-[11px] font-black uppercase tracking-wide text-slate-500'>Maximum price</span>
+                <input type='number' min='0' step='0.01' value={filters.maxPrice ?? ''} onChange={e => setFilter('maxPrice', e.target.value === '' ? undefined : Number(e.target.value))} className='w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm' />
+              </label>
+
+              <label className='space-y-1.5'>
+                <span className='text-[11px] font-black uppercase tracking-wide text-slate-500'>Radius (km)</span>
+                <input type='number' min='1' max='100' step='1' value={filters.radiusKm ?? ''} onChange={e => setFilter('radiusKm', e.target.value === '' ? undefined : Number(e.target.value))} placeholder='Requires coordinates' className='w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm' />
+              </label>
+
+              <div className='sm:col-span-2 lg:col-span-4 flex flex-wrap gap-2'>
+                {[
+                  ['verifiedOnly', 'Verified businesses'],
+                  ['featuredOnly', 'Featured'],
+                  ['openNow', 'Open now'],
+                  ['availableOnly', 'Available now'],
+                ].map(([key, label]) => (
+                  <button key={key} type='button' onClick={() => setFilter(key as keyof DiscoveryFilters, !filters[key as keyof DiscoveryFilters] as never)} className={'flex items-center gap-2 rounded-xl border px-3 py-2 text-xs font-bold ' + (filters[key as keyof DiscoveryFilters] ? 'bg-indigo-50 border-indigo-300 text-indigo-700' : 'bg-white border-slate-200 text-slate-600')}>
+                    {filters[key as keyof DiscoveryFilters] ? <Check className='w-3.5 h-3.5' /> : <span className='w-3.5 h-3.5 rounded border border-slate-300' />}
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              <div className='sm:col-span-2 lg:col-span-4 text-[11px] text-slate-400'>
+                Distance and “open now” are applied from authoritative business location data. A radius without a latitude/longitude origin is intentionally ignored.
+              </div>
+            </div>
+          )}
+        </section>
+
         {loading && <div className='py-16 flex items-center justify-center gap-2 text-slate-500'><Loader2 className='w-5 h-5 animate-spin' /> Searching MikitHub…</div>}
         {!loading && error && <div className='p-5 rounded-2xl bg-rose-50 border border-rose-200 text-rose-800'>{error}</div>}
-        {!loading && !error && submittedQuery && rankedResults.length === 0 && <div className='p-10 rounded-3xl bg-white border border-slate-200 text-center'><Search className='w-8 h-8 mx-auto text-slate-300 mb-3' /><h2 className='font-bold text-lg'>No results found</h2><p className='text-sm text-slate-500 mt-1'>Try a product, business, service, or category name.</p></div>}
+        {!loading && !error && submittedQuery && rankedResults.length === 0 && <div className='p-10 rounded-3xl bg-white border border-slate-200 text-center'><Search className='w-8 h-8 mx-auto text-slate-300 mb-3' /><h2 className='font-bold text-lg'>No results found</h2><p className='text-sm text-slate-500 mt-1'>Try changing the search or filters.</p></div>}
         {!loading && !error && !submittedQuery && <div className='p-10 rounded-3xl bg-white border border-slate-200 text-center'><Search className='w-8 h-8 mx-auto text-slate-300 mb-3' /><h2 className='font-bold text-lg'>Start with what you need</h2><p className='text-sm text-slate-500 mt-1'>Search across the MikitHub discovery graph.</p></div>}
         {!loading && !error && rankedResults.length > 0 && <div className='grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5'>
           {rankedResults.map(result => <button key={result.type + '-' + result.item.id} onClick={() => onNavigate(resultPath(result))} className='text-left bg-white rounded-3xl border border-slate-200 p-5 hover:border-indigo-300 hover:shadow-lg transition-all group'>
