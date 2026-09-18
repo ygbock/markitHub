@@ -136,6 +136,8 @@ export interface DiscoveryRepository {
   listBusinesses(query?: DiscoveryQuery): Promise<DiscoverySearchResult<DiscoveryBusiness>>;
   getBusinessById(id: string): Promise<DiscoveryBusiness | null>;
   getBusinessBySlug(slug: string): Promise<DiscoveryBusiness | null>;
+  getProductById(id: string): Promise<DiscoveryProduct | null>;
+  getProductBySlug(slug: string): Promise<DiscoveryProduct | null>;
   listProducts(query?: DiscoveryQuery): Promise<DiscoverySearchResult<DiscoveryProduct>>;
   listServices(query?: DiscoveryQuery): Promise<DiscoverySearchResult<DiscoveryService>>;
   listCategories(query?: DiscoveryQuery): Promise<DiscoverySearchResult<DiscoveryCategory>>;
