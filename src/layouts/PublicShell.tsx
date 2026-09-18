@@ -50,7 +50,7 @@ export const PublicShell: React.FC<PublicShellProps> = ({
     <div className="min-h-screen flex flex-col bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 antialiased">
       {/* Universal Discovery Header */}
       <header className="sticky top-0 z-40 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 shadow-xs">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="w-full max-w-[1920px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-12">
           <div className="flex items-center justify-between h-16 gap-4">
             {/* Logo & Location */}
             <div className="flex items-center gap-6">
@@ -191,7 +191,7 @@ export const PublicShell: React.FC<PublicShellProps> = ({
 
       {/* Universal Discovery Footer */}
       <footer className="bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 py-12">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="w-full max-w-[1920px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-12">
           <div className="grid grid-cols-1 md:grid-cols-4 gap-8 mb-8">
             <div className="space-y-3">
               <div className="flex items-center gap-2">
