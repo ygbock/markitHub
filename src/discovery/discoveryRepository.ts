@@ -11,7 +11,7 @@ import {
   type QueryConstraint,
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import type { Business, BusinessListing, BusinessLocation, Category, Product } from '../types';
+import type { Business, BusinessLocation, Category, Product } from '../types';
 import type {
   DiscoveryBusiness,
   DiscoveryCategory,
@@ -54,7 +54,7 @@ function distanceKm(a: { latitude: number; longitude: number }, b: { latitude: n
   return 6371 * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
 }
 
-function normalizeLocation(raw: Partial<BusinessLocation> & Record<string, unknown>): DiscoveryLocation {
+function normalizeLocation(raw: Partial<BusinessLocation> & { [key: string]: any }): DiscoveryLocation {
   return {
     id: raw.id,
     businessId: raw.businessId,

@@ -39,8 +39,10 @@ export async function testConnection(): Promise<boolean> {
   }
 }
 
-// Graceful background verification
-testConnection().catch(() => {});
+// Graceful background verification (browser/runtime only)
+if (typeof window !== 'undefined' || (typeof process !== 'undefined' && process.env.NODE_ENV !== 'test')) {
+  testConnection().catch(() => {});
+}
 
 export default app;
 
