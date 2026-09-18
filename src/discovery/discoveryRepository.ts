@@ -154,6 +154,8 @@ function normalizeBusiness(raw: Business & Record<string, unknown>): DiscoveryBu
     ? raw.locations.filter((location): location is BusinessLocation => !!location && location.isActive !== false).map(normalizeDiscoveryLocation)
     : [];
 
+  const listingRecord = listing as unknown as Record<string, unknown>;
+
   return {
     id: raw.id,
     slug: listing.slug || raw.id,
@@ -166,8 +168,8 @@ function normalizeBusiness(raw: Business & Record<string, unknown>): DiscoveryBu
     bannerUrl: listing.bannerUrl,
     email: (raw as Record<string, unknown>).email as string | undefined,
     phone: locations.find(location => location.phone)?.phone,
-    badges: Array.isArray((listing as Record<string, unknown>).badges) ? (listing as Record<string, unknown>).badges as string[] : [],
-    photos: Array.isArray((listing as Record<string, unknown>).photos) ? (listing as Record<string, unknown>).photos as string[] : [],
+    badges: Array.isArray(listingRecord.badges) ? listingRecord.badges as string[] : [],
+    photos: Array.isArray(listingRecord.photos) ? listingRecord.photos as string[] : [],
     ratingAverage: Number(listing.ratingAverage || 0),
     reviewCount: Number(listing.reviewCount || 0),
     isFeatured: listing.isFeatured === true,
