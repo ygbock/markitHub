@@ -122,10 +122,10 @@ export function registerStorefrontCheckoutRoutes(app: any, deps: {
         variantTitle = clean(variant.title, 160) || undefined;
       }
       if (!Number.isFinite(unitPrice) || unitPrice < 0) throw new Error('Product price is invalid.');
-      if (product.allowBackorder !== true && (!item.variantSku && stock < item.quantity)) {
+      if (!item.variantSku && stock < item.quantity) {
         throw new Error(`Insufficient stock for '${product.name || item.productId}'.`);
       }
-      if (item.variantSku && product.variants?.find((v: any) => String(v.sku || '') === item.variantSku)?.allowBackorder !== true && stock < item.quantity) {
+      if (item.variantSku && stock < item.quantity) {
         throw new Error(`Insufficient stock for '${product.name || item.productId}'.`);
       }
 
@@ -268,7 +268,6 @@ export function registerStorefrontCheckoutRoutes(app: any, deps: {
           const snap = productSnaps[i];
           if (!snap.exists) throw new Error(`Product '${line.productId}' is no longer available.`);
           const product = snap.data() || {};
-          const allowBackorder = product.allowBackorder === true;
           const variants = Array.isArray(product.variants) ? product.variants.map((v: any) => ({ ...v })) : [];
           let stockBefore = Number(product.stock || 0);
           let stockReservedBefore = Number(product.reserved || product.reservedStock || 0);
@@ -279,14 +278,14 @@ export function registerStorefrontCheckoutRoutes(app: any, deps: {
             const variant = variants[idx];
             const reserved = Number(variant.reserved || 0);
             const available = Number(variant.stock || 0) - reserved;
-            if (!allowBackorder && variant.allowBackorder !== true && available < line.quantity) {
+            if (available < line.quantity) {
               throw new Error(`Insufficient stock for '${line.productName}'.`);
             }
             variant.reserved = reserved + line.quantity;
             reservationItems.push({ productId: line.productId, variantSku: line.variantSku, quantity: line.quantity, stockBefore: Number(variant.stock || 0), reservedBefore: reserved });
           } else {
             const available = stockBefore - stockReservedBefore;
-            if (!allowBackorder && available < line.quantity) {
+            if (available < line.quantity) {
               throw new Error(`Insufficient stock for '${line.productName}'.`);
             }
             stockReservedBefore += line.quantity;
