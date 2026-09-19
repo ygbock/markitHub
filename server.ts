@@ -58,6 +58,7 @@ import { validateBusinessRegistrationRequest, hashBusinessRegistrationKey, build
 import { registerTenantCatalogRoutes } from './src/server/tenantCatalog';
 import { registerTenantInventoryRoutes } from './src/server/tenantInventory';
 import { registerTenantPosRoutes } from './src/server/tenantPos';
+import { registerTenantStorefrontRoutes } from './src/server/tenantStorefront';
 import {
   createAuthoritativeAuditRecord,
   recordAuditEvent,
@@ -279,6 +280,16 @@ async function startServer() {
   });
 
   registerTenantPosRoutes(app, {
+    requireServerAuth,
+    requireActiveTenantMembership,
+    requirePermission,
+    getAdminDb,
+    extractAuthenticatedTenantId,
+    createAuthoritativeAuditRecord,
+    updateAuthoritativeSecurityMetrics,
+  });
+
+  registerTenantStorefrontRoutes(app, {
     requireServerAuth,
     requireActiveTenantMembership,
     requirePermission,
