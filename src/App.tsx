@@ -1660,7 +1660,7 @@ export default function App() {
       )}
 
       {/* 2h. Tenant Operations Domain (/tenant/:tenantId/*) */}
-      {activeDomain === 'TENANT_OPERATIONS' && (
+      {activeDomain === 'TENANT_OPERATIONS' && currentRoute.definition.id !== 'tenant.products' && currentRoute.definition.id !== 'tenant.services' && (
         <div className="bg-slate-50 min-h-screen text-slate-800 flex flex-col justify-between" id="applet-viewport-root">
       
       {/* Top Main Mode Selector - Core Showroom navigation */}
