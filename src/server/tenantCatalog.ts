@@ -212,7 +212,7 @@ export function registerTenantCatalogRoutes(app: any, deps: {
 
   const tenantBase = [requireServerAuth, requireActiveTenantMembership];
 
-  app.get('/api/tenant/catalog/products', ...tenantBase, requirePermission('services.view'), async (req: any, res: any) => {
+  app.get('/api/tenant/catalog/products', ...tenantBase, requirePermission('inventory.view'), async (req: any, res: any) => {
     const tenantId = extractAuthenticatedTenantId(req.user);
     const db = getAdminDb();
     if (!tenantId || !db) return res.status(503).json({ error: 'Tenant catalog service is not configured.' });
@@ -329,7 +329,7 @@ export function registerTenantCatalogRoutes(app: any, deps: {
     }
   });
 
-  app.get('/api/tenant/catalog/services', ...tenantBase, requirePermission('inventory.view'), async (req: any, res: any) => {
+  app.get('/api/tenant/catalog/services', ...tenantBase, requirePermission('services.view'), async (req: any, res: any) => {
     const tenantId = extractAuthenticatedTenantId(req.user);
     const db = getAdminDb();
     if (!tenantId || !db) return res.status(503).json({ error: 'Tenant catalog service is not configured.' });
