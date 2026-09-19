@@ -78,6 +78,12 @@ export function registerTenantInventoryRoutes(app: any, deps: {
       const productRef = db.collection('tenants').doc(tenantId).collection('products').doc(productId);
       const inventoryRef = getInventoryRef(db, tenantId, productId, locationId);
       const now = new Date().toISOString();
+      const audit = createAuthoritativeAuditRecord({
+        tenantId, actorUid: req.user.uid, actorName: req.user.email || req.user.uid, actorEmail: req.user.email || null,
+        actorRole: String(req.user.claims?.role || 'Tenant Staff'), action: 'INVENTORY_ADJUSTED', module: 'Inventory',
+        targetType: 'product', targetId: productId, newState: { type, quantity, locationId, reference },
+        result: 'success', severity: 'info', details: `Inventory ${type} for product ${productId}: ${quantity}. Reason: ${reason}.`,
+      });
       const result = await db.runTransaction(async (tx: any) => {
         const productSnap = await tx.get(productRef);
         if (!productSnap.exists) throw Object.assign(new Error('Product not found.'), { statusCode: 404 });
@@ -90,18 +96,10 @@ export function registerTenantInventoryRoutes(app: any, deps: {
         const movementRef = db.collection('tenants').doc(tenantId).collection('inventoryMovements').doc(movementId);
         tx.set(inventoryRef, { tenantId, productId, locationId, quantity: next, updatedAt: now }, { merge: true });
         tx.create(movementRef, { id: movementId, tenantId, productId, locationId, quantity, type, reason, reference, previousQuantity: current, resultingQuantity: next, actorUid: req.user.uid, createdAt: now });
+        tx.set(db.collection('audit_logs').doc(audit.id), audit);
+        await updateAuthoritativeSecurityMetrics(db, audit, tx);
         return { movementId, previousQuantity: current, resultingQuantity: next };
       });
-      const audit = createAuthoritativeAuditRecord({
-        tenantId, actorUid: req.user.uid, actorName: req.user.email || req.user.uid, actorEmail: req.user.email || null,
-        actorRole: String(req.user.claims?.role || 'Tenant Staff'), action: 'INVENTORY_ADJUSTED', module: 'Inventory',
-        targetType: 'product', targetId: productId, newState: result, result: 'success', severity: 'info',
-        details: `Inventory ${type} for product ${productId}: ${quantity}. Reason: ${reason}.`,
-      });
-      const batch = db.batch();
-      batch.set(db.collection('audit_logs').doc(audit.id), audit);
-      await updateAuthoritativeSecurityMetrics(db, audit, batch);
-      await batch.commit();
       return res.json({ success: true, ...result });
     } catch (err: any) {
       return res.status(err?.statusCode || 400).json({ error: err?.message || 'Unable to adjust inventory.' });
@@ -120,6 +118,12 @@ export function registerTenantInventoryRoutes(app: any, deps: {
       const reason = validateReason(req.body?.reason);
       if (!productId || !fromLocationId || !toLocationId || fromLocationId === toLocationId) throw Object.assign(new Error('Valid distinct source and destination locations are required.'), { statusCode: 400 });
       const now = new Date().toISOString();
+      const audit = createAuthoritativeAuditRecord({
+        tenantId, actorUid: req.user.uid, actorName: req.user.email || req.user.uid, actorEmail: req.user.email || null,
+        actorRole: String(req.user.claims?.role || 'Tenant Staff'), action: 'INVENTORY_TRANSFERRED', module: 'Inventory',
+        targetType: 'product', targetId: productId, newState: { fromLocationId, toLocationId, quantity },
+        result: 'success', severity: 'info', details: `Transferred ${quantity} units of product ${productId}.`,
+      });
       const result = await db.runTransaction(async (tx: any) => {
         const fromRef = getInventoryRef(db, tenantId, productId, fromLocationId);
         const toRef = getInventoryRef(db, tenantId, productId, toLocationId);
@@ -134,18 +138,10 @@ export function registerTenantInventoryRoutes(app: any, deps: {
         const base = db.collection('tenants').doc(tenantId).collection('inventoryMovements');
         tx.create(base.doc(), { tenantId, productId, locationId: fromLocationId, quantity, type: 'TRANSFER_OUT', reason, previousQuantity: fromQty, resultingQuantity: fromQty - quantity, actorUid: req.user.uid, createdAt: now });
         tx.create(base.doc(), { tenantId, productId, locationId: toLocationId, quantity, type: 'TRANSFER_IN', reason, previousQuantity: toQty, resultingQuantity: toQty + quantity, actorUid: req.user.uid, createdAt: now });
+        tx.set(db.collection('audit_logs').doc(audit.id), audit);
+        await updateAuthoritativeSecurityMetrics(db, audit, tx);
         return { fromQuantity: fromQty - quantity, toQuantity: toQty + quantity };
       });
-      const audit = createAuthoritativeAuditRecord({
-        tenantId, actorUid: req.user.uid, actorName: req.user.email || req.user.uid, actorEmail: req.user.email || null,
-        actorRole: String(req.user.claims?.role || 'Tenant Staff'), action: 'INVENTORY_TRANSFERRED', module: 'Inventory',
-        targetType: 'product', targetId: productId, newState: { fromLocationId, toLocationId, quantity, ...result },
-        result: 'success', severity: 'info', details: `Transferred ${quantity} units of product ${productId}.`,
-      });
-      const batch = db.batch();
-      batch.set(db.collection('audit_logs').doc(audit.id), audit);
-      await updateAuthoritativeSecurityMetrics(db, audit, batch);
-      await batch.commit();
       return res.json({ success: true, ...result });
     } catch (err: any) {
       return res.status(err?.statusCode || 400).json({ error: err?.message || 'Unable to transfer inventory.' });
