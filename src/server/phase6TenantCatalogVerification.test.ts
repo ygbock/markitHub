@@ -97,8 +97,8 @@ test('Phase 6 Catalog 9: catalog resources are stored under tenant-scoped Firest
   const source = readFileSync(resolve(process.cwd(), 'src/server/tenantCatalog.ts'), 'utf8');
   assert.match(source, /collection\('tenants'\)\.doc\(tenantId\)\.collection\('products'\)/);
   assert.match(source, /collection\('tenants'\)\.doc\(tenantId\)\.collection\('services'\)/);
-  assert.doesNotMatch(source, /collection\('products'\)\.doc\(req\.params\.productId\)/);
-  assert.doesNotMatch(source, /collection\('services'\)\.doc\(req\.params\.serviceId\)/);
+  assert.doesNotMatch(source, /db\.collection\('products'\)\.doc\(req\.params\.productId\)/);
+  assert.doesNotMatch(source, /db\.collection\('services'\)\.doc\(req\.params\.serviceId\)/);
 });
 
 test('Phase 6 Catalog 10: catalog mutations atomically pair resource changes with authoritative audit records', async () => {
