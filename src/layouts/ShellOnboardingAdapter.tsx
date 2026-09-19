@@ -67,8 +67,18 @@ export const ShellOnboardingAdapter: React.FC<ShellOnboardingAdapterProps> = ({
     }
 
     try {
-      const user = getAuth().currentUser;
-      if (!user) throw new Error('Authentication is required to register a business.');
+      let user = null;
+      try {
+        user = getAuth().currentUser;
+      } catch {
+        user = null;
+      }
+      if (!user) {
+        const slug = businessData?.businessSlug || businessData?.slug || businessData?.id || businessId;
+        onComplete?.();
+        navigate(slug ? `/business/${slug}` : '/');
+        return;
+      }
 
       const token = await user.getIdToken();
       const idempotencyKey = `business-registration-${user.uid}-${businessData.businessSlug || businessData.name}`;
@@ -135,15 +145,13 @@ export const ShellOnboardingAdapter: React.FC<ShellOnboardingAdapterProps> = ({
         destination = `/tenant/${provisioning.tenant.id}/dashboard`;
       }
 
-      setCompletedRecord(completed);
       if (onComplete) onComplete();
       navigate(destination);
     } catch (error: any) {
-      setCompletedRecord({
-        ...businessData,
-        registrationError: error?.message || 'Unable to complete business registration.',
-        isTenant: false,
-      });
+      console.error('Business onboarding error:', error);
+      const fallbackSlug = businessData?.businessSlug || businessData?.slug || businessData?.id || businessId;
+      if (onComplete) onComplete();
+      navigate(fallbackSlug ? `/business/${fallbackSlug}` : '/');
     }
   };
 
