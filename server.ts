@@ -60,6 +60,7 @@ import { registerTenantInventoryRoutes } from './src/server/tenantInventory';
 import { registerTenantPosRoutes } from './src/server/tenantPos';
 import { registerTenantStorefrontRoutes } from './src/server/tenantStorefront';
 import { buildDefaultStorefrontRecord } from './src/server/tenantStorefront';
+import { registerStorefrontCheckoutRoutes } from './src/server/storefrontCheckout';
 import {
   createAuthoritativeAuditRecord,
   recordAuditEvent,
@@ -298,6 +299,17 @@ async function startServer() {
     extractAuthenticatedTenantId,
     createAuthoritativeAuditRecord,
     updateAuthoritativeSecurityMetrics,
+  });
+
+  // Phase 9: authoritative customer checkout/order lifecycle. Registered before
+  // the legacy storefront order handler so the canonical route resolves here.
+  registerStorefrontCheckoutRoutes(app, {
+    requireServerAuth,
+    getAdminDb,
+    createAuthoritativeAuditRecord,
+    updateAuthoritativeSecurityMetrics,
+    validateCouponAuthoritative,
+    promotions: SERVER_PROMOTIONS_REGISTRY,
   });
 
   app.get('/api/tenant/staff', requireServerAuth, requireActiveTenantMembership, requirePermission('users.view'), async (req, res) => {
