@@ -14,7 +14,7 @@ export function registerTenantPosRoutes(app: any, deps: {
   getAdminDb: () => any;
   extractAuthenticatedTenantId: (user: any) => string | null;
   createAuthoritativeAuditRecord: (input: any) => any;
-  updateAuthoritativeSecurityMetrics: (db: any, audit: any, batch: any) => Promise<void>;
+  updateAuthoritativeSecurityMetrics: (db: any, audit: any, transactionOrBatch: any) => Promise<void>;
 }) {
   const { requireServerAuth, requireActiveTenantMembership, requirePermission, getAdminDb, extractAuthenticatedTenantId, createAuthoritativeAuditRecord, updateAuthoritativeSecurityMetrics } = deps;
   const base = [requireServerAuth, requireActiveTenantMembership];
@@ -57,7 +57,7 @@ export function registerTenantPosRoutes(app: any, deps: {
           tx.set(inventoryRef, { tenantId, productId: item.productId, locationId, quantity: current - item.quantity, updatedAt: now }, { merge: true });
           const movementRef = db.collection('tenants').doc(tenantId).collection('inventoryMovements').doc();
           tx.create(movementRef, {
-            tenantId, productId: item.productId, locationId, quantity: item.quantity, type: 'SALE_RETURN' === 'SALE_RETURN' ? 'ADJUSTMENT_OUT' : 'ADJUSTMENT_OUT',
+            tenantId, productId: item.productId, locationId, quantity: item.quantity, type: 'ADJUSTMENT_OUT',
             reason: 'POS sale', reference: orderId, previousQuantity: current, resultingQuantity: current - item.quantity,
             actorUid: req.user.uid, createdAt: now,
           });
@@ -75,20 +75,17 @@ export function registerTenantPosRoutes(app: any, deps: {
           cashierUid: req.user.uid, locationId, createdAt: now, updatedAt: now,
         };
         tx.create(orderRef, order);
+        const audit = createAuthoritativeAuditRecord({
+          tenantId, actorUid: req.user.uid, actorName: req.user.email || req.user.uid, actorEmail: req.user.email || null,
+          actorRole: String(req.user.claims?.role || 'Tenant Staff'), action: 'POS_SALE_COMPLETED', module: 'POS',
+          targetType: 'order', targetId: orderId, targetName: orderId,
+          newState: { total, itemCount: resolvedItems.length, locationId },
+          result: 'success', severity: 'info', details: `Completed POS sale ${orderId} for ${total}.`,
+        });
+        tx.set(db.collection('audit_logs').doc(audit.id), audit);
+        await updateAuthoritativeSecurityMetrics(db, audit, tx);
         return order;
       });
-
-      const audit = createAuthoritativeAuditRecord({
-        tenantId, actorUid: req.user.uid, actorName: req.user.email || req.user.uid, actorEmail: req.user.email || null,
-        actorRole: String(req.user.claims?.role || 'Tenant Staff'), action: 'POS_SALE_COMPLETED', module: 'POS',
-        targetType: 'order', targetId: orderId, targetName: orderId,
-        newState: { total: result.total, itemCount: result.items.length, locationId },
-        result: 'success', severity: 'info', details: `Completed POS sale ${orderId} for ${result.total}.`,
-      });
-      const batch = db.batch();
-      batch.set(db.collection('audit_logs').doc(audit.id), audit);
-      await updateAuthoritativeSecurityMetrics(db, audit, batch);
-      await batch.commit();
       return res.status(201).json({ success: true, order: result });
     } catch (err: any) {
       return res.status(err?.statusCode || 400).json({ error: err?.message || 'Unable to complete POS sale.' });
