@@ -1669,7 +1669,7 @@ export default function App() {
           items={storefrontCart}
           onClearCart={() => setStorefrontCart([])}
           onNavigate={navigate}
-          customerUid={authContextState?.user?.uid || null}
+          authUser={authContextState?.user as any}
         />
       )}
 
