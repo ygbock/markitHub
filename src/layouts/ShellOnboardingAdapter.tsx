@@ -57,6 +57,15 @@ export const ShellOnboardingAdapter: React.FC<ShellOnboardingAdapterProps> = ({
   });
 
   const handleComplete = async (businessData: any, choice: 'LISTING_ONLY' | 'LISTING_AND_STORE') => {
+    // Preserve the canonical adapter contract for direct completion calls:
+    // an already-provisioned tenant ID is authoritative and may be routed
+    // immediately; a business ID must never be treated as a tenant ID.
+    if (choice === 'LISTING_AND_STORE' && businessData?.tenantId) {
+      onComplete?.();
+      navigate(`/tenant/${businessData.tenantId}/dashboard`);
+      return;
+    }
+
     try {
       const user = getAuth().currentUser;
       if (!user) throw new Error('Authentication is required to register a business.');
