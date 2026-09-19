@@ -37,7 +37,8 @@ test('Phase 8 Invariant 5: publication is explicit and reversible', () => {
   const source = fs.readFileSync(path.resolve(root, 'src/server/tenantStorefront.ts'), 'utf8');
   assert.match(source, /STOREFRONT_PUBLISHED/);
   assert.match(source, /STOREFRONT_UNPUBLISHED/);
-  assert.match(source, /req\.body\?\.published !== false/);\n  assert.match(source, /publicationStatus: publish \? 'published' : 'draft'/);
+  assert.match(source, /req\.body\?\.published !== false/);
+  assert.match(source, /publicationStatus: publish \? 'published' : 'draft'/);
 });
 
 test('Phase 8 Invariant 6: public storefront is rendered from the authoritative CMS endpoint and tenant catalog read model', () => {
