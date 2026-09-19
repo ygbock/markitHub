@@ -1934,6 +1934,28 @@ export default function App() {
                     onDeleteProduct={handleDeleteProduct}
                     staffRole={activeStaff.role}
                     activeStaff={activeStaff}
+                    inventoryService={{
+                      adjustStock: async request => {
+                        const response = await fetch('/api/tenant/inventory/adjust', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify(request),
+                        });
+                        const json = await response.json().catch(() => ({}));
+                        if (!response.ok) return { success: false, message: json.error || 'Inventory adjustment failed.' };
+                        return { success: true, message: json.message };
+                      },
+                      transferStock: async request => {
+                        const response = await fetch('/api/tenant/inventory/transfer', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify(request),
+                        });
+                        const json = await response.json().catch(() => ({}));
+                        if (!response.ok) return { success: false, message: json.error || 'Inventory transfer failed.' };
+                        return { success: true, message: json.message };
+                      },
+                    }}
                   />
                 )}
 
@@ -1946,6 +1968,18 @@ export default function App() {
                     onProcessOrder={handleProcessOrder}
                     onRefundOrder={handleRefundOrder}
                     activeStaffName={activeStaff.name}
+                    onAuthoritativeSale={async request => {
+                      const response = await fetch('/api/tenant/pos/sales', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(request),
+                      });
+                      const json = await response.json().catch(() => ({}));
+                      if (!response.ok || !json.order) {
+                        throw new Error(json.error || 'Authoritative POS sale failed.');
+                      }
+                      return json.order as Order;
+                    }}
                   />
                 )}
 
