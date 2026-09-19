@@ -54,6 +54,9 @@ import GeographicDiscoveryPage from './components/discovery/GeographicDiscoveryP
 import CategoryDiscoveryPage from './components/discovery/CategoryDiscoveryPage';
 import PublicBusinessProfilePage from './components/discovery/PublicBusinessProfilePage';
 import AuthoritativeStorefrontPage from './components/storefront/AuthoritativeStorefrontPage';
+import StorefrontCartPage from './components/storefront/StorefrontCartPage';
+import StorefrontCheckoutPage from './components/storefront/StorefrontCheckoutPage';
+import StorefrontOrdersPage from './components/storefront/StorefrontOrdersPage';
 import TenantStorefrontManagement from './components/storefront/TenantStorefrontManagement';
 import TenantCatalogManagement from './components/tenant/TenantCatalogManagement';
 import ListingBusinessShell from './components/business/ListingBusinessShell';
@@ -82,10 +85,21 @@ export default function App() {
   // Operator states
   const [activeStaff, setActiveStaff] = useState<StaffMember>(INITIAL_STAFF[0]); // Elena (Admin)
   const [activeCustomer, setActiveCustomer] = useState<Customer | null>(INITIAL_CUSTOMERS[0]); // Sarah Connor
+  const [storefrontCart, setStorefrontCart] = useState<import('./components/storefront/StorefrontCartPage').StorefrontCartLine[]>([]);
 
   // MikitHub Canonical Router
   const router = useMikitRouter();
   const { currentRoute, activeDomain, navigate } = router;
+
+  const addToStorefrontCart = useCallback((item: import('./components/storefront/StorefrontCartPage').StorefrontCartLine) => {
+    setStorefrontCart(prev => {
+      const index = prev.findIndex(existing => existing.productId === item.productId && existing.variantSku === item.variantSku);
+      if (index < 0) return [...prev, item];
+      const next = [...prev];
+      next[index] = { ...next[index], quantity: next[index].quantity + item.quantity };
+      return next;
+    });
+  }, []);
 
   // Active sub-tab in Tenant Operations
   const [adminSubTab, setAdminSubTab] = useState<AdminSubTab>('Dashboard');
@@ -1625,37 +1639,46 @@ export default function App() {
         />
       )}
 
-      {/* 2g. Public storefront read model. Cart/checkout/order flows remain on the existing commerce shell until their authoritative phases. */}
-      {activeDomain === 'STOREFRONT' && ['storefront.home', 'storefront.products', 'storefront.product.detail', 'storefront.categories'].includes(currentRoute.definition.id) && (
+      {/* Phase 9: canonical storefront commerce surfaces. */}
+      {activeDomain === 'STOREFRONT' && currentRoute.definition.id !== 'storefront.cart' && currentRoute.definition.id !== 'storefront.checkout' && currentRoute.definition.id !== 'storefront.orders' && (
         <AuthoritativeStorefrontPage
           tenantSlug={currentRoute.params.tenantSlug || ''}
           routeId={currentRoute.definition.id}
           onNavigate={navigate}
-          onOpenLogin={() => navigate(`/login?returnUrl=${encodeURIComponent(currentRoute.pathname)}`)}
+          onOpenLogin={() => navigate('/login?returnUrl=' + encodeURIComponent(currentRoute.pathname))}
+          onAddToCart={addToStorefrontCart}
         />
       )}
-      {activeDomain === 'STOREFRONT' && !['storefront.home', 'storefront.products', 'storefront.product.detail', 'storefront.categories'].includes(currentRoute.definition.id) && (
-        <TenantProvider initialSlug={currentRoute.params.tenantSlug || 'nexus-retail'}>
-          <div className="min-h-screen bg-white" id="storefront-domain-root">
-            <ECommerceStorefront
-              products={products}
-              customers={customers}
-              orders={orders}
-              onPlaceEcomOrder={handlePlaceEcomOrder}
-              activeCustomer={activeCustomer}
-              onLoginCustomer={handleLoginCustomer}
-              onRegisterCustomer={handleAddCustomer}
-              onOpenLogin={() => navigate(`/login?returnUrl=${encodeURIComponent(currentRoute.pathname)}`)}
-              homepageConfig={homepageConfig}
-              reviews={reviews}
-              onAddReview={handleAddReview}
-              onHelpfulClick={handleHelpfulClick}
-              onConfirmOrderReceipt={handleConfirmOrderReceipt}
-              onFileReturnOrComplaint={handleFileReturnOrComplaint}
-              systemSettings={systemSettings}
-            />
-          </div>
-        </TenantProvider>
+
+      {activeDomain === 'STOREFRONT' && currentRoute.definition.id === 'storefront.cart' && (
+        <StorefrontCartPage
+          tenantSlug={currentRoute.params.tenantSlug || ''}
+          items={storefrontCart}
+          onUpdateQuantity={(productId, variantSku, quantity) => {
+            if (quantity <= 0) setStorefrontCart(prev => prev.filter(item => !(item.productId === productId && item.variantSku === variantSku)));
+            else setStorefrontCart(prev => prev.map(item => item.productId === productId && item.variantSku === variantSku ? { ...item, quantity } : item));
+          }}
+          onRemove={(productId, variantSku) => setStorefrontCart(prev => prev.filter(item => !(item.productId === productId && item.variantSku === variantSku)))}
+          onNavigate={navigate}
+        />
+      )}
+
+      {activeDomain === 'STOREFRONT' && currentRoute.definition.id === 'storefront.checkout' && (
+        <StorefrontCheckoutPage
+          tenantSlug={currentRoute.params.tenantSlug || ''}
+          items={storefrontCart}
+          onClearCart={() => setStorefrontCart([])}
+          onNavigate={navigate}
+          customerUid={authContextState?.user?.uid || null}
+        />
+      )}
+
+      {activeDomain === 'STOREFRONT' && currentRoute.definition.id === 'storefront.orders' && (
+        <StorefrontOrdersPage
+          tenantSlug={currentRoute.params.tenantSlug || ''}
+          authUser={authContextState?.user as any}
+          onNavigate={navigate}
+        />
       )}
 
       {/* 2h-catalog. Authoritative tenant product/service management */}
