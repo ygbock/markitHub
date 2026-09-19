@@ -26,6 +26,7 @@ interface POSModuleProps {
   orders?: Order[];
   onAddCustomer: (customer: Customer) => void;
   onProcessOrder: (order: Order) => void;
+  onAuthoritativeSale?: (request: { items: Array<{ productId: string; variantSku?: string; quantity: number; unitPrice: number }>; locationId?: string; discount?: number; tax?: number; paymentMethod: string; customerId?: string; customerName?: string }) => Promise<Order>;
   onRefundOrder?: (orderId: string, reason: string) => void;
   activeStaffName: string;
 }
@@ -54,6 +55,7 @@ export default function POSModule({
   orders = [],
   onAddCustomer,
   onProcessOrder,
+  onAuthoritativeSale,
   onRefundOrder,
   activeStaffName
 }: POSModuleProps) {
@@ -698,8 +700,8 @@ export default function POSModule({
 
     setIsProcessingCheckout(true);
 
-    // Realistic checkout processing
-    setTimeout(() => {
+    // Authoritative checkout processing when supplied; the server owns inventory, order identity and audit.
+    const processCheckout = async () => {
       const orderId = `ord-pos-${Math.floor(1000 + Math.random() * 9000)}`;
       const pointsEarned = Math.round(total / 10);
       const customerEmail = selectedCustomer?.email;
@@ -736,8 +738,38 @@ export default function POSModule({
         receiptSentAt: customerEmail ? new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : undefined
       };
 
-      // Process central order record
-      onProcessOrder(newOrder);
+      if (onAuthoritativeSale) {
+        try {
+          const authoritativeOrder = await onAuthoritativeSale({
+            items: cart.map(item => ({
+              productId: item.product.id,
+              variantSku: item.selectedVariantSku,
+              quantity: item.quantity,
+              unitPrice: getItemPrice(item),
+            })),
+            discount: parseFloat(discountAmount.toFixed(2)),
+            tax: parseFloat(tax.toFixed(2)),
+            paymentMethod,
+            customerId: selectedCustomer?.id,
+            customerName: selectedCustomer?.name,
+          });
+          newOrder.id = authoritativeOrder.id;
+          newOrder.date = authoritativeOrder.date;
+          newOrder.items = authoritativeOrder.items;
+          newOrder.subtotal = authoritativeOrder.subtotal;
+          newOrder.tax = authoritativeOrder.tax;
+          newOrder.discount = authoritativeOrder.discount;
+          newOrder.total = authoritativeOrder.total;
+          newOrder.status = authoritativeOrder.status;
+        } catch (error: any) {
+          setIsProcessingCheckout(false);
+          triggerToast(error?.message || 'Authoritative POS sale failed.', 'warn');
+          playSound('error');
+          return;
+        }
+      } else {
+        onProcessOrder(newOrder);
+      }
 
       // Record in current shift transaction ledger
       const newShiftTx: ShiftTransaction = {
@@ -781,7 +813,9 @@ export default function POSModule({
       setShowOrderNotes(false);
       setIsTaxExempt(false);
       setIsProcessingCheckout(false);
-    }, 850);
+    };
+
+    void processCheckout();
   };
 
   const handleFinalizeShift = (report: ShiftReportData) => {
