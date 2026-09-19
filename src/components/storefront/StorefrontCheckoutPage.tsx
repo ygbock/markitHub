@@ -7,10 +7,10 @@ interface Props {
   items: StorefrontCartLine[];
   onClearCart: () => void;
   onNavigate: (path: string) => void;
-  customerUid?: string | null;
+  authUser?: { getIdToken: () => Promise<string> } | null;
 }
 
-export default function StorefrontCheckoutPage({ tenantSlug, items, onClearCart, onNavigate, customerUid }: Props) {
+export default function StorefrontCheckoutPage({ tenantSlug, items, onClearCart, onNavigate, authUser }: Props) {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
@@ -54,10 +54,12 @@ export default function StorefrontCheckoutPage({ tenantSlug, items, onClearCart,
     if (!items.length) return;
     setPlacing(true); setError('');
     try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (authUser) headers.Authorization = 'Bearer ' + await authUser.getIdToken();
       const response = await fetch('/api/storefront/' + encodeURIComponent(tenantSlug) + '/orders', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers,
         body: JSON.stringify({
-          items: payloadItems, couponCode, shippingMethod, customerUid: customerUid || null,
+          items: payloadItems, couponCode, shippingMethod,
           customer: { name, email, phone },
           shippingAddress: { addressLine1, city, country },
         }),
