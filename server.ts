@@ -208,6 +208,26 @@ async function startServer() {
     }
   };
 
+  const optionalServerAuth = async (req: any, _res: any, next: any) => {
+    const header = String(req.headers.authorization || '');
+    if (!header.startsWith('Bearer ')) return next();
+    try {
+      const auth = getFirebaseAdminAuth();
+      if (!auth) return next();
+      const decoded = await auth.verifyIdToken(header.slice('Bearer '.length).trim());
+      req.user = {
+        uid: decoded.uid,
+        email: decoded.email ?? null,
+        emailVerified: decoded.email_verified === true,
+        claims: decoded,
+      };
+    } catch {
+      // Public storefront checkout remains available to guests; invalid optional
+      // credentials are ignored rather than creating a privileged identity.
+    }
+    return next();
+  };
+
   app.get('/api/health', (req, res) => {
     res.json({
       status: 'ok',
@@ -305,6 +325,7 @@ async function startServer() {
   // the legacy storefront order handler so the canonical route resolves here.
   registerStorefrontCheckoutRoutes(app, {
     requireServerAuth,
+    optionalServerAuth,
     getAdminDb,
     createAuthoritativeAuditRecord,
     updateAuthoritativeSecurityMetrics,
