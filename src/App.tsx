@@ -53,6 +53,7 @@ import UnifiedSearchPage from './components/discovery/UnifiedSearchPage';
 import GeographicDiscoveryPage from './components/discovery/GeographicDiscoveryPage';
 import CategoryDiscoveryPage from './components/discovery/CategoryDiscoveryPage';
 import PublicBusinessProfilePage from './components/discovery/PublicBusinessProfilePage';
+import TenantCatalogManagement from './components/tenant/TenantCatalogManagement';
 import ListingBusinessShell from './components/business/ListingBusinessShell';
 import CustomerAccountShell from './components/customer/CustomerAccountShell';
 import RouteGuardShell from './components/routing/RouteGuardShell';
@@ -1645,6 +1646,17 @@ export default function App() {
             />
           </div>
         </TenantProvider>
+      )}
+
+      {/* 2h-catalog. Authoritative tenant product/service management */}
+      {activeDomain === 'TENANT_OPERATIONS' && (currentRoute.definition.id === 'tenant.products' || currentRoute.definition.id === 'tenant.services') && (
+        <div className="min-h-screen bg-slate-50 p-4 sm:p-6 lg:p-10" id="tenant-catalog-root">
+          <TenantCatalogManagement
+            tenantId={currentRoute.params.tenantId || ''}
+            mode={currentRoute.definition.id === 'tenant.products' ? 'products' : 'services'}
+            onNavigate={navigate}
+          />
+        </div>
       )}
 
       {/* 2h. Tenant Operations Domain (/tenant/:tenantId/*) */}
