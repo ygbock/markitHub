@@ -55,6 +55,7 @@ import { addUsageEventToTransaction, evaluateUsageLimit, usagePeriod, usageMeter
 import { DEFAULT_PLATFORM_PLANS } from './src/server/platformAdminControlPlane';
 import { validateTenantProvisioningRequest, hashProvisioningIdempotencyKey, buildTenantProvisioningRecords } from './src/server/tenantProvisioning';
 import { validateBusinessRegistrationRequest, hashBusinessRegistrationKey, buildBusinessRegistrationRecords } from './src/server/businessRegistration';
+import { registerTenantCatalogRoutes } from './src/server/tenantCatalog';
 import {
   createAuthoritativeAuditRecord,
   recordAuditEvent,
@@ -253,6 +254,17 @@ async function startServer() {
       return res.status(500).json({ error: 'Unable to verify tenant membership status.' });
     }
   };
+
+
+  registerTenantCatalogRoutes(app, {
+    requireServerAuth,
+    requireActiveTenantMembership,
+    requirePermission,
+    getAdminDb,
+    extractAuthenticatedTenantId,
+    createAuthoritativeAuditRecord,
+    updateAuthoritativeSecurityMetrics,
+  });
 
   app.get('/api/tenant/staff', requireServerAuth, requireActiveTenantMembership, requirePermission('users.view'), async (req, res) => {
     const tenantId = extractAuthenticatedTenantId(req.user);
