@@ -2337,8 +2337,6 @@ async function startServer() {
                     if (productStock < delta.total) throw new Error('Insufficient stock during payment settlement for product ' + productId);
                     const before = productStock;
                     productStock -= delta.total;
-                    const reservedBefore = Number(product.reserved || product.reservedStock || 0);
-                    const reservedAfter = Math.max(0, reservedBefore - delta.total);
                     const movementId = movementBase + '_p_' + String(movementIndex++);
                     tx.create(db.collection('stock_movements').doc(movementId), {
                       id: movementId, tenantId, date: new Date().toISOString(), productId,
