@@ -43,6 +43,7 @@ function money(value: number): number {
 
 export function registerStorefrontCheckoutRoutes(app: any, deps: {
   requireServerAuth: any;
+  optionalServerAuth: any;
   getAdminDb: () => any;
   createAuthoritativeAuditRecord: (input: any) => any;
   updateAuthoritativeSecurityMetrics: (db: any, audit: any, batch: any) => Promise<void>;
@@ -51,6 +52,7 @@ export function registerStorefrontCheckoutRoutes(app: any, deps: {
 }) {
   const {
     requireServerAuth,
+    optionalServerAuth,
     getAdminDb,
     createAuthoritativeAuditRecord,
     updateAuthoritativeSecurityMetrics,
@@ -202,7 +204,7 @@ export function registerStorefrontCheckoutRoutes(app: any, deps: {
     }
   });
 
-  app.post('/api/storefront/:tenantSlug/orders', async (req: any, res: any) => {
+  app.post('/api/storefront/:tenantSlug/orders', optionalServerAuth, async (req: any, res: any) => {
     try {
       const db = deps.getAdminDb();
       if (!db) return res.status(503).json({ success: false, error: 'Order service is not configured.' });
@@ -217,7 +219,7 @@ export function registerStorefrontCheckoutRoutes(app: any, deps: {
       const couponCode = clean(req.body?.couponCode, 80) || undefined;
       const shippingMethod = clean(req.body?.shippingMethod, 30);
       const customer = req.body?.customer || {};
-      const customerUid = clean(req.body?.customerUid, 160) || null;
+      const customerUid = req.user?.uid ? String(req.user.uid) : null;
       const customerName = clean(customer.name, 160) || 'Guest Customer';
       const customerEmail = clean(customer.email, 320);
       const customerPhone = clean(customer.phone, 80);
@@ -295,7 +297,7 @@ export function registerStorefrontCheckoutRoutes(app: any, deps: {
         }
 
         for (const update of updatedProducts) {
-          tx.set(update.ref, { ...update, ref: undefined, variants: update.variants, stock: update.stock, reserved: update.reserved, updatedAt: now }, { merge: true });
+          tx.set(update.ref, { variants: update.variants, stock: update.stock, reserved: update.reserved, updatedAt: now }, { merge: true });
         }
 
         const order = {
@@ -363,7 +365,7 @@ export function registerStorefrontCheckoutRoutes(app: any, deps: {
     }
   });
 
-  app.get('/api/storefront/:tenantSlug/orders/:orderId', async (req: any, res: any) => {
+  app.get('/api/storefront/:tenantSlug/orders/:orderId', optionalServerAuth, async (req: any, res: any) => {
     try {
       const db = deps.getAdminDb();
       if (!db) return res.status(503).json({ success: false, error: 'Order service is not configured.' });
@@ -375,8 +377,9 @@ export function registerStorefrontCheckoutRoutes(app: any, deps: {
       const token = clean(req.query?.accessToken, 200);
       const authHeader = String(req.headers.authorization || '');
       const tokenMatches = token && order.accessTokenHash === hashAccessToken(token);
-      const bearerUid = authHeader.startsWith('Bearer ') ? null : null;
-      if (!tokenMatches && !bearerUid) return res.status(403).json({ success: false, error: 'ORDER_ACCESS_DENIED' });
+      const bearerUid = req.user?.uid ? String(req.user.uid) : null;
+      const userMatches = Boolean(bearerUid && order.customerUid && String(order.customerUid) === bearerUid);
+      if (!tokenMatches && !userMatches) return res.status(403).json({ success: false, error: 'ORDER_ACCESS_DENIED' });
       return res.json({ success: true, order });
     } catch (err: any) {
       return res.status(500).json({ success: false, error: 'Unable to load order.' });
