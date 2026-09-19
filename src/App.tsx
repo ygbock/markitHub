@@ -53,6 +53,8 @@ import UnifiedSearchPage from './components/discovery/UnifiedSearchPage';
 import GeographicDiscoveryPage from './components/discovery/GeographicDiscoveryPage';
 import CategoryDiscoveryPage from './components/discovery/CategoryDiscoveryPage';
 import PublicBusinessProfilePage from './components/discovery/PublicBusinessProfilePage';
+import AuthoritativeStorefrontPage from './components/storefront/AuthoritativeStorefrontPage';
+import TenantStorefrontManagement from './components/storefront/TenantStorefrontManagement';
 import TenantCatalogManagement from './components/tenant/TenantCatalogManagement';
 import ListingBusinessShell from './components/business/ListingBusinessShell';
 import CustomerAccountShell from './components/customer/CustomerAccountShell';
@@ -1623,8 +1625,16 @@ export default function App() {
         />
       )}
 
-      {/* 2g. Tenant Storefront Domain (/store/:tenantSlug/*) */}
-      {activeDomain === 'STOREFRONT' && (
+      {/* 2g. Public storefront read model. Cart/checkout/order flows remain on the existing commerce shell until their authoritative phases. */}
+      {activeDomain === 'STOREFRONT' && ['storefront.home', 'storefront.products', 'storefront.product.detail', 'storefront.categories'].includes(currentRoute.definition.id) && (
+        <AuthoritativeStorefrontPage
+          tenantSlug={currentRoute.params.tenantSlug || ''}
+          routeId={currentRoute.definition.id}
+          onNavigate={navigate}
+          onOpenLogin={() => navigate(`/login?returnUrl=${encodeURIComponent(currentRoute.pathname)}`)}
+        />
+      )}
+      {activeDomain === 'STOREFRONT' && !['storefront.home', 'storefront.products', 'storefront.product.detail', 'storefront.categories'].includes(currentRoute.definition.id) && (
         <TenantProvider initialSlug={currentRoute.params.tenantSlug || 'nexus-retail'}>
           <div className="min-h-screen bg-white" id="storefront-domain-root">
             <ECommerceStorefront
@@ -1659,8 +1669,13 @@ export default function App() {
         </div>
       )}
 
+      {/* 2h. Authoritative storefront CMS management */}
+      {activeDomain === 'TENANT_OPERATIONS' && currentRoute.definition.id === 'tenant.storefront' && (
+        <TenantStorefrontManagement onNavigate={navigate} />
+      )}
+
       {/* 2h. Tenant Operations Domain (/tenant/:tenantId/*) */}
-      {activeDomain === 'TENANT_OPERATIONS' && currentRoute.definition.id !== 'tenant.products' && currentRoute.definition.id !== 'tenant.services' && (
+      {activeDomain === 'TENANT_OPERATIONS' && !['tenant.products', 'tenant.services', 'tenant.storefront'].includes(currentRoute.definition.id) && (
         <div className="bg-slate-50 min-h-screen text-slate-800 flex flex-col justify-between" id="applet-viewport-root">
       
       {/* Top Main Mode Selector - Core Showroom navigation */}
