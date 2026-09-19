@@ -80,3 +80,11 @@ test('Phase 8 Invariant 10: storefront payload normalization bounds CMS content 
   assert.match(source, /businessId:/);
   assert.match(source, /slug,/);
 });
+
+
+test('Phase 8 Invariant 11: tenant provisioning initializes a tenant-owned storefront draft in the same transaction', () => {
+  const source = fs.readFileSync(path.resolve(root, 'server.ts'), 'utf8');
+  assert.match(source, /tenantRef\.collection\('storefront'\)\.doc\('config'\)/);
+  assert.match(source, /buildDefaultStorefrontRecord\(\{ tenant: records\.tenant \}\)/);
+  assert.match(source, /transaction\.create\(storefrontRef, storefrontRecord\)/);
+});
