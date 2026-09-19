@@ -2,12 +2,14 @@ import React, { useEffect, useState } from 'react';
 import { ArrowRight, CheckCircle2, MapPin, ShoppingBag } from 'lucide-react';
 import { discoveryRepository } from '../../discovery/discoveryRepository';
 import type { DiscoveryProduct } from '../../discovery/types';
+import type { StorefrontCartLine } from './StorefrontCartPage';
 
 interface Props {
   tenantSlug: string;
   routeId: string;
   onNavigate: (path: string) => void;
   onOpenLogin: () => void;
+  onAddToCart: (item: StorefrontCartLine) => void;
 }
 
 interface Storefront {
@@ -26,7 +28,7 @@ interface Storefront {
   }>;
 }
 
-export default function AuthoritativeStorefrontPage({ tenantSlug, routeId, onNavigate, onOpenLogin }: Props) {
+export default function AuthoritativeStorefrontPage({ tenantSlug, routeId, onNavigate, onOpenLogin, onAddToCart }: Props) {
   const [storefront, setStorefront] = useState<Storefront | null>(null);
   const [products, setProducts] = useState<DiscoveryProduct[]>([]);
   const [loading, setLoading] = useState(true);
@@ -106,7 +108,7 @@ export default function AuthoritativeStorefrontPage({ tenantSlug, routeId, onNav
         {routeId === 'storefront.product.detail' && visibleProducts.length === 1 ? (
           <section className="bg-white rounded-3xl p-6 md:p-10 grid md:grid-cols-2 gap-8">
             <img src={visibleProducts[0].imageUrl || visibleProducts[0].images?.[0] || ''} alt={visibleProducts[0].name} className="w-full aspect-square object-cover rounded-2xl bg-slate-100" />
-            <div><div className="text-xs uppercase font-bold text-slate-400">{visibleProducts[0].brand || 'Product'}</div><h1 className="mt-2 text-4xl font-black">{visibleProducts[0].name}</h1><p className="mt-4 text-slate-600">{visibleProducts[0].description}</p><div className="mt-6 text-2xl font-black">{visibleProducts[0].currency || ''} {visibleProducts[0].price.toFixed(2)}</div><button className="mt-6 px-5 py-3 rounded-xl text-white font-bold" style={{backgroundColor: storefront.primaryColor}} onClick={() => onNavigate('/store/' + storefront.slug + '/cart')}><ShoppingBag className="inline w-4 h-4 mr-2" />Add to cart</button></div>
+            <div><div className="text-xs uppercase font-bold text-slate-400">{visibleProducts[0].brand || 'Product'}</div><h1 className="mt-2 text-4xl font-black">{visibleProducts[0].name}</h1><p className="mt-4 text-slate-600">{visibleProducts[0].description}</p><div className="mt-6 text-2xl font-black">{visibleProducts[0].currency || ''} {visibleProducts[0].price.toFixed(2)}</div><button className="mt-6 px-5 py-3 rounded-xl text-white font-bold" style={{backgroundColor: storefront.primaryColor}} onClick={() => onAddToCart({ productId: visibleProducts[0].id, name: visibleProducts[0].name, price: visibleProducts[0].price, currency: visibleProducts[0].currency, imageUrl: visibleProducts[0].imageUrl || visibleProducts[0].images?.[0], quantity: 1 })}><ShoppingBag className="inline w-4 h-4 mr-2" />Add to cart</button></div>
           </section>
         ) : (
           <section>
