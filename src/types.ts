@@ -20,6 +20,7 @@ export type PermissionCategory =
   | 'purchase'
   | 'finance'
   | 'crm'
+  | 'services'
   | 'ecommerce'
   | 'users'
   | 'system';
@@ -60,6 +61,10 @@ export type PermissionKey =
   | 'crm.marketing'
   | 'crm.support'
   // E-commerce
+  | 'services.view'
+  | 'services.create'
+  | 'services.update'
+  | 'services.delete'
   | 'ecommerce.view'
   | 'ecommerce.manage'
   | 'ecommerce.fulfillment'
