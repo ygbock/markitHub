@@ -56,6 +56,8 @@ import { DEFAULT_PLATFORM_PLANS } from './src/server/platformAdminControlPlane';
 import { validateTenantProvisioningRequest, hashProvisioningIdempotencyKey, buildTenantProvisioningRecords } from './src/server/tenantProvisioning';
 import { validateBusinessRegistrationRequest, hashBusinessRegistrationKey, buildBusinessRegistrationRecords } from './src/server/businessRegistration';
 import { registerTenantCatalogRoutes } from './src/server/tenantCatalog';
+import { registerTenantInventoryRoutes } from './src/server/tenantInventory';
+import { registerTenantPosRoutes } from './src/server/tenantPos';
 import {
   createAuthoritativeAuditRecord,
   recordAuditEvent,
@@ -257,6 +259,26 @@ async function startServer() {
 
 
   registerTenantCatalogRoutes(app, {
+    requireServerAuth,
+    requireActiveTenantMembership,
+    requirePermission,
+    getAdminDb,
+    extractAuthenticatedTenantId,
+    createAuthoritativeAuditRecord,
+    updateAuthoritativeSecurityMetrics,
+  });
+
+  registerTenantInventoryRoutes(app, {
+    requireServerAuth,
+    requireActiveTenantMembership,
+    requirePermission,
+    getAdminDb,
+    extractAuthenticatedTenantId,
+    createAuthoritativeAuditRecord,
+    updateAuthoritativeSecurityMetrics,
+  });
+
+  registerTenantPosRoutes(app, {
     requireServerAuth,
     requireActiveTenantMembership,
     requirePermission,
