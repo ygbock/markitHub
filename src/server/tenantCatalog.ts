@@ -189,3 +189,251 @@ export function assertTenantCatalogResource(resource: Record<string, any> | unde
     throw Object.assign(new Error('Cross-tenant catalog access is forbidden.'), { statusCode: 403 });
   }
 }
+
+
+export function registerTenantCatalogRoutes(app: any, deps: {
+  requireServerAuth: any;
+  requireActiveTenantMembership: any;
+  requirePermission: (permission: string) => any;
+  getAdminDb: () => any;
+  extractAuthenticatedTenantId: (user: any) => string | null;
+  createAuthoritativeAuditRecord: (input: any) => any;
+  updateAuthoritativeSecurityMetrics: (db: any, audit: any, batch: any) => Promise<void>;
+}) {
+  const {
+    requireServerAuth,
+    requireActiveTenantMembership,
+    requirePermission,
+    getAdminDb,
+    extractAuthenticatedTenantId,
+    createAuthoritativeAuditRecord,
+    updateAuthoritativeSecurityMetrics,
+  } = deps;
+
+  const tenantBase = [requireServerAuth, requireActiveTenantMembership];
+
+  app.get('/api/tenant/catalog/products', ...tenantBase, requirePermission('inventory.view'), async (req: any, res: any) => {
+    const tenantId = extractAuthenticatedTenantId(req.user);
+    const db = getAdminDb();
+    if (!tenantId || !db) return res.status(503).json({ error: 'Tenant catalog service is not configured.' });
+    try {
+      const snap = await db.collection('tenants').doc(tenantId).collection('products').limit(100).get();
+      return res.json({ success: true, products: snap.docs.map((d: any) => ({ ...d.data(), id: d.id })) });
+    } catch (err: any) {
+      return res.status(500).json({ error: err?.message || 'Unable to load tenant products.' });
+    }
+  });
+
+  app.post('/api/tenant/catalog/products', ...tenantBase, requirePermission('inventory.create'), async (req: any, res: any) => {
+    const tenantId = extractAuthenticatedTenantId(req.user);
+    const db = getAdminDb();
+    if (!tenantId || !db) return res.status(503).json({ error: 'Tenant catalog service is not configured.' });
+    try {
+      const tenantSnap = await db.collection('tenants').doc(tenantId).get();
+      if (!tenantSnap.exists) return res.status(404).json({ error: 'Tenant not found.' });
+      const tenant = tenantSnap.data() || {};
+      const input = validateCatalogProductInput(req.body || {});
+      const productId = cleanString(req.body?.id, 120) || `product_${crypto.randomUUID().replace(/-/g, '').slice(0, 20)}`;
+      const ref = db.collection('tenants').doc(tenantId).collection('products').doc(productId);
+      const existing = await ref.get();
+      if (existing.exists) return res.status(409).json({ error: 'Product already exists.' });
+      const record = buildCatalogProductRecord({
+        tenantId,
+        businessId: String(tenant.businessId || ''),
+        productId,
+        input: { ...req.body, ...input },
+        now: new Date().toISOString(),
+      });
+      if (!record.businessId) return res.status(409).json({ error: 'Tenant is not bound to a business.' });
+
+      const audit = createAuthoritativeAuditRecord({
+        tenantId, actorUid: req.user.uid, actorName: req.user.email || req.user.uid,
+        actorEmail: req.user.email || null, actorRole: String(req.user.claims?.role || 'Tenant Staff'),
+        action: 'PRODUCT_CREATED', module: 'Catalog', targetType: 'product', targetId: productId,
+        targetName: record.name, newState: { sku: record.sku, status: record.status, published: record.ecommerce?.published },
+        result: 'success', severity: 'info', details: `Created catalog product ${record.name}.`,
+      });
+      const batch = db.batch();
+      batch.create(ref, record);
+      batch.set(db.collection('audit_logs').doc(audit.id), audit);
+      await updateAuthoritativeSecurityMetrics(db, audit, batch);
+      await batch.commit();
+      return res.status(201).json({ success: true, product: record });
+    } catch (err: any) {
+      const status = err?.statusCode || 400;
+      return res.status(status).json({ error: err?.message || 'Unable to create product.' });
+    }
+  });
+
+  app.patch('/api/tenant/catalog/products/:productId', ...tenantBase, requirePermission('inventory.edit'), async (req: any, res: any) => {
+    const tenantId = extractAuthenticatedTenantId(req.user);
+    const db = getAdminDb();
+    if (!tenantId || !db) return res.status(503).json({ error: 'Tenant catalog service is not configured.' });
+    try {
+      const ref = db.collection('tenants').doc(tenantId).collection('products').doc(req.params.productId);
+      const snap = await ref.get();
+      const existing = snap.exists ? snap.data() : undefined;
+      assertTenantCatalogResource(existing, tenantId, 'product');
+      const tenantSnap = await db.collection('tenants').doc(tenantId).get();
+      const record = buildCatalogProductRecord({
+        tenantId, businessId: String(tenantSnap.data()?.businessId || existing?.businessId || ''),
+        productId: req.params.productId, input: req.body || {}, existing, now: new Date().toISOString(),
+      });
+      const audit = createAuthoritativeAuditRecord({
+        tenantId, actorUid: req.user.uid, actorName: req.user.email || req.user.uid, actorEmail: req.user.email || null,
+        actorRole: String(req.user.claims?.role || 'Tenant Staff'), action: 'PRODUCT_UPDATED', module: 'Catalog',
+        targetType: 'product', targetId: req.params.productId, targetName: record.name,
+        previousState: { sku: existing?.sku, status: existing?.status, published: existing?.ecommerce?.published },
+        newState: { sku: record.sku, status: record.status, published: record.ecommerce?.published },
+        result: 'success', severity: 'info', details: `Updated catalog product ${record.name}.`,
+      });
+      const batch = db.batch();
+      batch.set(ref, record, { merge: true });
+      batch.set(db.collection('audit_logs').doc(audit.id), audit);
+      await updateAuthoritativeSecurityMetrics(db, audit, batch);
+      await batch.commit();
+      return res.json({ success: true, product: record });
+    } catch (err: any) {
+      const status = err?.statusCode || 400;
+      return res.status(status).json({ error: err?.message || 'Unable to update product.' });
+    }
+  });
+
+  app.delete('/api/tenant/catalog/products/:productId', ...tenantBase, requirePermission('inventory.delete'), async (req: any, res: any) => {
+    const tenantId = extractAuthenticatedTenantId(req.user);
+    const db = getAdminDb();
+    if (!tenantId || !db) return res.status(503).json({ error: 'Tenant catalog service is not configured.' });
+    try {
+      const ref = db.collection('tenants').doc(tenantId).collection('products').doc(req.params.productId);
+      const snap = await ref.get();
+      const existing = snap.exists ? snap.data() : undefined;
+      assertTenantCatalogResource(existing, tenantId, 'product');
+      const now = new Date().toISOString();
+      const record = { ...existing, status: 'Archived', updatedAt: now, ecommerce: { ...(existing?.ecommerce || {}), published: false, storefrontStatus: 'Hidden', publishTargets: { ...(existing?.ecommerce?.publishTargets || {}), website: false } } };
+      const audit = createAuthoritativeAuditRecord({
+        tenantId, actorUid: req.user.uid, actorName: req.user.email || req.user.uid, actorEmail: req.user.email || null,
+        actorRole: String(req.user.claims?.role || 'Tenant Staff'), action: 'PRODUCT_ARCHIVED', module: 'Catalog',
+        targetType: 'product', targetId: req.params.productId, targetName: String(existing?.name || req.params.productId),
+        previousState: { status: existing?.status, published: existing?.ecommerce?.published }, newState: { status: 'Archived', published: false },
+        result: 'success', severity: 'warning', details: `Archived catalog product ${existing?.name || req.params.productId}.`,
+      });
+      const batch = db.batch();
+      batch.set(ref, record, { merge: true });
+      batch.set(db.collection('audit_logs').doc(audit.id), audit);
+      await updateAuthoritativeSecurityMetrics(db, audit, batch);
+      await batch.commit();
+      return res.json({ success: true, archived: true });
+    } catch (err: any) {
+      const status = err?.statusCode || 400;
+      return res.status(status).json({ error: err?.message || 'Unable to archive product.' });
+    }
+  });
+
+  app.get('/api/tenant/catalog/services', ...tenantBase, requirePermission('inventory.view'), async (req: any, res: any) => {
+    const tenantId = extractAuthenticatedTenantId(req.user);
+    const db = getAdminDb();
+    if (!tenantId || !db) return res.status(503).json({ error: 'Tenant catalog service is not configured.' });
+    try {
+      const snap = await db.collection('tenants').doc(tenantId).collection('services').limit(100).get();
+      return res.json({ success: true, services: snap.docs.map((d: any) => ({ ...d.data(), id: d.id })) });
+    } catch (err: any) {
+      return res.status(500).json({ error: err?.message || 'Unable to load tenant services.' });
+    }
+  });
+
+  app.post('/api/tenant/catalog/services', ...tenantBase, requirePermission('inventory.create'), async (req: any, res: any) => {
+    const tenantId = extractAuthenticatedTenantId(req.user);
+    const db = getAdminDb();
+    if (!tenantId || !db) return res.status(503).json({ error: 'Tenant catalog service is not configured.' });
+    try {
+      const tenantSnap = await db.collection('tenants').doc(tenantId).get();
+      if (!tenantSnap.exists) return res.status(404).json({ error: 'Tenant not found.' });
+      const tenant = tenantSnap.data() || {};
+      const serviceId = cleanString(req.body?.id, 120) || `service_${crypto.randomUUID().replace(/-/g, '').slice(0, 20)}`;
+      const ref = db.collection('tenants').doc(tenantId).collection('services').doc(serviceId);
+      if ((await ref.get()).exists) return res.status(409).json({ error: 'Service already exists.' });
+      const record = buildCatalogServiceRecord({
+        tenantId, businessId: String(tenant.businessId || ''), serviceId, input: req.body || {}, now: new Date().toISOString(),
+      });
+      if (!record.businessId) return res.status(409).json({ error: 'Tenant is not bound to a business.' });
+      const audit = createAuthoritativeAuditRecord({
+        tenantId, actorUid: req.user.uid, actorName: req.user.email || req.user.uid, actorEmail: req.user.email || null,
+        actorRole: String(req.user.claims?.role || 'Tenant Staff'), action: 'SERVICE_CREATED', module: 'Services',
+        targetType: 'service', targetId: serviceId, targetName: record.name, newState: { status: record.status, published: record.published },
+        result: 'success', severity: 'info', details: `Created service ${record.name}.`,
+      });
+      const batch = db.batch();
+      batch.create(ref, record);
+      batch.set(db.collection('audit_logs').doc(audit.id), audit);
+      await updateAuthoritativeSecurityMetrics(db, audit, batch);
+      await batch.commit();
+      return res.status(201).json({ success: true, service: record });
+    } catch (err: any) {
+      const status = err?.statusCode || 400;
+      return res.status(status).json({ error: err?.message || 'Unable to create service.' });
+    }
+  });
+
+  app.patch('/api/tenant/catalog/services/:serviceId', ...tenantBase, requirePermission('inventory.edit'), async (req: any, res: any) => {
+    const tenantId = extractAuthenticatedTenantId(req.user);
+    const db = getAdminDb();
+    if (!tenantId || !db) return res.status(503).json({ error: 'Tenant catalog service is not configured.' });
+    try {
+      const ref = db.collection('tenants').doc(tenantId).collection('services').doc(req.params.serviceId);
+      const snap = await ref.get();
+      const existing = snap.exists ? snap.data() : undefined;
+      assertTenantCatalogResource(existing, tenantId, 'service');
+      const tenantSnap = await db.collection('tenants').doc(tenantId).get();
+      const record = buildCatalogServiceRecord({
+        tenantId, businessId: String(tenantSnap.data()?.businessId || existing?.businessId || ''),
+        serviceId: req.params.serviceId, input: req.body || {}, existing, now: new Date().toISOString(),
+      });
+      const audit = createAuthoritativeAuditRecord({
+        tenantId, actorUid: req.user.uid, actorName: req.user.email || req.user.uid, actorEmail: req.user.email || null,
+        actorRole: String(req.user.claims?.role || 'Tenant Staff'), action: 'SERVICE_UPDATED', module: 'Services',
+        targetType: 'service', targetId: req.params.serviceId, targetName: record.name,
+        previousState: { status: existing?.status, published: existing?.published }, newState: { status: record.status, published: record.published },
+        result: 'success', severity: 'info', details: `Updated service ${record.name}.`,
+      });
+      const batch = db.batch();
+      batch.set(ref, record, { merge: true });
+      batch.set(db.collection('audit_logs').doc(audit.id), audit);
+      await updateAuthoritativeSecurityMetrics(db, audit, batch);
+      await batch.commit();
+      return res.json({ success: true, service: record });
+    } catch (err: any) {
+      const status = err?.statusCode || 400;
+      return res.status(status).json({ error: err?.message || 'Unable to update service.' });
+    }
+  });
+
+  app.delete('/api/tenant/catalog/services/:serviceId', ...tenantBase, requirePermission('inventory.delete'), async (req: any, res: any) => {
+    const tenantId = extractAuthenticatedTenantId(req.user);
+    const db = getAdminDb();
+    if (!tenantId || !db) return res.status(503).json({ error: 'Tenant catalog service is not configured.' });
+    try {
+      const ref = db.collection('tenants').doc(tenantId).collection('services').doc(req.params.serviceId);
+      const snap = await ref.get();
+      const existing = snap.exists ? snap.data() : undefined;
+      assertTenantCatalogResource(existing, tenantId, 'service');
+      const now = new Date().toISOString();
+      const record = { ...existing, status: 'archived', updatedAt: now, published: false };
+      const audit = createAuthoritativeAuditRecord({
+        tenantId, actorUid: req.user.uid, actorName: req.user.email || req.user.uid, actorEmail: req.user.email || null,
+        actorRole: String(req.user.claims?.role || 'Tenant Staff'), action: 'SERVICE_ARCHIVED', module: 'Services',
+        targetType: 'service', targetId: req.params.serviceId, targetName: String(existing?.name || req.params.serviceId),
+        previousState: { status: existing?.status, published: existing?.published }, newState: { status: 'archived', published: false },
+        result: 'success', severity: 'warning', details: `Archived service ${existing?.name || req.params.serviceId}.`,
+      });
+      const batch = db.batch();
+      batch.set(ref, record, { merge: true });
+      batch.set(db.collection('audit_logs').doc(audit.id), audit);
+      await updateAuthoritativeSecurityMetrics(db, audit, batch);
+      await batch.commit();
+      return res.json({ success: true, archived: true });
+    } catch (err: any) {
+      const status = err?.statusCode || 400;
+      return res.status(status).json({ error: err?.message || 'Unable to archive service.' });
+    }
+  });
+}
