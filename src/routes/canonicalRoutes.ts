@@ -593,6 +593,7 @@ export const CANONICAL_ROUTE_DEFINITIONS: CanonicalRouteDefinition[] = [
     context: 'TENANT',
     auth: 'TENANT_STAFF',
     requiredCapability: 'services',
+    requiredPermission: 'services.view',
     title: 'Service Catalog',
     description: 'Service offerings, pricing, durations, and assignees.',
   },
