@@ -59,6 +59,7 @@ import { registerTenantCatalogRoutes } from './src/server/tenantCatalog';
 import { registerTenantInventoryRoutes } from './src/server/tenantInventory';
 import { registerTenantPosRoutes } from './src/server/tenantPos';
 import { registerTenantStorefrontRoutes } from './src/server/tenantStorefront';
+import { buildDefaultStorefrontRecord } from './src/server/tenantStorefront';
 import {
   createAuthoritativeAuditRecord,
   recordAuditEvent,
@@ -861,10 +862,13 @@ async function startServer() {
         const tenantRef = db.collection('tenants').doc(records.tenant.id);
         const subscriptionRef = db.collection('subscriptions').doc(records.subscription.id);
         const membershipRef = db.collection('tenant_memberships').doc(records.tenant.id + '_' + req.user.uid);
+        const storefrontRef = tenantRef.collection('storefront').doc('config');
+        const storefrontRecord = buildDefaultStorefrontRecord({ tenant: records.tenant });
 
         transaction.create(tenantRef, records.tenant);
         transaction.create(subscriptionRef, records.subscription);
         transaction.create(membershipRef, records.membership);
+        transaction.create(storefrontRef, storefrontRecord);
         transaction.create(requestRef, {
           tenantId: records.tenant.id,
           businessId: business.id,
