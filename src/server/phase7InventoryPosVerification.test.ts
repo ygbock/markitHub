@@ -29,7 +29,7 @@ test('Phase 7 Invariant 4: inventory mutations persist movement history and auth
   const source = readFileSync(resolve(process.cwd(), 'src/server/tenantInventory.ts'), 'utf8');
   assert.match(source, /inventoryMovements/);
   assert.match(source, /createAuthoritativeAuditRecord/);
-  assert.match(source, /updateAuthoritativeSecurityMetrics/);
+  assert.match(source, /updateAuthoritativeSecurityMetrics\(db, audit, tx\)/);
 });
 
 test('Phase 7 Invariant 5: POS sales require sales.create and derive the tenant server-side', () => {
