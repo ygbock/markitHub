@@ -2300,9 +2300,13 @@ async function startServer() {
 
                 let movementIndex = 0;
                 for (const [productId, delta] of productDeltas) {
-                  const productRef = db.collection('products').doc(productId);
-                  const productSnap = await tx.get(productRef);
-                  if (!productSnap.exists) throw new Error('Product not found during inventory settlement: ' + productId);
+                  const tenantProductRef = db.collection('tenants').doc(tenantId).collection('products').doc(productId);
+                  const legacyProductRef = db.collection('products').doc(productId);
+                  const tenantProductSnap = await tx.get(tenantProductRef);
+                  const legacyProductSnap = tenantProductSnap.exists ? null : await tx.get(legacyProductRef);
+                  const productRef = tenantProductSnap.exists ? tenantProductRef : legacyProductRef;
+                  const productSnap = tenantProductSnap.exists ? tenantProductSnap : legacyProductSnap;
+                  if (!productSnap || !productSnap.exists) throw new Error('Product not found during inventory settlement: ' + productId);
                   const product = productSnap.data() || {};
                   const productTenantId = String(product.tenantId || product.tenant_id || '');
                   if (productTenantId && productTenantId !== tenantId) throw new Error('Product belongs to another tenant.');
@@ -2315,6 +2319,7 @@ async function startServer() {
                     const before = Number(variants[idx].stock || 0);
                     if (before < qty) throw new Error('Insufficient stock during payment settlement for variant ' + sku);
                     variants[idx].stock = before - qty;
+                    variants[idx].reserved = Math.max(0, Number(variants[idx].reserved || 0) - qty);
                     const movementId = movementBase + '_v_' + String(movementIndex++);
                     tx.create(db.collection('stock_movements').doc(movementId), {
                       id: movementId, tenantId, date: new Date().toISOString(), productId,
@@ -2332,6 +2337,8 @@ async function startServer() {
                     if (productStock < delta.total) throw new Error('Insufficient stock during payment settlement for product ' + productId);
                     const before = productStock;
                     productStock -= delta.total;
+                    const reservedBefore = Number(product.reserved || product.reservedStock || 0);
+                    const reservedAfter = Math.max(0, reservedBefore - delta.total);
                     const movementId = movementBase + '_p_' + String(movementIndex++);
                     tx.create(db.collection('stock_movements').doc(movementId), {
                       id: movementId, tenantId, date: new Date().toISOString(), productId,
@@ -2347,11 +2354,15 @@ async function startServer() {
                     productStock = variants.reduce((sum:number, v:any) => sum + Number(v.stock || 0), 0);
                   }
 
+                  const productReserved = delta.total > 0
+                    ? Math.max(0, Number(product.reserved || product.reservedStock || 0) - delta.total)
+                    : Number(product.reserved || product.reservedStock || 0);
                   tx.set(productRef, {
                     stock: productStock,
+                    reserved: productReserved,
                     variants,
                     ...(product.onHand !== undefined ? { onHand: productStock } : {}),
-                    ...(product.available !== undefined ? { available: Math.max(0, productStock - Number(product.reserved || product.reservedStock || 0)) } : {}),
+                    ...(product.available !== undefined ? { available: Math.max(0, productStock - productReserved) } : {}),
                     updatedAt: new Date().toISOString()
                   }, { merge: true });
                 }
