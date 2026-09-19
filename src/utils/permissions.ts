@@ -8,6 +8,7 @@ export const PERMISSION_CATEGORIES: { id: PermissionCategory; label: string; ico
   { id: 'purchase', label: 'Purchasing & Procurement', icon: 'Truck', description: 'Purchase orders, supplier contracts, dock receiving, and PO authorizations' },
   { id: 'finance', label: 'Finance & Invoicing', icon: 'Receipt', description: 'Tax invoices, ledger reports, revenue analytics, and financial exports' },
   { id: 'crm', label: 'CRM & Customer Relations', icon: 'Users', description: 'Customer profiles, loyalty rewards, marketing campaigns, and support tickets' },
+  { id: 'services', label: 'Services & Bookings', icon: 'Calendar', description: 'Service catalog, pricing, duration, booking availability, and service lifecycle' },
   { id: 'ecommerce', label: 'E-commerce & Storefront', icon: 'ShoppingBag', description: 'Online storefront catalog, digital promotions, and parcel fulfillments' },
   { id: 'users', label: 'Users & Staff Control', icon: 'ShieldCheck', description: 'Employee directory, role assignment, permission overrides, and security audit' },
   { id: 'system', label: 'System & Configuration', icon: 'Settings', description: 'Store currency, tax rates, sensor diagnostics, and database sync' },
@@ -184,6 +185,32 @@ export const ALL_PERMISSIONS: PermissionDefinition[] = [
     description: 'Assign, reply to, and resolve customer support tickets and dispute claims.'
   },
 
+  {
+    key: 'services.view',
+    label: 'View Services',
+    category: 'services',
+    description: 'Inspect the tenant service catalog and service availability.'
+  },
+  {
+    key: 'services.create',
+    label: 'Create Services',
+    category: 'services',
+    description: 'Create service offerings and booking definitions.'
+  },
+  {
+    key: 'services.update',
+    label: 'Edit Services',
+    category: 'services',
+    description: 'Modify service pricing, duration, publication, and availability.'
+  },
+  {
+    key: 'services.delete',
+    label: 'Archive Services',
+    category: 'services',
+    description: 'Archive service offerings from the tenant catalog.',
+    isDestructive: true
+  },
+
   // 6. E-commerce Permissions
   {
     key: 'ecommerce.view',
@@ -268,6 +295,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<StaffRole, PermissionKey[]> = {
     'purchase.view', 'purchase.create', 'purchase.approve', 'purchase.receive',
     'finance.view', 'finance.invoices', 'finance.reports', 'finance.export',
     'crm.view', 'crm.manage', 'crm.loyalty', 'crm.marketing', 'crm.support',
+    'services.view', 'services.create', 'services.update', 'services.delete',
     'ecommerce.view', 'ecommerce.manage', 'ecommerce.fulfillment',
     'users.view', 'users.manage', 'users.roles', 'users.audit', 'users.unlock',
     'system.settings', 'system.sync'
@@ -333,6 +361,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<StaffRole, PermissionKey[]> = {
   // 10. E-commerce Manager: Web storefront catalog, online promotions, parcel fulfillments, CRM campaigns
   'E-commerce Manager': [
     'ecommerce.view', 'ecommerce.manage', 'ecommerce.fulfillment',
+    'services.view', 'services.create', 'services.update', 'services.delete',
     'inventory.view', 'inventory.edit',
     'crm.view', 'crm.manage', 'crm.marketing', 'crm.support',
     'sales.view',
