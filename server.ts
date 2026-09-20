@@ -2330,7 +2330,10 @@ async function startServer() {
             const settlementRef = db.collection('payment_settlements').doc(String(tenantId) + '_' + String(sessionId));
             await db.runTransaction(async (tx: any) => {
               const settlementSnap = await tx.get(settlementRef);
-              if (settlementSnap.exists && settlementSnap.data()?.status === 'settled') return;
+              if (settlementSnap.exists) {
+                const existingSettlementStatus = String(settlementSnap.data()?.status || '').toLowerCase();
+                if (['settled', 'duplicate_order_terminal', 'rejected_order_terminal'].includes(existingSettlementStatus)) return;
+              }
               const freshSessionSnap = await tx.get(sessionRef);
               if (!freshSessionSnap.exists) throw new Error('Payment session disappeared during settlement.');
               const fresh = freshSessionSnap.data() as MonimeServerSession;
@@ -2585,6 +2588,7 @@ async function startServer() {
             const currentSessionStatus = String(existing.status || 'pending').toLowerCase();
             // Terminal successful sessions cannot be moved backwards by a late cancel/expiry event.
             if (['completed', 'paid'].includes(currentSessionStatus)) {
+              await eventRef.set({ status: 'processed', processed_at: new Date().toISOString(), ignored_reason: 'terminal_session_state' }, { merge: true });
               return res.status(200).json({ received: true, ignored: true, reason: 'terminal_session_state' });
             }
             const terminalStatus: PaymentState = eventType.includes('cancelled') ? 'cancelled' : 'expired';
