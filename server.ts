@@ -2113,6 +2113,40 @@ async function startServer() {
       return res.status(500).json({ success: false, message: err?.message || 'Connection test error' });
     }
   });
+  const releaseMonimeReservationOnly = async (db: any, tx: any, tenantId: string, reservationId: string) => {
+    if (reservationId) {
+      const reservationRef = db.collection('inventory_reservations').doc(reservationId);
+      const reservationSnap = await tx.get(reservationRef);
+      if (reservationSnap.exists) {
+        const reservation = reservationSnap.data() || {};
+        const reservationTenantId = String(reservation.tenantId || reservation.tenant_id || '');
+        if (reservationTenantId && reservationTenantId !== tenantId) throw new Error('Inventory reservation belongs to another tenant.');
+        if (String(reservation.status || '') === 'active') {
+          const now = new Date().toISOString();
+          for (const item of Array.isArray(reservation.items) ? reservation.items : []) {
+            const productRef = db.collection('tenants').doc(tenantId).collection('products').doc(String(item.productId));
+            const productSnap = await tx.get(productRef);
+            if (!productSnap.exists) continue;
+            const product = productSnap.data() || {};
+            if (item.variantSku) {
+              const variants = Array.isArray(product.variants) ? product.variants.map((v: any) => ({ ...v })) : [];
+              const idx = variants.findIndex((v: any) => String(v.sku || '') === String(item.variantSku));
+              if (idx >= 0) {
+                variants[idx].reserved = Math.max(0, Number(variants[idx].reserved || 0) - Number(item.quantity || 0));
+                tx.set(productRef, { variants, updatedAt: now }, { merge: true });
+              }
+            } else {
+              tx.set(productRef, {
+                reserved: Math.max(0, Number(product.reserved || product.reservedStock || 0) - Number(item.quantity || 0)),
+                updatedAt: now,
+              }, { merge: true });
+            }
+          }
+          tx.set(reservationRef, { status: 'released', releasedAt: now, updatedAt: now }, { merge: true });
+        }
+      }
+    }
+  };
   const releaseMonimeReservationForTerminalPayment = async (db: any, tx: any, tenantId: string, reservationId: string, orderId: string, terminalPaymentStatus: 'failed' | 'cancelled' | 'expired') => {
     if (reservationId) {
       const reservationRef = db.collection('inventory_reservations').doc(reservationId);
@@ -2369,6 +2403,32 @@ async function startServer() {
                   webhookEventId: eventId,
                 });
                 return;
+              }
+
+              if (reservationId) {
+                const reservationRef = db.collection('inventory_reservations').doc(reservationId);
+                const reservationSnap = await tx.get(reservationRef);
+                if (reservationSnap.exists) {
+                  const reservation = reservationSnap.data() || {};
+                  if (String(reservation.status) === 'active') {
+                    const tenantReservation = String(reservation.tenantId || reservation.tenant_id || '');
+                    if (tenantReservation && tenantReservation !== tenantId) throw new Error('Inventory reservation belongs to another tenant.');
+                    const reservationExpiresAt = new Date(String(reservation.expiresAt || 0)).getTime();
+                    if (Number.isFinite(reservationExpiresAt) && reservationExpiresAt <= Date.now()) {
+                      throw new Error('Inventory reservation has expired.');
+                    }
+                    tx.set(reservationRef, {
+                      status: 'finalized',
+                      finalizedAt: new Date().toISOString(),
+                      finalizedByPaymentSession: String(sessionId),
+                      tenantId,
+                    }, { merge: true });
+                  } else if (String(reservation.status) !== 'finalized') {
+                    throw new Error('Inventory reservation is not active for payment settlement.');
+                  }
+                } else {
+                  throw new Error('Linked inventory reservation was not found.');
+                }
               }
 
               tx.set(sessionRef, {
