@@ -2113,7 +2113,7 @@ async function startServer() {
       return res.status(500).json({ success: false, message: err?.message || 'Connection test error' });
     }
   });
-  const releaseMonimeReservationForTerminalPayment = async (tx: any, tenantId: string, reservationId: string, orderId: string, terminalPaymentStatus: 'failed' | 'cancelled' | 'expired') => {
+  const releaseMonimeReservationForTerminalPayment = async (db: any, tx: any, tenantId: string, reservationId: string, orderId: string, terminalPaymentStatus: 'failed' | 'cancelled' | 'expired') => {
     if (reservationId) {
       const reservationRef = db.collection('inventory_reservations').doc(reservationId);
       const reservationSnap = await tx.get(reservationRef);
@@ -2264,7 +2264,7 @@ async function startServer() {
                 const freshStatus = String(fresh.status || 'pending').toLowerCase() as PaymentState;
                 const nextFreshStatus = transitionPaymentState(freshStatus, 'failed');
                 if (!nextFreshStatus) return;
-                await releaseMonimeReservationForTerminalPayment(tx, tenantId, String(fresh.reservation_id || ''), String(fresh.order_id || ''), 'failed');
+                await releaseMonimeReservationForTerminalPayment(db, tx, tenantId, String(fresh.reservation_id || ''), String(fresh.order_id || ''), 'failed');
                 tx.set(sessionRef, {
                   status: nextFreshStatus,
                   updated_at: new Date().toISOString(),
