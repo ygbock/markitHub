@@ -2050,8 +2050,8 @@ async function startServer() {
         redirect_url: session.redirectUrl,
         status: session.status || 'pending',
         amount: totalAmount,
-        currency: validationResult.pricing.currency,
-        line_items: validationResult.items,
+        currency: authoritativeCurrency,
+        line_items: lineItems,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       };
