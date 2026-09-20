@@ -145,3 +145,10 @@ test('Phase 9 Invariant 16: Monime inventory settlement is transactionally idemp
   assert.match(server, /tx\.create\(db\.collection\('stock_movements'\)\.doc\(movementId\)/);
   assert.match(server, /tx\.create\(settlementRef/);
 });
+
+test('Phase 9 Invariant 17: storefront cancellation only releases an active reservation', () => {
+  const source = readFileSync(resolve(process.cwd(), 'src/server/storefrontCheckout.ts'), 'utf8');
+  assert.match(source, /const reservationStatus = String\(reservation\.status \|\| ''\)\.toLowerCase\(\)/);
+  assert.match(source, /if \(reservationStatus === 'active'\)/);
+  assert.match(source, /status: 'released'/);
+});
