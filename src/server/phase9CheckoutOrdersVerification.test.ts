@@ -111,3 +111,13 @@ test('Phase 9 Invariant 12: checkout UI submits only product IDs, quantities, an
   assert.match(checkout, /shippingAddress/);
   assert.doesNotMatch(checkout, /price:\s*item\.price/);
 });
+
+test('Phase 9 Invariant 13: Monime terminal payment failures and expiry release reservations and reconcile order payment state', () => {
+  const server = readFileSync(resolve(process.cwd(), 'server.ts'), 'utf8');
+  assert.match(server, /releaseMonimeReservationForTerminalPayment/);
+  assert.match(server, /payment\.failed/);
+  assert.match(server, /checkout_session\.expired/);
+  assert.match(server, /status: terminalPaymentStatus === 'expired' \? 'expired' : 'released'/);
+  assert.match(server, /paymentStatus: terminalPaymentStatus/);
+  assert.match(server, /status: nextStatus/);
+});
