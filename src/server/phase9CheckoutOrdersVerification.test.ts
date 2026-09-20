@@ -43,6 +43,15 @@ test('Phase 9 Invariant 5: inventory reservation is tenant-scoped, expiring, and
   assert.match(source, /available = stockBefore - stockReservedBefore/);
 });
 
+test('Phase 9 Invariant 6a: expired reservations are released before new checkout reservations are evaluated', () => {
+  const source = readFileSync(resolve(process.cwd(), 'src/server/storefrontCheckout.ts'), 'utf8');
+  assert.match(source, /releaseExpiredReservations/);
+  assert.match(source, /where\('status', '==', 'active'\)/);
+  assert.match(source, /where\('expiresAt', '<=', now\)/);
+  assert.match(source, /status: 'expired'/);
+  assert.match(source, /reserved: Math\.max\(0/);
+});
+
 test('Phase 9 Invariant 6: order identity is bound to verified authentication when available and guest checkout remains possible', () => {
   const source = readFileSync(resolve(process.cwd(), 'src/server/storefrontCheckout.ts'), 'utf8');
   assert.match(source, /optionalServerAuth/);
