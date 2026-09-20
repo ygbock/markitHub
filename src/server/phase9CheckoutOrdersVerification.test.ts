@@ -268,3 +268,17 @@ test('Phase 9 Invariant 29: explicit failed/pending/refunded payment state canno
     /if \(order\.status === 'Completed'[\s\S]*?paymentStatus = 'Paid'[\s\S]*?startStageId = 27;\n    \} else if/,
   );
 });
+
+test('Phase 9 Invariant 30: lifecycle transitions cannot skip stages or move a completed lifecycle backward', () => {
+  const lifecycle = readFileSync(resolve(process.cwd(), 'src/services/orderLifecycleService.ts'), 'utf8');
+  assert.match(
+    lifecycle,
+    /targetStageId !== currentStageId && targetStageId !== currentStageId \+ 1/,
+  );
+  assert.match(lifecycle, /currentStageId >= 27/);
+  assert.match(lifecycle, /targetStageId < currentStageId/);
+  assert.match(
+    lifecycle,
+    /filter\(stg => stg\.status === 'completed' \|\| stg\.status === 'in_progress'\)/,
+  );
+});
