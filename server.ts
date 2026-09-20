@@ -2310,6 +2310,67 @@ async function startServer() {
                 throw new Error('Monime webhook currency does not match the server payment session.');
               }
 
+              const orderId = String(fresh.order_id || '');
+              const orderRefForSettlement = orderId ? db.collection('orders').doc(orderId) : null;
+              const orderSnapForSettlement = orderRefForSettlement ? await tx.get(orderRefForSettlement) : null;
+              if (!orderRefForSettlement || !orderSnapForSettlement?.exists) throw new Error('Linked order was not found during payment settlement.');
+              const settlementOrder = orderSnapForSettlement.data() || {};
+              const orderTenantId = String(settlementOrder.tenantId || settlementOrder.tenant_id || '');
+              if (orderTenantId && orderTenantId !== tenantId) throw new Error('Order belongs to another tenant.');
+              const orderTotal = Number(settlementOrder.grandTotal ?? settlementOrder.total ?? settlementOrder.totalAmount ?? NaN);
+              const sessionTotal = Number(fresh.amount);
+              if (!Number.isFinite(orderTotal) || !Number.isFinite(sessionTotal) || Math.abs(orderTotal - sessionTotal) > 0.01) throw new Error('Payment amount does not match the server order total.');
+              const orderCurrency = String(settlementOrder.currency || '').trim();
+              if (orderCurrency && orderCurrency.toUpperCase() !== String(fresh.currency || '').toUpperCase()) throw new Error('Payment currency does not match the server order currency.');
+              const currentPaymentStatus = String(settlementOrder.paymentStatus || settlementOrder.payment_status || '').toLowerCase();
+              const reservationId = String((fresh as any).reservation_id || '');
+
+              // The order is the second authoritative terminal boundary. A successful
+              // webhook must never resurrect a failed/cancelled/expired order, and a
+              // second payment session must never consume inventory for an already-paid
+              // order. Release this session's reservation instead of finalizing it.
+              const terminalOrderStatus = new Set(['failed', 'payment_failed', 'cancelled', 'payment_cancelled', 'expired', 'payment_expired']);
+              if (['paid', 'completed', 'settled'].includes(currentPaymentStatus)) {
+                await releaseMonimeReservationOnly(db, tx, tenantId, reservationId);
+                tx.set(sessionRef, {
+                  status: 'completed',
+                  updated_at: new Date().toISOString(),
+                  ...(orderNumber ? { monime_order_number: orderNumber } : {}),
+                }, { merge: true });
+                tx.create(settlementRef, {
+                  tenantId,
+                  sessionId: String(sessionId),
+                  orderId,
+                  amount: fresh.amount,
+                  currency: fresh.currency,
+                  status: 'duplicate_order_terminal',
+                  duplicate: true,
+                  settledAt: new Date().toISOString(),
+                  webhookEventId: eventId,
+                });
+                return;
+              }
+              if (terminalOrderStatus.has(currentPaymentStatus)) {
+                await releaseMonimeReservationOnly(db, tx, tenantId, reservationId);
+                tx.set(sessionRef, {
+                  status: 'completed',
+                  updated_at: new Date().toISOString(),
+                  ...(orderNumber ? { monime_order_number: orderNumber } : {}),
+                }, { merge: true });
+                tx.create(settlementRef, {
+                  tenantId,
+                  sessionId: String(sessionId),
+                  orderId,
+                  amount: fresh.amount,
+                  currency: fresh.currency,
+                  status: 'rejected_order_terminal',
+                  rejected: true,
+                  settledAt: new Date().toISOString(),
+                  webhookEventId: eventId,
+                });
+                return;
+              }
+
               tx.set(sessionRef, {
                 status: 'completed',
                 updated_at: new Date().toISOString(),
@@ -2343,7 +2404,6 @@ async function startServer() {
                 }
               }
 
-              const orderId = String(fresh.order_id || '');
               const reservationRefForSettlement = reservationId ? db.collection('inventory_reservations').doc(reservationId) : null;
               const reservationForStockSnap = reservationRefForSettlement ? await tx.get(reservationRefForSettlement) : null;
               const reservationForStock = reservationForStockSnap?.data() || null;
@@ -2476,7 +2536,6 @@ async function startServer() {
                     }, { merge: true });
                   }
                 }
-              }
 
               tx.create(settlementRef, {
                 tenantId,
@@ -2530,6 +2589,7 @@ async function startServer() {
             serverMonimeSessions.set(sessionId, existing);
           }
         }
+        await eventRef.set({ status: 'processed', processed_at: new Date().toISOString() }, { merge: true });
       }
 
       return res.status(200).json({ received: true, eventType });
