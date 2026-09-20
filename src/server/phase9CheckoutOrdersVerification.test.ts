@@ -236,3 +236,13 @@ test('Phase 9 Invariant 26: Monime payable amount and line items are rebuilt fro
   assert.match(checkout, /const authoritativeCurrency = String\(order\.currency \|\| ''\)\.trim\(\)\.toUpperCase\(\)/);
   assert.match(checkout, /const totalAmount = authoritativeTotal/);
 });
+
+test('Phase 9 Invariant 27: persisted Monime session identity and payable payload remain authoritative after provider creation', () => {
+  const server = readFileSync(resolve(process.cwd(), 'server.ts'), 'utf8');
+  const checkout = server.slice(server.indexOf("app.post('/api/monime/create-checkout-session'"));
+  assert.match(checkout, /reservation_id: effectiveReservationId/);
+  assert.match(checkout, /currency: authoritativeCurrency/);
+  assert.match(checkout, /line_items: lineItems/);
+  assert.match(checkout, /reference: orderId/);
+  assert.match(checkout, /'Idempotency-Key': idempotencyKey/);
+});
