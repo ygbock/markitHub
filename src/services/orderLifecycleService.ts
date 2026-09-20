@@ -598,6 +598,16 @@ export class OrderLifecycleService {
     const stageDef = ORDER_LIFECYCLE_STAGES.find(s => s.id === targetStageId);
     if (!stageDef) return order;
 
+    // Fulfillment must never advance beyond inventory reservation while payment
+    // remains unpaid. Stage 10 is the temporary reservation boundary and is
+    // intentionally allowed before payment; physical allocation/WMS work begins
+    // at stage 11 only after authoritative payment settlement.
+    const currentPaymentStatus = domainStatuses.paymentStatus;
+    const requiresPaidOrder = targetStageId >= 11;
+    if (requiresPaidOrder && currentPaymentStatus !== 'Paid') {
+      return order;
+    }
+
     // Apply domain status impact from definition
     if (stageDef.domainStatusImpact.orderStatus) domainStatuses.orderStatus = stageDef.domainStatusImpact.orderStatus;
     if (stageDef.domainStatusImpact.paymentStatus) domainStatuses.paymentStatus = stageDef.domainStatusImpact.paymentStatus;
