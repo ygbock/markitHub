@@ -255,3 +255,16 @@ test('Phase 9 Invariant 28: lifecycle initialization cannot default an unpaid st
   assert.match(lifecycle, /fulfillmentStatus(\s*:\s*\w+)?\s*=\s*isPaid\s*\?\s*'Allocated'\s*:\s*'Reserved'/);
   assert.match(lifecycle, /requiresPaidOrder\s*=\s*targetStageId\s*>=\s*11/);
 });
+
+
+test('Phase 9 Invariant 29: explicit failed/pending/refunded payment state cannot be overwritten by legacy delivered/dispatched status during lifecycle initialization', () => {
+  const lifecycle = readFileSync(resolve(process.cwd(), 'src/services/orderLifecycleService.ts'), 'utf8');
+  assert.match(lifecycle, /const hasExplicitPaymentStatus = normalizedPaymentStatus\.length > 0/);
+  assert.match(lifecycle, /if \(!hasExplicitPaymentStatus \|\| isPaid\)/);
+  assert.match(lifecycle, /paymentStatus = 'Failed'/);
+  assert.match(lifecycle, /paymentStatus = 'Refunded'/);
+  assert.doesNotMatch(
+    lifecycle,
+    /if \(order\.status === 'Completed'[\s\S]*?paymentStatus = 'Paid'[\s\S]*?startStageId = 27;\n    \} else if/,
+  );
+});
