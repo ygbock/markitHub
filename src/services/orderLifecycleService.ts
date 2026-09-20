@@ -641,7 +641,12 @@ export class OrderLifecycleService {
     // intentionally allowed before payment; physical allocation/WMS work begins
     // at stage 11 only after authoritative payment settlement.
     const currentPaymentStatus = domainStatuses.paymentStatus;
-    const currentStageId = Number(order.currentLifecycleStageId || 0);
+    const currentStageId = Number(
+      order.currentLifecycleStageId ||
+      [...stages]
+        .filter(stg => stg.status === 'completed' || stg.status === 'in_progress')
+        .reduce((maxStageId, stg) => Math.max(maxStageId, stg.stageId), 0)
+    );
 
     // Lifecycle transitions are strictly monotonic once a lifecycle exists.
     // Replaying the current stage is idempotent, but skipping ahead would
