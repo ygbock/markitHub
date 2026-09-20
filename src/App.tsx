@@ -1506,6 +1506,20 @@ export default function App() {
   }
 
   // 2. Authoritative Frontend Shell Dispatcher via ShellResolver
+  // These route IDs are intentionally explicit so every canonical storefront
+  // surface is visibly owned by the authoritative storefront application.
+  const authoritativeStorefrontRouteIds = [
+    'storefront.home',
+    'storefront.products',
+    'storefront.product.detail',
+    'storefront.categories',
+  ] as const;
+  const isAuthoritativeStorefrontRoute =
+    activeDomain === 'STOREFRONT' &&
+    authoritativeStorefrontRouteIds.includes(
+      currentRoute.definition.id as (typeof authoritativeStorefrontRouteIds)[number]
+    );
+
   return (
     <ShellResolver
       currentPath={currentRoute.pathname}
