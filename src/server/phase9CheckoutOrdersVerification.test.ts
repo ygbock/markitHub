@@ -139,7 +139,8 @@ test('Phase 9 Invariant 15: fulfillment lifecycle stages 11+ cannot advance an u
 test('Phase 9 Invariant 16: Monime inventory settlement is transactionally idempotent', () => {
   const server = readFileSync(resolve(process.cwd(), 'server.ts'), 'utf8');
   assert.match(server, /const settlementRef = db\.collection\('payment_settlements'\)\.doc\(String\(tenantId\) \+ '_' \+ String\(sessionId\)\)/);
-  assert.match(server, /if \(settlementSnap\.exists && settlementSnap\.data\(\)\?\.status === 'settled'\) return/);
+  assert.match(server, /if \(settlementSnap\.exists\)/);
+  assert.match(server, /\['settled', 'duplicate_order_terminal', 'rejected_order_terminal'\]\.includes\(existingSettlementStatus\)/);
   assert.match(server, /const movementId = movementBase \+ '_v_' \+ String\(movementIndex\+\+\)/);
   assert.match(server, /const movementId = movementBase \+ '_p_' \+ String\(movementIndex\+\+\)/);
   assert.match(server, /tx\.create\(db\.collection\('stock_movements'\)\.doc\(movementId\)/);
