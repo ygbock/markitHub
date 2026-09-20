@@ -641,6 +641,27 @@ export class OrderLifecycleService {
     // intentionally allowed before payment; physical allocation/WMS work begins
     // at stage 11 only after authoritative payment settlement.
     const currentPaymentStatus = domainStatuses.paymentStatus;
+    const currentStageId = Number(order.currentLifecycleStageId || 0);
+
+    // Lifecycle transitions are strictly monotonic once a lifecycle exists.
+    // Replaying the current stage is idempotent, but skipping ahead would
+    // manufacture completion records for stages that have not actually run.
+    if (currentStageId > 0 && targetStageId !== currentStageId && targetStageId !== currentStageId + 1) {
+      return order;
+    }
+
+    // A terminal completed order cannot be resurrected into an earlier stage.
+    if (
+      currentStageId >= 27 &&
+      targetStageId < currentStageId
+    ) {
+      return order;
+    }
+
+    // Fulfillment must never advance beyond inventory reservation while payment
+    // remains unpaid. Stage 10 is the temporary reservation boundary and is
+    // intentionally allowed before payment; physical allocation/WMS work begins
+    // at stage 11 only after authoritative payment settlement.
     const requiresPaidOrder = targetStageId >= 11;
     if (requiresPaidOrder && currentPaymentStatus !== 'Paid') {
       return order;
