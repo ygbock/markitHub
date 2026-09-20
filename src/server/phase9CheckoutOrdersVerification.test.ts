@@ -135,3 +135,13 @@ test('Phase 9 Invariant 15: fulfillment lifecycle stages 11+ cannot advance an u
   assert.match(lifecycle, /currentPaymentStatus !== 'Paid'/);
   assert.match(lifecycle, /return order;/);
 });
+
+test('Phase 9 Invariant 16: Monime inventory settlement is transactionally idempotent', () => {
+  const server = readFileSync(resolve(process.cwd(), 'server.ts'), 'utf8');
+  assert.match(server, /const settlementRef = db\.collection\('payment_settlements'\)\.doc\(String\(tenantId\) \+ '_' \+ String\(sessionId\)\)/);
+  assert.match(server, /if \(settlementSnap\.exists && settlementSnap\.data\(\)\?\.status === 'settled'\) return/);
+  assert.match(server, /const movementId = movementBase \+ '_v_' \+ String\(movementIndex\+\+\)/);
+  assert.match(server, /const movementId = movementBase \+ '_p_' \+ String\(movementIndex\+\+\)/);
+  assert.match(server, /tx\.create\(db\.collection\('stock_movements'\)\.doc\(movementId\)/);
+  assert.match(server, /tx\.create\(settlementRef/);
+});
