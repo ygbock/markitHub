@@ -121,3 +121,10 @@ test('Phase 9 Invariant 13: Monime terminal payment failures and expiry release 
   assert.match(server, /paymentStatus: terminalPaymentStatus/);
   assert.match(server, /status: nextStatus/);
 });
+
+test('Phase 9 Invariant 14: Monime payment settlement reconciles both canonical and tenant order mirrors', () => {
+  const server = readFileSync(resolve(process.cwd(), 'server.ts'), 'utf8');
+  assert.match(server, /paymentProvider: 'monime'/);
+  assert.match(server, /collection\('tenants'\)\.doc\(tenantId\)\.collection\('orders'\)\.doc\(String\(orderId\)\)/);
+  assert.match(server, /paymentStatus: 'paid'/);
+});
