@@ -181,3 +181,21 @@ test('Phase 9 Invariant 20: late Monime cancellation/expiry events are durably m
   const cancellationBranch = server.slice(server.indexOf("eventType === 'checkout_session.cancelled'"));
   assert.match(cancellationBranch, /await eventRef\.set\(\{ status: 'processed'/);
 });
+
+
+test('Phase 9 Invariant 21: Monime terminal settlement records are retry-idempotent', () => {
+  const server = readFileSync(resolve(process.cwd(), 'server.ts'), 'utf8');
+  const settlement = server.slice(server.indexOf("const settlementRef = db.collection('payment_settlements')"));
+  assert.match(settlement, /if \(settlementSnap\.exists\)/);
+  assert.match(settlement, /existingSettlementStatus = String\(settlementSnap\.data\(\)\?\.status \|\| ''\)\.toLowerCase\(\)/);
+  assert.match(settlement, /\['settled', 'duplicate_order_terminal', 'rejected_order_terminal'\]\.includes\(existingSettlementStatus\)/);
+});
+
+test('Phase 9 Invariant 22: late Monime cancellation/expiry of a completed session marks the webhook event processed before returning', () => {
+  const server = readFileSync(resolve(process.cwd(), 'server.ts'), 'utf8');
+  const cancellationBranch = server.slice(server.indexOf("eventType === 'checkout_session.cancelled'"));
+  const terminalReturn = cancellationBranch.indexOf("reason: 'terminal_session_state'");
+  const processedMark = cancellationBranch.indexOf("ignored_reason: 'terminal_session_state'");
+  assert.ok(processedMark >= 0);
+  assert.ok(terminalReturn > processedMark);
+});
