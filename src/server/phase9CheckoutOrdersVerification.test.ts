@@ -128,3 +128,10 @@ test('Phase 9 Invariant 14: Monime payment settlement reconciles both canonical 
   assert.match(server, /collection\('tenants'\)\.doc\(tenantId\)\.collection\('orders'\)\.doc\(String\(orderId\)\)/);
   assert.match(server, /paymentStatus: 'paid'/);
 });
+
+test('Phase 9 Invariant 15: fulfillment lifecycle stages 11+ cannot advance an unpaid order', () => {
+  const lifecycle = readFileSync(resolve(process.cwd(), 'src/services/orderLifecycleService.ts'), 'utf8');
+  assert.match(lifecycle, /const requiresPaidOrder = targetStageId >= 11/);
+  assert.match(lifecycle, /currentPaymentStatus !== 'Paid'/);
+  assert.match(lifecycle, /return order;/);
+});
