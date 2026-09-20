@@ -246,3 +246,12 @@ test('Phase 9 Invariant 27: persisted Monime session identity and payable payloa
   assert.match(checkout, /reference: orderId/);
   assert.match(checkout, /'Idempotency-Key': idempotencyKey/);
 });
+
+test('Phase 9 Invariant 28: lifecycle initialization cannot default an unpaid storefront order to Paid', () => {
+  const lifecycle = readFileSync(resolve(process.cwd(), 'src/services/orderLifecycleService.ts'), 'utf8');
+  assert.match(lifecycle, /normalizedPaymentStatus = String\(\(order as any\)\.paymentStatus \|\| \(order as any\)\.payment_status/);
+  assert.match(lifecycle, /const isPaid = \['paid', 'completed', 'settled', 'captured'\]\.includes\(normalizedPaymentStatus\)/);
+  assert.match(lifecycle, /paymentStatus = isPaid \? 'Paid' : 'Pending Verification'/);
+  assert.match(lifecycle, /fulfillmentStatus = isPaid \? 'Allocated' : 'Reserved'/);
+  assert.match(lifecycle, /requiresPaidOrder = targetStageId >= 11/);
+});
