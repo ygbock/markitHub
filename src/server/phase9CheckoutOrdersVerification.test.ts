@@ -251,8 +251,8 @@ test('Phase 9 Invariant 28: lifecycle initialization cannot default an unpaid st
   const lifecycle = readFileSync(resolve(process.cwd(), 'src/services/orderLifecycleService.ts'), 'utf8');
   assert.match(lifecycle, /normalizedPaymentStatus\s*=\s*String\(\s*\(order as any\)\.paymentStatus\s*\|\|\s*\(order as any\)\.payment_status/);
   assert.match(lifecycle, /isPaid\s*=\s*\[\s*'paid'\s*,\s*'completed'\s*,\s*'settled'\s*,\s*'captured'\s*\]\.includes\(\s*normalizedPaymentStatus\s*\)/);
-  assert.match(lifecycle, /paymentStatus(\s*:\s*\w+)?\s*=\s*isPaid\s*\?\s*'Paid'\s*:\s*'Pending Verification'/);
-  assert.match(lifecycle, /fulfillmentStatus(\s*:\s*\w+)?\s*=\s*isPaid\s*\?\s*'Allocated'\s*:\s*'Reserved'/);
+  assert.match(lifecycle, /paymentStatus\s*:\s*OrderDomainPaymentStatus\s*=\s*'Pending Verification'/);
+  assert.match(lifecycle, /fulfillmentStatus\s*:\s*OrderDomainFulfillmentStatus\s*=\s*'Reserved'/);
   assert.match(lifecycle, /requiresPaidOrder\s*=\s*targetStageId\s*>=\s*11/);
 });
 
