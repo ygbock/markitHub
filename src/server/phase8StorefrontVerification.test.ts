@@ -69,7 +69,7 @@ test('Phase 8 Invariant 9: App dispatches canonical storefront routes to authori
   const source = fs.readFileSync(path.resolve(root, 'src/App.tsx'), 'utf8');
   assert.match(source, /AuthoritativeStorefrontPage/);
   assert.match(source, /TenantStorefrontManagement/);
-  assert.match(source, /storefront\.home[\\s\\S]*storefront\.products[\\s\\S]*storefront\.product\.detail[\\s\\S]*storefront\.categories/);
+  assert.match(source, /storefront\.home[\s\S]*storefront\.products[\s\S]*storefront\.product\.detail[\s\S]*storefront\.categories/);
   assert.match(source, /currentRoute\.definition\.id === 'tenant\.storefront'/);
 });
 
