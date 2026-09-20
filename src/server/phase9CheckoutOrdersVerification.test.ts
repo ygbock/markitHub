@@ -100,4 +100,5 @@ test('Phase 9 Invariant 12: checkout UI submits only product IDs, quantities, an
   assert.match(checkout, /productId/);
   assert.match(checkout, /quantity/);
   assert.match(checkout, /shippingAddress/);
+  assert.doesNotMatch(checkout, /price:\s*item\.price/);
 });
