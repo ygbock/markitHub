@@ -1898,30 +1898,65 @@ async function startServer() {
           });
         }
       }
-      if (reservationId) {
-        const reservationSnap = await db.collection('inventory_reservations').doc(String(reservationId)).get();
-        if (!reservationSnap.exists) {
-          return res.status(400).json({ error: 'Inventory reservation was not found.' });
-        }
-        const reservation = reservationSnap.data() || {};
-        const reservationTenant = String(reservation.tenantId || '');
-        const reservationOrderId = String(reservation.orderId || reservation.order_id || '');
-        const reservationStatus = String(reservation.status || '');
-        if (reservationTenant !== tenantId || reservationOrderId !== String(orderId) || reservationStatus !== 'active') {
-          return res.status(409).json({ error: 'Inventory reservation is invalid for this order and tenant.' });
-        }
-        const expiresAt = new Date(String(reservation.expiresAt || 0)).getTime();
-        if (Number.isFinite(expiresAt) && expiresAt <= Date.now()) {
-          return res.status(409).json({ error: 'Inventory reservation has expired.' });
-        }
-      }
-
-      const order = serverStorefrontOrders.get(String(orderId));
-      if (!order || String((order as any).tenantId || '') !== tenantId) {
+      const orderRef = db.collection('orders').doc(String(orderId));
+      const orderSnap = await orderRef.get();
+      if (!orderSnap.exists) {
         return res.status(404).json({ error: 'Order not found for this tenant.' });
       }
-      if (String((order as any).paymentStatus || '').toLowerCase() === 'paid') {
+      const order = orderSnap.data() || {};
+      if (String(order.tenantId || order.tenant_id || '') !== tenantId) {
+        return res.status(404).json({ error: 'Order not found for this tenant.' });
+      }
+      const orderPaymentStatus = String(order.paymentStatus || order.payment_status || '').toLowerCase();
+      if (['paid', 'completed', 'settled'].includes(orderPaymentStatus)) {
         return res.status(409).json({ error: 'Order has already been paid.' });
+      }
+      if (['cancelled', 'payment_cancelled', 'failed', 'payment_failed', 'expired', 'payment_expired'].includes(orderPaymentStatus)) {
+        return res.status(409).json({ error: 'Order is in a terminal payment state.' });
+      }
+
+      const authoritativeReservationId = String(order.inventoryReservationId || order.reservation_id || '');
+      if (!authoritativeReservationId) {
+        return res.status(409).json({ error: 'Order has no active inventory reservation.' });
+      }
+      if (reservationId && String(reservationId) !== authoritativeReservationId) {
+        return res.status(409).json({ error: 'Reservation does not belong to this order.' });
+      }
+      const effectiveReservationId = authoritativeReservationId;
+      const reservationSnap = await db.collection('inventory_reservations').doc(effectiveReservationId).get();
+      if (!reservationSnap.exists) {
+        return res.status(400).json({ error: 'Inventory reservation was not found.' });
+      }
+      const reservation = reservationSnap.data() || {};
+      const reservationTenant = String(reservation.tenantId || reservation.tenant_id || '');
+      const reservationOrderId = String(reservation.orderId || reservation.order_id || '');
+      const reservationStatus = String(reservation.status || '').toLowerCase();
+      if (reservationTenant !== tenantId || reservationOrderId !== String(orderId) || reservationStatus !== 'active') {
+        return res.status(409).json({ error: 'Inventory reservation is invalid for this order and tenant.' });
+      }
+      const expiresAt = new Date(String(reservation.expiresAt || 0)).getTime();
+      if (Number.isFinite(expiresAt) && expiresAt <= Date.now()) {
+        return res.status(409).json({ error: 'Inventory reservation has expired.' });
+      }
+
+      const existingSessionsSnap = await db.collection('monime_sessions')
+        .where('tenant_id', '==', tenantId)
+        .where('order_id', '==', String(orderId))
+        .limit(20)
+        .get();
+      const reusableSession = existingSessionsSnap.docs
+        .map((doc: any) => doc.data() || {})
+        .find((candidate: any) => ['pending', 'processing', 'authorized'].includes(String(candidate.status || '').toLowerCase()) && String(candidate.reservation_id || '') === effectiveReservationId);
+      if (reusableSession?.monime_session_id && reusableSession.redirect_url) {
+        return res.status(200).json({
+          success: true,
+          sessionId: reusableSession.monime_session_id,
+          redirectUrl: reusableSession.redirect_url,
+          orderNumber: reusableSession.monime_order_number,
+          status: reusableSession.status,
+          sessionRecord: reusableSession,
+          reused: true,
+        });
       }
       const gatewaySnap = await db.collection('tenants').doc(tenantId).collection('payment_gateways').doc('monime').get();
       if (!gatewaySnap.exists) {
@@ -1938,20 +1973,32 @@ async function startServer() {
       const monimeApiUrl = (process.env.MONIME_API_URL || 'https://api.monime.io').replace(/\/+$/, '');
 
       // Build line items for Monime (minor units = cents, e.g. SLE * 100)
-      const lineItems = validationResult.items.map((item) => ({
+      const authoritativeItems = Array.isArray(order.items) ? order.items : [];
+      if (!authoritativeItems.length) {
+        return res.status(409).json({ error: 'Order has no payable line items.' });
+      }
+      const authoritativeTotal = Number(order.grandTotal ?? order.totalAmount ?? order.total ?? NaN);
+      const authoritativeCurrency = String(order.currency || '').trim().toUpperCase();
+      if (!Number.isFinite(authoritativeTotal) || authoritativeTotal < 0 || !authoritativeCurrency) {
+        return res.status(409).json({ error: 'Order has invalid authoritative payment totals.' });
+      }
+      const lineItems = authoritativeItems.map((item: any) => ({
         type: 'custom',
-        name: item.productName,
-        quantity: item.quantity,
+        name: String(item.productName || item.name || item.productId || 'Item'),
+        quantity: Number(item.quantity),
         price: {
-          currency: validationResult.pricing.currency,
-          value: Math.round(item.serverUnitPrice * 100),
+          currency: authoritativeCurrency,
+          value: Math.round(Number(item.serverUnitPrice ?? item.unitPrice ?? item.price ?? 0) * 100),
         },
-        reference: item.variantSku || item.productId,
+        reference: String(item.variantSku || item.sku || item.productId || ''),
         images: item.imageUrl ? [item.imageUrl] : undefined,
       }));
+      if (lineItems.some((item: any) => !Number.isSafeInteger(item.quantity) || item.quantity < 1 || !Number.isSafeInteger(item.price.value) || item.price.value < 0)) {
+        return res.status(409).json({ error: 'Order contains invalid payable line items.' });
+      }
 
-      const totalAmount = validationResult.pricing.grandTotal;
-      const idempotencyKey = `nexus-${crypto.createHash('sha256').update(String(orderId)).digest('hex').slice(0, 32)}`;
+      const totalAmount = authoritativeTotal;
+      const idempotencyKey = `nexus-${crypto.createHash('sha256').update(tenantId + ':' + String(orderId)).digest('hex').slice(0, 32)}`;
 
       let session: any = null;
 
@@ -1996,8 +2043,8 @@ async function startServer() {
 
       const sessionRecord: MonimeServerSession = {
         tenant_id: tenantId,
-        order_id: orderId,
-        ...(reservationId ? { reservation_id: String(reservationId) } : {}),
+        order_id: String(orderId),
+        reservation_id: effectiveReservationId,
         monime_session_id: session.id,
         monime_order_number: session.orderNumber,
         redirect_url: session.redirectUrl,
