@@ -2493,6 +2493,7 @@ async function startServer() {
                     }, { merge: true });
                   }
                 }
+              }
 
               tx.create(settlementRef, {
                 tenantId,
