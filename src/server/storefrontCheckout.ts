@@ -90,6 +90,56 @@ export function registerStorefrontCheckoutRoutes(app: any, deps: {
     });
   }
 
+  async function releaseExpiredReservations(db: any, tenantId: string): Promise<number> {
+    const now = new Date().toISOString();
+    const snap = await db.collection('inventory_reservations')
+      .where('tenantId', '==', tenantId)
+      .where('status', '==', 'active')
+      .where('expiresAt', '<=', now)
+      .limit(100)
+      .get();
+
+    let released = 0;
+    for (const reservationDoc of snap.docs) {
+      const reservationRef = reservationDoc.ref;
+      const reservation = reservationDoc.data() || {};
+      const reservationItems = Array.isArray(reservation.items) ? reservation.items : [];
+
+      await db.runTransaction(async (tx: any) => {
+        const fresh = await tx.get(reservationRef);
+        if (!fresh.exists) return;
+        const current = fresh.data() || {};
+        if (String(current.tenantId || '') !== tenantId || String(current.status || '') !== 'active') return;
+        const expiresAt = String(current.expiresAt || '');
+        if (!expiresAt || expiresAt > now) return;
+
+        for (const item of Array.isArray(current.items) ? current.items : reservationItems) {
+          const productRef = db.collection('tenants').doc(tenantId).collection('products').doc(String(item.productId));
+          const productSnap = await tx.get(productRef);
+          if (!productSnap.exists) continue;
+          const product = productSnap.data() || {};
+          if (item.variantSku) {
+            const variants = Array.isArray(product.variants) ? product.variants.map((v: any) => ({ ...v })) : [];
+            const idx = variants.findIndex((v: any) => String(v.sku || '') === String(item.variantSku));
+            if (idx >= 0) {
+              variants[idx].reserved = Math.max(0, Number(variants[idx].reserved || 0) - Number(item.quantity || 0));
+              tx.set(productRef, { variants, updatedAt: now }, { merge: true });
+            }
+          } else {
+            tx.set(productRef, {
+              reserved: Math.max(0, Number(product.reserved || product.reservedStock || 0) - Number(item.quantity || 0)),
+              updatedAt: now,
+            }, { merge: true });
+          }
+        }
+
+        tx.set(reservationRef, { status: 'expired', expiredAt: now, updatedAt: now }, { merge: true });
+        released += 1;
+      });
+    }
+    return released;
+  }
+
   async function calculateQuote(db: any, tenant: any, items: CheckoutItemInput[], couponCode?: string, shippingMethod?: string) {
     const productRefs = items.map(item => db.collection('tenants').doc(tenant.id).collection('products').doc(item.productId));
     const snaps = await Promise.all(productRefs.map((ref: any) => ref.get()));
@@ -196,7 +246,7 @@ export function registerStorefrontCheckoutRoutes(app: any, deps: {
       if (!configSnap.exists || String(configSnap.data()?.publicationStatus || '') !== 'published') {
         return res.status(404).json({ success: false, error: 'STOREFRONT_NOT_PUBLISHED' });
       }
-      const items = normalizeItems(req.body?.items);
+      await releaseExpiredReservations(db, tenant.id);\n      const items = normalizeItems(req.body?.items);
       const quote = await calculateQuote(db, tenant, items, clean(req.body?.couponCode, 80) || undefined, clean(req.body?.shippingMethod, 30));
       return res.json({ success: true, quote });
     } catch (err: any) {
