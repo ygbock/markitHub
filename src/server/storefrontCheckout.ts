@@ -246,7 +246,8 @@ export function registerStorefrontCheckoutRoutes(app: any, deps: {
       if (!configSnap.exists || String(configSnap.data()?.publicationStatus || '') !== 'published') {
         return res.status(404).json({ success: false, error: 'STOREFRONT_NOT_PUBLISHED' });
       }
-      await releaseExpiredReservations(db, tenant.id);\n      const items = normalizeItems(req.body?.items);
+      await releaseExpiredReservations(db, tenant.id);
+      const items = normalizeItems(req.body?.items);
       const quote = await calculateQuote(db, tenant, items, clean(req.body?.couponCode, 80) || undefined, clean(req.body?.shippingMethod, 30));
       return res.json({ success: true, quote });
     } catch (err: any) {
