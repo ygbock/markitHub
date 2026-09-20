@@ -672,6 +672,37 @@ export class OrderLifecycleService {
       return order;
     }
 
+    // Domain prerequisites prevent a valid stage number from being used to
+    // manufacture an impossible business state. These checks complement the
+    // strict one-stage-at-a-time rule above.
+    const prerequisiteChecks: Record<number, () => boolean> = {
+      10: () => currentPaymentStatus === 'Paid',
+      11: () => domainStatuses.fulfillmentStatus === 'Reserved',
+      12: () => domainStatuses.fulfillmentStatus === 'Allocated',
+      13: () => domainStatuses.fulfillmentStatus === 'Allocated',
+      14: () => domainStatuses.fulfillmentStatus === 'Pick Task Generated',
+      15: () => domainStatuses.fulfillmentStatus === 'Picking',
+      16: () => domainStatuses.fulfillmentStatus === 'Pick Exception' || domainStatuses.fulfillmentStatus === 'Picking',
+      17: () => domainStatuses.fulfillmentStatus === 'Packing',
+      18: () => domainStatuses.fulfillmentStatus === 'QC Passed',
+      19: () => domainStatuses.shipmentStatus === 'Label Generated',
+      20: () => domainStatuses.shipmentStatus === 'Courier Assigned',
+      21: () => domainStatuses.shipmentStatus === 'Dispatched',
+      22: () => domainStatuses.shipmentStatus === 'In Transit',
+      23: () => domainStatuses.shipmentStatus === 'In Transit',
+      24: () => domainStatuses.shipmentStatus === 'Out for Delivery',
+      25: () => domainStatuses.shipmentStatus === 'Delivery Attempted',
+      26: () => domainStatuses.shipmentStatus === 'Delivered',
+      27: () => domainStatuses.shipmentStatus === 'Delivered' && domainStatuses.fulfillmentStatus === 'Fulfilled',
+      28: () => domainStatuses.orderStatus === 'Completed',
+      29: () => domainStatuses.orderStatus === 'Completed',
+      30: () => domainStatuses.orderStatus === 'Completed' && domainStatuses.shipmentStatus === 'Delivered'
+    };
+    const prerequisiteCheck = prerequisiteChecks[targetStageId];
+    if (prerequisiteCheck && !prerequisiteCheck()) {
+      return order;
+    }
+
     // Apply domain status impact from definition
     if (stageDef.domainStatusImpact.orderStatus) domainStatuses.orderStatus = stageDef.domainStatusImpact.orderStatus;
     if (stageDef.domainStatusImpact.paymentStatus) domainStatuses.paymentStatus = stageDef.domainStatusImpact.paymentStatus;
