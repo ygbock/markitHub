@@ -649,9 +649,15 @@ export class OrderLifecycleService {
     );
 
     // Lifecycle transitions are strictly monotonic once a lifecycle exists.
-    // Replaying the current stage is idempotent, but skipping ahead would
-    // manufacture completion records for stages that have not actually run.
-    if (currentStageId > 0 && targetStageId !== currentStageId && targetStageId !== currentStageId + 1) {
+    // Replaying the current stage is idempotent. Exception-only stage 15 is
+    // optional on the happy path, so stage 14 may proceed directly to stage 16;
+    // if an exception is recorded, stage 15 may also proceed to stage 16.
+    const allowedNextStageIds: Record<number, number[]> = {
+      14: [15, 16],
+      15: [16]
+    };
+    const allowedNext = allowedNextStageIds[currentStageId] || [currentStageId + 1];
+    if (currentStageId > 0 && targetStageId !== currentStageId && !allowedNext.includes(targetStageId)) {
       return order;
     }
 
