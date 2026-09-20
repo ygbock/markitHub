@@ -2522,7 +2522,7 @@ async function startServer() {
               const freshStatus = String(fresh.status || 'pending').toLowerCase() as PaymentState;
               const nextFreshStatus = transitionPaymentState(freshStatus, terminalStatus);
               if (!nextFreshStatus) return;
-              await releaseMonimeReservationForTerminalPayment(tx, tenantId, String(fresh.reservation_id || ''), String(fresh.order_id || ''), terminalStatus);
+              await releaseMonimeReservationForTerminalPayment(db, tx, tenantId, String(fresh.reservation_id || ''), String(fresh.order_id || ''), terminalStatus);
               tx.set(sessionRef, { ...fresh, status: nextFreshStatus, updated_at: new Date().toISOString() }, { merge: true });
             });
             existing.status = nextSessionStatus;
