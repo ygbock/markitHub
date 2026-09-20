@@ -460,7 +460,9 @@ export function registerStorefrontCheckoutRoutes(app: any, deps: {
         const reservationSnap = reservationRef ? await tx.get(reservationRef) : null;
         if (reservationSnap?.exists) {
           const reservation = reservationSnap.data() || {};
-          for (const item of Array.isArray(reservation.items) ? reservation.items : []) {
+          const reservationStatus = String(reservation.status || '').toLowerCase();
+          if (reservationStatus === 'active') {
+            for (const item of Array.isArray(reservation.items) ? reservation.items : []) {
             const productRef = db.collection('tenants').doc(tenant.id).collection('products').doc(String(item.productId));
             const productSnap = await tx.get(productRef);
             if (!productSnap.exists) continue;
@@ -473,8 +475,9 @@ export function registerStorefrontCheckoutRoutes(app: any, deps: {
             } else {
               tx.set(productRef, { reserved: Math.max(0, Number(product.reserved || 0) - Number(item.quantity || 0)), updatedAt: new Date().toISOString() }, { merge: true });
             }
+            }
+            tx.set(reservationRef, { status: 'released', releasedAt: new Date().toISOString() }, { merge: true });
           }
-          tx.set(reservationRef, { status: 'released', releasedAt: new Date().toISOString() }, { merge: true });
         }
         tx.set(orderRef, { status: 'cancelled', paymentStatus: 'cancelled', cancelledAt: new Date().toISOString(), updatedAt: new Date().toISOString() }, { merge: true });
         tx.set(db.collection('tenants').doc(tenant.id).collection('orders').doc(req.params.orderId), { status: 'cancelled', paymentStatus: 'cancelled', cancelledAt: new Date().toISOString(), updatedAt: new Date().toISOString() }, { merge: true });
