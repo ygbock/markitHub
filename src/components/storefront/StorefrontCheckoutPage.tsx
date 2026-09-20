@@ -29,7 +29,6 @@ export default function StorefrontCheckoutPage({ tenantSlug, items, onClearCart,
     productId: item.productId,
     variantSku: item.variantSku,
     quantity: item.quantity,
-    price: item.price,
   })), [items]);
 
   useEffect(() => {
