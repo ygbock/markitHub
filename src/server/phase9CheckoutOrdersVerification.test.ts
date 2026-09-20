@@ -282,3 +282,22 @@ test('Phase 9 Invariant 30: lifecycle transitions cannot skip stages or move a c
     /filter\(stg => stg\.status === 'completed' \|\| stg\.status === 'in_progress'\)/,
   );
 });
+
+test('Phase 9 Invariant 31: lifecycle domain prerequisites prevent impossible fulfillment, shipping, delivery, and return transitions', () => {
+  const lifecycle = readFileSync(resolve(process.cwd(), 'src/services/orderLifecycleService.ts'), 'utf8');
+  assert.match(lifecycle, /10: \(\) => currentPaymentStatus === 'Paid'/);
+  assert.match(lifecycle, /11: \(\) => domainStatuses\.fulfillmentStatus === 'Reserved'/);
+  assert.match(lifecycle, /18: \(\) => domainStatuses\.fulfillmentStatus === 'QC Passed'/);
+  assert.match(lifecycle, /20: \(\) => domainStatuses\.shipmentStatus === 'Courier Assigned'/);
+  assert.match(lifecycle, /24: \(\) => domainStatuses\.shipmentStatus === 'Out for Delivery'/);
+  assert.match(lifecycle, /26: \(\) => domainStatuses\.shipmentStatus === 'Delivered'/);
+  assert.match(lifecycle, /27: \(\) => domainStatuses\.shipmentStatus === 'Delivered' && domainStatuses\.fulfillmentStatus === 'Fulfilled'/);
+  assert.match(lifecycle, /30: \(\) => domainStatuses\.orderStatus === 'Completed' && domainStatuses\.shipmentStatus === 'Delivered'/);
+});
+
+test('Phase 9 Invariant 32: picking exception is optional on the happy path but resolves into packing', () => {
+  const lifecycle = readFileSync(resolve(process.cwd(), 'src/services/orderLifecycleService.ts'), 'utf8');
+  assert.match(lifecycle, /14: \[15, 16\]/);
+  assert.match(lifecycle, /15: \[16\]/);
+  assert.match(lifecycle, /16: \(\) => domainStatuses\.fulfillmentStatus === 'Pick Exception' \|\| domainStatuses\.fulfillmentStatus === 'Picking'/);
+});
