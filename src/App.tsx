@@ -1654,7 +1654,7 @@ export default function App() {
       )}
 
       {/* Phase 9: canonical storefront commerce surfaces. */}
-      {activeDomain === 'STOREFRONT' && currentRoute.definition.id !== 'storefront.cart' && currentRoute.definition.id !== 'storefront.checkout' && currentRoute.definition.id !== 'storefront.orders' && (
+      {(isAuthoritativeStorefrontRoute || (activeDomain === 'STOREFRONT' && currentRoute.definition.id === 'storefront.generic')) && (
         <AuthoritativeStorefrontPage
           tenantSlug={currentRoute.params.tenantSlug || ''}
           routeId={currentRoute.definition.id}
