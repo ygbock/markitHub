@@ -200,3 +200,39 @@ test('Phase 9 Invariant 22: late Monime cancellation/expiry of a completed sessi
   assert.ok(processedMark >= 0);
   assert.ok(terminalReturn > processedMark);
 });
+
+
+test('Phase 9 Invariant 23: Monime checkout session creation binds to the durable canonical order, not the legacy in-memory order map', () => {
+  const server = readFileSync(resolve(process.cwd(), 'server.ts'), 'utf8');
+  const checkout = server.slice(server.indexOf("app.post('/api/monime/create-checkout-session'"));
+  assert.match(checkout, /const orderRef = db\.collection\('orders'\)\.doc\(String\(orderId\)\)/);
+  assert.match(checkout, /const orderSnap = await orderRef\.get\(\)/);
+  assert.doesNotMatch(checkout, /const order = serverStorefrontOrders\.get\(String\(orderId\)\)/);
+});
+
+test('Phase 9 Invariant 24: Monime session creation uses the order-owned reservation and rejects mismatched or terminal orders', () => {
+  const server = readFileSync(resolve(process.cwd(), 'server.ts'), 'utf8');
+  const checkout = server.slice(server.indexOf("app.post('/api/monime/create-checkout-session'"));
+  assert.match(checkout, /authoritativeReservationId = String\(order\.inventoryReservationId \|\| order\.reservation_id \|\| ''\)/);
+  assert.match(checkout, /reservationId && String\(reservationId\) !== authoritativeReservationId/);
+  assert.match(checkout, /\['paid', 'completed', 'settled'\]\.includes\(orderPaymentStatus\)/);
+  assert.match(checkout, /\['cancelled', 'payment_cancelled', 'failed', 'payment_failed', 'expired', 'payment_expired'\]/);
+});
+
+test('Phase 9 Invariant 25: repeated Monime session requests reuse an existing active session and use tenant-order idempotency', () => {
+  const server = readFileSync(resolve(process.cwd(), 'server.ts'), 'utf8');
+  const checkout = server.slice(server.indexOf("app.post('/api/monime/create-checkout-session'"));
+  assert.match(checkout, /collection\('monime_sessions'\)[\s\S]*where\('tenant_id', '==', tenantId\)[\s\S]*where\('order_id', '==', String\(orderId\)\)/);
+  assert.match(checkout, /reusableSession\?\.monime_session_id/);
+  assert.match(checkout, /reused: true/);
+  assert.match(checkout, /update\(tenantId \+ ':' \+ String\(orderId\)/);
+});
+
+test('Phase 9 Invariant 26: Monime payable amount and line items are rebuilt from the authoritative persisted order', () => {
+  const server = readFileSync(resolve(process.cwd(), 'server.ts'), 'utf8');
+  const checkout = server.slice(server.indexOf("app.post('/api/monime/create-checkout-session'"));
+  assert.match(checkout, /const authoritativeItems = Array\.isArray\(order\.items\) \? order\.items : \[\]/);
+  assert.match(checkout, /const authoritativeTotal = Number\(order\.grandTotal \?\? order\.totalAmount \?\? order\.total/);
+  assert.match(checkout, /const authoritativeCurrency = String\(order\.currency \|\| ''\)\.trim\(\)\.toUpperCase\(\)/);
+  assert.match(checkout, /const totalAmount = authoritativeTotal/);
+});
