@@ -2377,52 +2377,9 @@ async function startServer() {
                 ...(orderNumber ? { monime_order_number: orderNumber } : {}),
               }, { merge: true });
 
-              const reservationId = String((fresh as any).reservation_id || '');
-              if (reservationId) {
-                const reservationRef = db.collection('inventory_reservations').doc(reservationId);
-                const reservationSnap = await tx.get(reservationRef);
-                if (reservationSnap.exists) {
-                  const reservation = reservationSnap.data() || {};
-                  if (String(reservation.status) === 'active') {
-                    const tenantReservation = String(reservation.tenantId || '');
-                    if (tenantReservation && tenantReservation !== tenantId) throw new Error('Inventory reservation belongs to another tenant.');
-                    const reservationExpiresAt = new Date(String(reservation.expiresAt || 0)).getTime();
-                    if (Number.isFinite(reservationExpiresAt) && reservationExpiresAt <= Date.now()) {
-                      throw new Error('Inventory reservation has expired.');
-                    }
-                    tx.set(reservationRef, {
-                      status: 'finalized',
-                      finalizedAt: new Date().toISOString(),
-                      finalizedByPaymentSession: String(sessionId),
-                      tenantId,
-                    }, { merge: true });
-                  } else if (String(reservation.status) !== 'finalized') {
-                    throw new Error('Inventory reservation is not active for payment settlement.');
-                  }
-                } else {
-                  throw new Error('Linked inventory reservation was not found.');
-                }
-              }
-
               const reservationRefForSettlement = reservationId ? db.collection('inventory_reservations').doc(reservationId) : null;
               const reservationForStockSnap = reservationRefForSettlement ? await tx.get(reservationRefForSettlement) : null;
               const reservationForStock = reservationForStockSnap?.data() || null;
-              const orderRefForSettlement = orderId ? db.collection('orders').doc(orderId) : null;
-              const orderSnapForSettlement = orderRefForSettlement ? await tx.get(orderRefForSettlement) : null;
-              if (!orderRefForSettlement || !orderSnapForSettlement?.exists) throw new Error('Linked order was not found during payment settlement.');
-              const settlementOrder = orderSnapForSettlement.data() || {};
-              const orderTenantId = String(settlementOrder.tenantId || settlementOrder.tenant_id || '');
-              if (orderTenantId && orderTenantId !== tenantId) throw new Error('Order belongs to another tenant.');
-              const orderTotal = Number(settlementOrder.grandTotal ?? settlementOrder.total ?? settlementOrder.totalAmount ?? NaN);
-              const sessionTotal = Number(fresh.amount);
-              if (!Number.isFinite(orderTotal) || !Number.isFinite(sessionTotal) || Math.abs(orderTotal - sessionTotal) > 0.01) throw new Error('Payment amount does not match the server order total.');
-              const orderCurrency = String(settlementOrder.currency || '').trim();
-              if (orderCurrency && orderCurrency.toUpperCase() !== String(fresh.currency || '').toUpperCase()) throw new Error('Payment currency does not match the server order currency.');
-              const currentPaymentStatus = String(settlementOrder.paymentStatus || settlementOrder.payment_status || '').toLowerCase();
-              if (currentPaymentStatus === 'paid' || currentPaymentStatus === 'completed') {
-                tx.set(settlementRef, { status: 'settled', tenantId, sessionId: String(sessionId), orderId, duplicate: true, settledAt: new Date().toISOString() }, { merge: true });
-                return;
-              }
               if (reservationForStock && String(reservationForStock.tenantId || reservationForStock.tenant_id || '') !== tenantId) throw new Error('Inventory reservation belongs to another tenant.');
               if (reservationForStock && Array.isArray(reservationForStock.items)) {
                 const movementBase = String(tenantId) + '_' + String(sessionId);
