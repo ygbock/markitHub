@@ -497,31 +497,43 @@ export class OrderLifecycleService {
   } {
     const timestamp = order.date || new Date().toISOString();
 
-    // Determine initial domain statuses based on order status
-    let orderStatus: OrderDomainOrderStatus = 'Confirmed';
-    let paymentStatus: OrderDomainPaymentStatus = 'Paid';
-    let fulfillmentStatus: OrderDomainFulfillmentStatus = 'Allocated';
+    // Determine initial domain statuses from the authoritative payment/status fields.
+    // Storefront checkout uses normalized lowercase values such as pending_payment
+    // and pending; legacy orders may use title-cased values such as Pending Payment.
+    // Never default an unrecognized order to Paid: that would let the lifecycle
+    // payment gate treat an unpaid order as financially settled.
+    const normalizedOrderStatus = String(order.status || '').trim().toLowerCase();
+    const normalizedPaymentStatus = String((order as any).paymentStatus || (order as any).payment_status || '').trim().toLowerCase();
+    const isPaid = ['paid', 'completed', 'settled', 'captured'].includes(normalizedPaymentStatus);
+    const isPaymentPending = ['pending', 'pending_payment', 'pending verification', 'processing', 'requires_payment_method', 'requires_action', 'authorized'].includes(normalizedPaymentStatus)
+      || ['pending payment', 'pending_payment', 'submitted'].includes(normalizedOrderStatus);
+
+    let orderStatus: OrderDomainOrderStatus = isPaid ? 'Confirmed' : 'Submitted';
+    let paymentStatus: OrderDomainPaymentStatus = isPaid ? 'Paid' : 'Pending Verification';
+    let fulfillmentStatus: OrderDomainFulfillmentStatus = isPaid ? 'Allocated' : 'Reserved';
     let shipmentStatus: OrderDomainShipmentStatus = 'Unshipped';
     let returnStatus: OrderDomainReturnStatus = 'None';
 
-    if (order.status === 'Pending Payment') {
+    if (isPaymentPending) {
       orderStatus = 'Submitted';
       paymentStatus = 'Pending Verification';
       fulfillmentStatus = 'Reserved';
       startStageId = 7;
-    } else if (order.status === 'Completed' || order.deliveryStatus === 'Delivered') {
+    }
+
+    if (order.status === 'Completed' || normalizedOrderStatus === 'completed' || order.deliveryStatus === 'Delivered') {
       orderStatus = 'Completed';
       paymentStatus = 'Paid';
       fulfillmentStatus = 'Fulfilled';
       shipmentStatus = 'Delivered';
       startStageId = 27;
-    } else if (order.status === 'Dispatched' || order.deliveryStatus === 'Dispatched') {
+    } else if (order.status === 'Dispatched' || normalizedOrderStatus === 'dispatched' || order.deliveryStatus === 'Dispatched') {
       orderStatus = 'In Progress';
       paymentStatus = 'Paid';
       fulfillmentStatus = 'Fulfilled';
       shipmentStatus = 'Dispatched';
       startStageId = 21;
-    } else if (order.refundRequested || order.status === 'Refund Requested') {
+    } else if (order.refundRequested || order.status === 'Refund Requested' || normalizedOrderStatus === 'refund requested') {
       returnStatus = 'Return Requested';
       startStageId = 30;
     }
