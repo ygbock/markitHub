@@ -2113,6 +2113,72 @@ async function startServer() {
       return res.status(500).json({ success: false, message: err?.message || 'Connection test error' });
     }
   });
+  const releaseMonimeReservationForTerminalPayment = async (tx: any, tenantId: string, reservationId: string, orderId: string, terminalPaymentStatus: 'failed' | 'cancelled' | 'expired') => {
+    if (reservationId) {
+      const reservationRef = db.collection('inventory_reservations').doc(reservationId);
+      const reservationSnap = await tx.get(reservationRef);
+      if (reservationSnap.exists) {
+        const reservation = reservationSnap.data() || {};
+        const reservationTenantId = String(reservation.tenantId || reservation.tenant_id || '');
+        if (reservationTenantId && reservationTenantId !== tenantId) throw new Error('Inventory reservation belongs to another tenant.');
+        if (String(reservation.status || '') === 'active') {
+          const now = new Date().toISOString();
+          for (const item of Array.isArray(reservation.items) ? reservation.items : []) {
+            const productRef = db.collection('tenants').doc(tenantId).collection('products').doc(String(item.productId));
+            const productSnap = await tx.get(productRef);
+            if (!productSnap.exists) continue;
+            const product = productSnap.data() || {};
+            if (item.variantSku) {
+              const variants = Array.isArray(product.variants) ? product.variants.map((v: any) => ({ ...v })) : [];
+              const idx = variants.findIndex((v: any) => String(v.sku || '') === String(item.variantSku));
+              if (idx >= 0) {
+                variants[idx].reserved = Math.max(0, Number(variants[idx].reserved || 0) - Number(item.quantity || 0));
+                tx.set(productRef, { variants, updatedAt: now }, { merge: true });
+              }
+            } else {
+              tx.set(productRef, {
+                reserved: Math.max(0, Number(product.reserved || product.reservedStock || 0) - Number(item.quantity || 0)),
+                updatedAt: now,
+              }, { merge: true });
+            }
+          }
+          tx.set(reservationRef, { status: terminalPaymentStatus === 'expired' ? 'expired' : 'released', releasedAt: now, updatedAt: now }, { merge: true });
+        }
+      }
+    }
+
+    if (orderId) {
+      const orderRef = db.collection('orders').doc(orderId);
+      const orderSnap = await tx.get(orderRef);
+      if (orderSnap.exists) {
+        const order = orderSnap.data() || {};
+        const orderTenantId = String(order.tenantId || order.tenant_id || '');
+        if (orderTenantId && orderTenantId !== tenantId) throw new Error('Order belongs to another tenant.');
+        const current = String(order.paymentStatus || order.payment_status || '').toLowerCase();
+        if (!['paid', 'completed', 'settled'].includes(current)) {
+          const now = new Date().toISOString();
+          const nextStatus = terminalPaymentStatus === 'failed' ? 'payment_failed' : terminalPaymentStatus;
+          tx.set(orderRef, {
+            paymentStatus: terminalPaymentStatus,
+            payment_status: terminalPaymentStatus,
+            status: nextStatus,
+            updatedAt: now,
+            updated_at: now,
+            tenantId,
+          }, { merge: true });
+          tx.set(db.collection('tenants').doc(tenantId).collection('orders').doc(orderId), {
+            paymentStatus: terminalPaymentStatus,
+            payment_status: terminalPaymentStatus,
+            status: nextStatus,
+            updatedAt: now,
+            updated_at: now,
+            tenantId,
+          }, { merge: true });
+        }
+      }
+    }
+  };
+
   // Monime Webhook Receiver Endpoint
   app.post('/api/monime/webhook/:tenantId', express.raw({ type: 'application/json', limit: '256kb' }), async (req: any, res) => {
     try {
@@ -2191,7 +2257,20 @@ async function startServer() {
             const current = String(existing.status || 'pending').toLowerCase() as PaymentState;
             const next = transitionPaymentState(current, 'failed');
             if (next) {
-              await sessionRef.set({ status: next, updated_at: new Date().toISOString(), failure_reason: String(data.reason || data.message || 'Monime payment failed').slice(0, 500) }, { merge: true });
+              await db.runTransaction(async (tx: any) => {
+                const freshSession = await tx.get(sessionRef);
+                if (!freshSession.exists) return;
+                const fresh = freshSession.data() as MonimeServerSession;
+                const freshStatus = String(fresh.status || 'pending').toLowerCase() as PaymentState;
+                const nextFreshStatus = transitionPaymentState(freshStatus, 'failed');
+                if (!nextFreshStatus) return;
+                await releaseMonimeReservationForTerminalPayment(tx, tenantId, String(fresh.reservation_id || ''), String(fresh.order_id || ''), 'failed');
+                tx.set(sessionRef, {
+                  status: nextFreshStatus,
+                  updated_at: new Date().toISOString(),
+                  failure_reason: String(data.reason || data.message || 'Monime payment failed').slice(0, 500),
+                }, { merge: true });
+              });
             }
           }
         }
@@ -2431,9 +2510,23 @@ async function startServer() {
             if (['completed', 'paid'].includes(currentSessionStatus)) {
               return res.status(200).json({ received: true, ignored: true, reason: 'terminal_session_state' });
             }
-            existing.status = eventType.includes('cancelled') ? 'cancelled' : 'expired';
+            const terminalStatus: PaymentState = eventType.includes('cancelled') ? 'cancelled' : 'expired';
+            const nextSessionStatus = transitionPaymentState(currentSessionStatus as PaymentState, eventType.includes('cancelled') ? 'cancelled' : 'expired');
+            if (!nextSessionStatus) {
+              return res.status(200).json({ received: true, ignored: true, reason: 'invalid_payment_state_transition' });
+            }
+            await db.runTransaction(async (tx: any) => {
+              const freshSessionSnap = await tx.get(sessionRef);
+              if (!freshSessionSnap.exists) return;
+              const fresh = freshSessionSnap.data() as MonimeServerSession;
+              const freshStatus = String(fresh.status || 'pending').toLowerCase() as PaymentState;
+              const nextFreshStatus = transitionPaymentState(freshStatus, terminalStatus);
+              if (!nextFreshStatus) return;
+              await releaseMonimeReservationForTerminalPayment(tx, tenantId, String(fresh.reservation_id || ''), String(fresh.order_id || ''), terminalStatus);
+              tx.set(sessionRef, { ...fresh, status: nextFreshStatus, updated_at: new Date().toISOString() }, { merge: true });
+            });
+            existing.status = nextSessionStatus;
             existing.updated_at = new Date().toISOString();
-            await sessionRef.set(existing, { merge: true });
             serverMonimeSessions.set(sessionId, existing);
           }
         }
