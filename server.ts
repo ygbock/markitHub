@@ -2457,19 +2457,19 @@ async function startServer() {
                   if (orderTenant && orderTenant !== tenantId) throw new Error('Order belongs to another tenant.');
                   const currentStatus = String(order.paymentStatus || order.payment_status || '').toLowerCase();
                   if (!['paid', 'completed', 'settled'].includes(currentStatus)) {
-                    addUsageEventToTransaction(db, tx, {
-                      tenantId,
-                      metric: 'ordersMonthly',
-                      quantity: 1,
-                      source: 'monime_payment_settlement',
-                      sourceId: String(sessionId),
-                      occurredAt: new Date().toISOString(),
-                      metadata: { orderId },
-                    });
+                    const paidAt = new Date().toISOString();
                     tx.set(orderRef, {
                       paymentStatus: 'paid',
                       payment_status: 'paid',
-                      paidAt: new Date().toISOString(),
+                      paidAt,
+                      paymentProvider: 'monime',
+                      monimeSessionId: String(sessionId),
+                      tenantId,
+                    }, { merge: true });
+                    tx.set(db.collection('tenants').doc(tenantId).collection('orders').doc(String(orderId)), {
+                      paymentStatus: 'paid',
+                      payment_status: 'paid',
+                      paidAt,
                       paymentProvider: 'monime',
                       monimeSessionId: String(sessionId),
                       tenantId,
