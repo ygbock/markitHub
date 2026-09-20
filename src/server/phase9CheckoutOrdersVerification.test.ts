@@ -152,3 +152,32 @@ test('Phase 9 Invariant 17: storefront cancellation only releases an active rese
   assert.match(source, /if \(reservationStatus === 'active'\)/);
   assert.match(source, /status: 'released'/);
 });
+
+test('Phase 9 Invariant 18: Monime settlement gates on the authoritative order terminal state before reservation finalization', () => {
+  const server = readFileSync(resolve(process.cwd(), 'server.ts'), 'utf8');
+  const settlement = server.slice(server.indexOf("const settlementRef = db.collection('payment_settlements')"));
+  const orderGate = settlement.indexOf("const currentPaymentStatus = String(settlementOrder.paymentStatus || settlementOrder.payment_status || '').toLowerCase()");
+  const reservationFinalize = settlement.indexOf("status: 'finalized'", orderGate);
+  assert.ok(orderGate >= 0);
+  assert.ok(reservationFinalize > orderGate);
+  assert.match(settlement, /terminalOrderStatus = new Set\(\['failed', 'payment_failed', 'cancelled', 'payment_cancelled', 'expired', 'payment_expired'\]\)/);
+  assert.match(settlement, /status: 'rejected_order_terminal'/);
+});
+
+test('Phase 9 Invariant 19: a successful webhook for an already-paid order cannot consume its second reservation', () => {
+  const server = readFileSync(resolve(process.cwd(), 'server.ts'), 'utf8');
+  const settlement = server.slice(server.indexOf("const settlementRef = db.collection('payment_settlements')"));
+  const duplicateGate = settlement.indexOf("if (['paid', 'completed', 'settled'].includes(currentPaymentStatus))");
+  const releaseOnly = settlement.indexOf("releaseMonimeReservationOnly(db, tx, tenantId, reservationId)", duplicateGate);
+  const finalize = settlement.indexOf("status: 'finalized'", duplicateGate);
+  assert.ok(duplicateGate >= 0);
+  assert.ok(releaseOnly > duplicateGate);
+  assert.ok(finalize === -1 || finalize > releaseOnly);
+  assert.match(settlement, /status: 'duplicate_order_terminal'/);
+});
+
+test('Phase 9 Invariant 20: late Monime cancellation/expiry events are durably marked processed', () => {
+  const server = readFileSync(resolve(process.cwd(), 'server.ts'), 'utf8');
+  const cancellationBranch = server.slice(server.indexOf("eventType === 'checkout_session.cancelled'"));
+  assert.match(cancellationBranch, /await eventRef\.set\(\{ status: 'processed'/);
+});
