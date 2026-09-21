@@ -543,7 +543,13 @@ export class OrderLifecycleService {
     // Legacy completion/dispatch fields may imply payment only when no explicit
     // payment state exists. An explicit failed/pending/refunded state is authoritative
     // and must never be overwritten by a stale delivery/status field.
-    if (order.status === 'Completed' || normalizedOrderStatus === 'completed' || order.deliveryStatus === 'Delivered') {
+    // A return request is a post-delivery state and must take precedence over
+    // legacy Completed/Delivered fields so initialization cannot silently erase it.
+    if (order.refundRequested || order.status === 'Refund Requested' || normalizedOrderStatus === 'refund requested'
+      || String(order.lifecycleDomainStatuses?.returnStatus || '') !== 'None') {
+      returnStatus = order.lifecycleDomainStatuses?.returnStatus || 'Return Requested';
+      startStageId = 30;
+    } else if (order.status === 'Completed' || normalizedOrderStatus === 'completed' || order.deliveryStatus === 'Delivered') {
       if (!hasExplicitPaymentStatus || isPaid) {
         orderStatus = 'Completed';
         paymentStatus = 'Paid';
@@ -559,9 +565,6 @@ export class OrderLifecycleService {
         shipmentStatus = 'Dispatched';
         startStageId = 21;
       }
-    } else if (order.refundRequested || order.status === 'Refund Requested' || normalizedOrderStatus === 'refund requested') {
-      returnStatus = 'Return Requested';
-      startStageId = 30;
     }
 
     const domainStatuses: OrderLifecycleDomainStatuses = order.lifecycleDomainStatuses || {
@@ -636,10 +639,10 @@ export class OrderLifecycleService {
     const stageDef = ORDER_LIFECYCLE_STAGES.find(s => s.id === targetStageId);
     if (!stageDef) return order;
 
-    // Fulfillment must never advance beyond inventory reservation while payment
-    // remains unpaid. Stage 10 is the temporary reservation boundary and is
-    // intentionally allowed before payment; physical allocation/WMS work begins
-    // at stage 11 only after authoritative payment settlement.
+    // The persisted lifecycle definition places payment success at stage 9,
+    // therefore inventory reservation at stage 10 also requires authoritative
+    // payment settlement. This keeps the implementation aligned with the
+    // current stage ordering rather than allowing a synthetic unpaid stage 10.
     const currentPaymentStatus = domainStatuses.paymentStatus;
     const currentStageId = Number(
       order.currentLifecycleStageId ||
@@ -776,6 +779,111 @@ export class OrderLifecycleService {
     }
 
     return updatedOrder;
+  }
+
+  /**
+   * Advances the post-delivery return/refund state machine without allowing
+   * rejected/refunded orders to be resurrected or refund states to be skipped.
+   *
+   * Financial movement and inventory restoration remain separate authoritative
+   * operations. Their transaction identifiers are required when those states
+   * are committed so callers can make the underlying side effects idempotent.
+   */
+  static transitionReturnStatus(
+    order: Order,
+    targetStatus: OrderDomainReturnStatus,
+    options?: {
+      actorName?: string;
+      actorRole?: string;
+      notes?: string;
+      restockTransactionId?: string;
+      refundTransactionId?: string;
+      refundAmount?: number;
+    }
+  ): Order {
+    const current = order.lifecycleDomainStatuses || this.initializeOrderLifecycle(order, 27).domainStatuses;
+    const currentReturn = current.returnStatus || 'None';
+    if (targetStatus === currentReturn) return order;
+
+    const allowed: Record<OrderDomainReturnStatus, OrderDomainReturnStatus[]> = {
+      'None': ['Return Requested'],
+      'Return Requested': ['Return Approved', 'Return Rejected'],
+      'Return Approved': ['Reverse Pickup In-Transit'],
+      'Reverse Pickup In-Transit': ['Item Inspected'],
+      'Item Inspected': ['Restocked'],
+      'Restocked': ['Refund Issued'],
+      'Refund Issued': [],
+      'Return Rejected': []
+    };
+
+    if (!allowed[currentReturn].includes(targetStatus)) return order;
+
+    const shipmentStatus = current.shipmentStatus;
+    const paymentStatus = current.paymentStatus;
+    const orderStatus = current.orderStatus;
+
+    // A return can only begin after a paid, completed delivery.
+    if (currentReturn === 'None' && (
+      orderStatus !== 'Completed' ||
+      shipmentStatus !== 'Delivered' ||
+      paymentStatus !== 'Paid'
+    )) return order;
+
+    // No refund may be issued before the physical return has been inspected
+    // and explicitly restocked.
+    if (targetStatus === 'Restocked' && !String(options?.restockTransactionId || '').trim()) return order;
+    if (targetStatus === 'Refund Issued' && !String(options?.refundTransactionId || '').trim()) return order;
+
+    const now = new Date().toISOString();
+    const next: OrderLifecycleDomainStatuses = { ...current, returnStatus: targetStatus, lastUpdated: now };
+    const updated: Order = {
+      ...order,
+      lifecycleDomainStatuses: next,
+      refundRequested: targetStatus !== 'None' && targetStatus !== 'Return Rejected',
+      refundRequestDetails: order.refundRequestDetails
+        ? {
+            ...order.refundRequestDetails,
+            status:
+              targetStatus === 'Return Rejected' ? 'Rejected' :
+              targetStatus === 'Refund Issued' ? 'Refund Issued' :
+              order.refundRequestDetails.status
+          }
+        : order.refundRequestDetails,
+    };
+
+    if (targetStatus === 'Return Requested') {
+      updated.status = 'Refund Requested';
+    } else if (targetStatus === 'Return Rejected') {
+      updated.status = 'Completed';
+      updated.refundRequested = false;
+    } else if (targetStatus === 'Refund Issued') {
+      updated.status = 'Refunded';
+      updated.refundRequested = false;
+      updated.refundAmount = Number(options?.refundAmount ?? order.refundAmount ?? order.grandTotal ?? order.total ?? 0);
+      updated.refundedAt = now;
+      next.paymentStatus = 'Refunded';
+      next.fulfillmentStatus = 'Returned to Stock';
+      next.orderStatus = 'Completed';
+      next.lastUpdated = now;
+      if (updated.refundRequestDetails) {
+        updated.refundRequestDetails = {
+          ...updated.refundRequestDetails,
+          status: 'Refund Issued',
+          reviewedAt: updated.refundRequestDetails.reviewedAt || now
+        };
+      }
+    }
+
+    if (targetStatus === 'Restocked' && updated.refundRequestDetails) {
+      updated.refundRequestDetails = {
+        ...updated.refundRequestDetails,
+        status: updated.refundRequestDetails.status === 'Replacement Dispatched'
+          ? updated.refundRequestDetails.status
+          : 'Approved'
+      };
+    }
+
+    return updated;
   }
 
   /**
