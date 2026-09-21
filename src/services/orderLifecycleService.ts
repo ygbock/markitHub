@@ -672,10 +672,9 @@ export class OrderLifecycleService {
       return order;
     }
 
-    // Fulfillment must never advance beyond inventory reservation while payment
-    // remains unpaid. Stage 10 is the temporary reservation boundary and is
-    // intentionally allowed before payment; physical allocation/WMS work begins
-    // at stage 11 only after authoritative payment settlement.
+    // Fulfillment stages follow the persisted 30-stage definition: payment
+    // succeeds at stage 9, inventory reservation is stage 10, and physical
+    // allocation/WMS work begins at stage 11.
     const requiresPaidOrder = targetStageId >= 11;
     if (requiresPaidOrder && currentPaymentStatus !== 'Paid') {
       return order;
