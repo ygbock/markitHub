@@ -95,7 +95,7 @@ test('M0 Layer 4: ListingBusinessShell provides dedicated management for listing
   assert.ok(listingShellFile.includes('Services Menu'), 'Must manage service menu offerings');
 });
 
-test('M0 Layer 5: Route dispatcher routes /business/:businessId/* to ListingBusinessShell', () => {
+test('M0 Layer 5: Route dispatcher routes /business/:businessId/* to the authoritative Business Owner management shell', () => {
   // Test route parsing
   const dashboardRoute = parseCanonicalRoute('/business/biz-kallon-repair/dashboard');
   assert.equal(dashboardRoute.definition.domain, 'BUSINESS', 'Dashboard route must resolve to BUSINESS domain');
@@ -114,8 +114,8 @@ test('M0 Layer 5: Route dispatcher routes /business/:businessId/* to ListingBusi
   const publicListingRoute = parseCanonicalRoute('/business/kallon-smart-fix');
   assert.equal(publicListingRoute.definition.domain, 'PUBLIC_DISCOVERY', 'Public business profile must be in PUBLIC_DISCOVERY');
 
-  // App.tsx dispatcher mounts ListingBusinessShell
+  // App.tsx dispatcher mounts the authoritative owner management shell.
   assert.ok(appFile.includes("activeDomain === 'BUSINESS'"), 'App.tsx must check activeDomain === BUSINESS');
-  assert.ok(appFile.includes('<ListingBusinessShell'), 'App.tsx must render ListingBusinessShell');
-  assert.ok(appFile.includes('aria-label="Operational Branch Switcher"'), 'App.tsx must render operational branch switcher');
+  assert.ok(appFile.includes('<BusinessOwnerListingManagement'), 'App.tsx must render BusinessOwnerListingManagement');
+  assert.ok(appFile.includes("currentRoute.definition.id === 'business.locations'"), 'App.tsx must map the locations route to owner management');
 });
