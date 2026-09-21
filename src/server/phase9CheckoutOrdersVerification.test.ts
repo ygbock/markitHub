@@ -513,3 +513,18 @@ test('Phase 9 Invariant 47: warehouse dispatch does not prematurely mark fulfill
   );
   assert.match(finalInventory, /fulfillmentStatus: 'Fulfilled'/);
 });
+
+test('Phase 9 Invariant 48: stage 26 requires an authoritative inventory ledger finalization transaction', () => {
+  const lifecycle = readFileSync(resolve(process.cwd(), 'src/services/orderLifecycleService.ts'), 'utf8');
+  const stage26Prerequisite = lifecycle.slice(
+    lifecycle.indexOf("26: () =>"),
+    lifecycle.indexOf("27: () =>")
+  );
+  assert.match(stage26Prerequisite, /shipmentStatus === 'Delivered'/);
+  assert.match(stage26Prerequisite, /inventoryFinalizationTransactionId/);
+
+  const server = readFileSync(resolve(process.cwd(), 'server.ts'), 'utf8');
+  const settlement = server.slice(server.indexOf('const inventoryFinalizationTransactionId'));
+  assert.match(settlement, /INV-SETTLEMENT-/);
+  assert.match(settlement, /inventoryFinalizedAt: paidAt/);
+});
