@@ -428,6 +428,21 @@ test('Phase 9 Invariant 41: refund issuance runtime requires restock and refund 
   assert.equal(refunded.refundAmount, 100);
 });
 
+test('Phase 9 Invariant 43: transitionToStage cannot bootstrap directly into a later lifecycle stage', () => {
+  const order: any = {
+    id: 'ORD-LIFECYCLE-BOOTSTRAP-1',
+    date: new Date().toISOString(),
+    status: 'Paid',
+    total: 100,
+    paymentMethod: 'Digital Wallet',
+    channel: 'Online Storefront',
+    paymentStatus: 'paid',
+  };
+  const result = OrderLifecycleService.transitionToStage(order, 12);
+  assert.equal(result, order);
+  assert.equal(result.currentLifecycleStageId, undefined);
+});
+
 test('Phase 9 Invariant 42: terminal return states cannot be advanced at runtime', () => {
   const order: any = {
     id: 'ORD-RETURN-4',
