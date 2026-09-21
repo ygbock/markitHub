@@ -769,7 +769,9 @@ async function startServer() {
           if (!priorBusinessId) throw Object.assign(new Error('Business registration idempotency record is invalid.'), { statusCode: 500 });
           const priorBusiness = await transaction.get(db.collection('businesses').doc(priorBusinessId));
           if (!priorBusiness.exists) throw Object.assign(new Error('Business registration record references a missing business.'), { statusCode: 409 });
-          responsePayload = { id: priorBusiness.id, ...priorBusiness.data() };
+          const priorBusinessData = priorBusiness.data() || {};
+          if (String(priorBusinessData.ownerUid || '') !== String(req.user.uid || '')) throw Object.assign(new Error('Business registration record belongs to another owner.'), { statusCode: 403 });
+          responsePayload = { id: priorBusiness.id, ...priorBusinessData };
           replayed = true;
           return;
         }
@@ -785,6 +787,10 @@ async function startServer() {
         transaction.create(businessRef, records.business);
         transaction.create(locationRef, records.location);
         transaction.create(relationshipRef, records.relationship);
+        transaction.set(db.collection('users').doc(String(req.user.uid)), {
+          accountRole: 'BUSINESS_OWNER',
+          updatedAt: records.business.updatedAt,
+        }, { merge: true });
         transaction.create(requestRef, {
           businessId: records.business.id,
           locationId: records.location.id,
