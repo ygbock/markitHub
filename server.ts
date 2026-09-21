@@ -763,6 +763,8 @@ async function startServer() {
       await db.runTransaction(async (transaction) => {
         const priorRequest = await transaction.get(requestRef);
         if (priorRequest.exists) {
+          const priorOwnerUid = String(priorRequest.data()?.ownerUid || '').trim();
+          if (priorOwnerUid && priorOwnerUid !== String(req.user.uid || '')) throw Object.assign(new Error('Idempotency-Key belongs to another business owner.'), { statusCode: 409 });
           const priorBusinessId = String(priorRequest.data()?.businessId || '').trim();
           if (!priorBusinessId) throw Object.assign(new Error('Business registration idempotency record is invalid.'), { statusCode: 500 });
           const priorBusiness = await transaction.get(db.collection('businesses').doc(priorBusinessId));
@@ -787,6 +789,8 @@ async function startServer() {
           businessId: records.business.id,
           locationId: records.location.id,
           idempotencyKeyHash: keyHash,
+          ownerUid: req.user.uid,
+          businessMode: records.business.businessMode,
           createdAt: records.business.createdAt,
         });
 
@@ -821,6 +825,51 @@ async function startServer() {
     } catch (err: any) {
       const status = Number(err?.statusCode) || 500;
       return res.status(status).json({ success: false, error: err?.message || 'Business registration failed.' });
+    }
+  });
+
+  // =========================================================================
+  // CANONICAL BUSINESS OWNER WORKSPACE
+  // =========================================================================
+  app.get('/api/business/owned', requireServerAuth, async (req: any, res: any) => {
+    const db = getAdminDb();
+    if (!db) return res.status(503).json({ error: 'Business service is not configured.' });
+    try {
+      const snapshot = await db.collection('businesses').where('ownerUid', '==', String(req.user.uid)).get();
+      const businesses = snapshot.docs.map((doc: any) => {
+        const data = doc.data() || {};
+        const embeddedLocations = Array.isArray(data.locations) ? data.locations : [];
+        return {
+          id: doc.id,
+          legalName: data.legalName || '',
+          tradingName: data.tradingName || data.legalName || '',
+          status: data.status || 'draft',
+          verificationStatus: data.verificationStatus || 'pending',
+          businessMode: data.businessMode || 'listing_only',
+          onboardingStatus: data.onboardingStatus || 'in_progress',
+          listing: data.listing ? {
+            id: data.listing.id,
+            slug: data.listing.slug,
+            isPublished: data.listing.isPublished === true,
+            headline: data.listing.headline || '',
+          } : null,
+          locations: embeddedLocations.map((location: any) => ({
+            id: location.id,
+            name: location.name,
+            city: location.city,
+            country: location.country,
+            hasOperationalTenant: location.hasOperationalTenant === true,
+            tenantId: location.tenantId || null,
+            isActive: location.isActive !== false,
+          })),
+          tenantIds: Array.isArray(data.tenantIds) ? data.tenantIds : [],
+          createdAt: data.createdAt || null,
+          updatedAt: data.updatedAt || null,
+        };
+      });
+      return res.json({ success: true, businesses });
+    } catch (err: any) {
+      return res.status(500).json({ error: err?.message || 'Unable to load owned businesses.' });
     }
   });
 
