@@ -57,6 +57,7 @@ import { validateTenantProvisioningRequest, hashProvisioningIdempotencyKey, buil
 import { validateBusinessRegistrationRequest, hashBusinessRegistrationKey, buildBusinessRegistrationRecords } from './src/server/businessRegistration';
 import { evaluateBusinessOnboardingReadiness } from './src/server/businessOnboarding';
 import { registerBusinessProfileRoutes } from './src/server/businessProfileRoutes';
+import { registerBusinessReviewRoutes } from './src/server/businessReviewRoutes';
 import { registerTenantCatalogRoutes } from './src/server/tenantCatalog';
 import { registerTenantInventoryRoutes } from './src/server/tenantInventory';
 import { registerTenantPosRoutes } from './src/server/tenantPos';
@@ -882,6 +883,7 @@ async function startServer() {
   });
 
   registerBusinessProfileRoutes({ app, requireServerAuth, getAdminDb });
+registerBusinessReviewRoutes({ app, requireServerAuth, requirePlatformAdmin: assertPlatformAdmin, getAdminDb });
 
   // =========================================================================
   // CANONICAL BUSINESS ONBOARDING READINESS & REVIEW SUBMISSION
