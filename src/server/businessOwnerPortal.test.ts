@@ -45,6 +45,8 @@ test('Business Owner 4: registration idempotency keys cannot be replayed across 
   assert.match(registration, /priorOwnerUid/);
   assert.match(registration, /Idempotency-Key belongs to another business owner/);
   assert.match(registration, /ownerUid: req\\.user\\.uid/);
+  assert.match(registration, /accountRole: 'BUSINESS_OWNER'/);
+  assert.match(registration, /Business registration record belongs to another owner/);
 });
 
 test('Business Owner 5: owner signup and portal are mounted into the canonical app', () => {
