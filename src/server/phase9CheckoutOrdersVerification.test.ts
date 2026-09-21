@@ -485,3 +485,15 @@ test('Phase 9 Invariant 42: terminal return states cannot be advanced at runtime
   const result = OrderLifecycleService.transitionReturnStatus(order, 'Return Requested');
   assert.equal(result, order);
 });
+
+test('Phase 9 Invariant 46: successful Monime inventory settlement synchronizes lifecycle reservation state without advancing into WMS allocation', () => {
+  const server = readFileSync(resolve(process.cwd(), 'server.ts'), 'utf8');
+  const settlement = server.slice(server.indexOf('const lifecyclePaymentPatch = existingLifecycle'));
+  assert.match(settlement, /fulfillmentStatus: \['Unfulfilled', 'Reserved'\]\.includes\(String\(existingLifecycle\.fulfillmentStatus \|\| ''\)\)/);
+  assert.match(settlement, /const withReservationStage = next\.map/);
+  assert.match(settlement, /stage\.stageId === 10/);
+  assert.match(settlement, /status: 'completed'/);
+  assert.match(settlement, /existingCurrentStage < 10/);
+  assert.doesNotMatch(settlement, /currentLifecycleStageId: 11/);
+  assert.doesNotMatch(settlement, /currentLifecycleStageId: 12/);
+});
