@@ -177,7 +177,7 @@ test('Business Owner 14: lifecycle is closed-loop from owner signup through revi
 
   // Owner signup -> review-gated business.
   assert.match(registration, /ownerUid/);
-  assert.match(registration, /listing[\\s\\S]*isPublished.*false/);
+  assert.match(registration, /listing[\s\S]*isPublished.*false/);
   assert.match(registration, /businessMode/);
 
   // Readiness -> owner-only submission.
@@ -187,7 +187,7 @@ test('Business Owner 14: lifecycle is closed-loop from owner signup through revi
   assert.match(server, /BUSINESS_SUBMITTED_FOR_REVIEW/);
 
   // Platform queue -> approval -> publication.
-  assert.match(review, /queueStatus = requestedStatus \\|\\| 'submitted_for_review'/);
+  assert.match(review, /queueStatus = requestedStatus \|\| 'submitted_for_review'/);
   assert.match(review, /BUSINESS_REVIEW_APPROVED/);
   assert.match(review, /verificationStatus: 'verified'/);
   assert.match(review, /onboardingStatus: 'approved'/);
@@ -199,26 +199,26 @@ test('Business Owner 14: lifecycle is closed-loop from owner signup through revi
   assert.match(review, /verificationStatus: 'rejected'/);
   assert.match(server, /BUSINESS_RESUBMITTED_FOR_REVIEW/);
   assert.match(server, /wasRejected/);
-  assert.match(server, /verificationStatus: wasRejected \\? 'pending'/);
-  assert.match(server, /listing: \\{ \\.\\.\\.\\(business\\.listing \\|\\| \\{\\}\\), isPublished: false \\}/);
+  assert.match(server, /verificationStatus: wasRejected \? 'pending'/);
+  assert.match(server, /listing: \{ \.\.\.\(business\.listing \|\| \{\}\), isPublished: false \}/);
 
   // Approval is required before operational commerce provisioning.
   const provisioningStart = server.indexOf("app.post('/api/business/provision-tenant'");
   const provisioningEnd = server.indexOf("// TENANT AUDIT & SECURITY TELEMETRY", provisioningStart);
   const provisioning = server.slice(provisioningStart, provisioningEnd);
   assert.ok(provisioningStart >= 0 && provisioningEnd > provisioningStart);
-  assert.match(provisioning, /business\\.businessMode.*listing_and_store/s);
-  assert.match(provisioning, /business\\.status.*active/s);
-  assert.match(provisioning, /business\\.verificationStatus.*verified/s);
-  assert.match(provisioning, /business\\.onboardingStatus.*approved/s);
-  assert.match(provisioning, /business\\.listing\\?\\.isPublished !== true/);
-  assert.match(provisioning, /location\\.tenantId/);
-  assert.match(provisioning, /plan\\.status !== 'active'/);
+  assert.match(provisioning, /business\.businessMode.*listing_and_store/s);
+  assert.match(provisioning, /business\.status.*active/s);
+  assert.match(provisioning, /business\.verificationStatus.*verified/s);
+  assert.match(provisioning, /business\.onboardingStatus.*approved/s);
+  assert.match(provisioning, /business\.listing\?\.isPublished !== true/);
+  assert.match(provisioning, /location\.tenantId/);
+  assert.match(provisioning, /plan\.status !== 'active'/);
   assert.match(provisioning, /TENANT_PROVISIONED/);
   assert.match(provisioning, /platform_provisioning_requests/);
   assert.match(provisioning, /replayed/);
 
   // The owner portal exposes review actions without granting client-side publication.
   assert.match(portal, /Submit for platform review/);
-  assert.doesNotMatch(portal, /isPublished\\s*:\\s*true/);
+  assert.doesNotMatch(portal, /isPublished\s*:\s*true/);
 });
