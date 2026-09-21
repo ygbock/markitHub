@@ -70,6 +70,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           photoURL: fbUser.photoURL || data.photoURL || '',
           emailVerified: fbUser.emailVerified || !!data.emailVerified,
           status: data.status,
+          accountRole: data.accountRole || 'CUSTOMER',
           createdAt: data.createdAt || new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         };
@@ -83,6 +84,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           photoURL: fbUser.photoURL || '',
           emailVerified: fbUser.emailVerified,
           status: 'active',
+          accountRole: 'CUSTOMER',
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         };
