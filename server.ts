@@ -942,11 +942,15 @@ registerBusinessReviewRoutes({ app, requireServerAuth, requirePlatformAdmin, get
           throw Object.assign(new Error('Business is already published.'), { statusCode: 409 });
         }
 
-        const now = new Date().toISOString();
-        const patch = {
-          onboardingStatus: 'submitted_for_review',
-          updatedAt: now,
-        };
+        const wasRejected = business.onboardingStatus === 'rejected' || business.verificationStatus === 'rejected';
+      const now = new Date().toISOString();
+      const patch = {
+        onboardingStatus: 'submitted_for_review',
+        verificationStatus: wasRejected ? 'pending' : (business.verificationStatus || 'pending'),
+        status: wasRejected ? 'pending_verification' : (business.status || 'pending_verification'),
+        listing: { ...(business.listing || {}), isPublished: false },
+        updatedAt: now,
+      };
         transaction.set(businessRef, patch, { merge: true });
 
         auditRecord = createAuthoritativeAuditRecord({
@@ -954,7 +958,7 @@ registerBusinessReviewRoutes({ app, requireServerAuth, requirePlatformAdmin, get
           actorUid: req.user.uid,
           actorEmail: req.user.email,
           actorRole: 'Business Owner',
-          action: 'BUSINESS_SUBMITTED_FOR_REVIEW',
+          action: wasRejected ? 'BUSINESS_RESUBMITTED_FOR_REVIEW' : 'BUSINESS_SUBMITTED_FOR_REVIEW',
           module: 'Business Onboarding',
           targetType: 'business',
           targetId: business.id,
@@ -971,7 +975,9 @@ registerBusinessReviewRoutes({ app, requireServerAuth, requirePlatformAdmin, get
             status: business.status || 'pending_verification',
             listingPublished: false,
           },
-          reason: 'Business owner submitted a complete business profile for platform review.',
+          reason: wasRejected
+            ? 'Business owner resubmitted a previously rejected business after updating onboarding data.'
+            : 'Business owner submitted a complete business profile for platform review.',
           result: 'success',
         });
         transaction.create(db.collection('audit_logs').doc(auditRecord.id), auditRecord);
