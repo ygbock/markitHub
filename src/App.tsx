@@ -86,7 +86,9 @@ export default function App() {
 
   // Operator states
   const [activeStaff, setActiveStaff] = useState<StaffMember>(INITIAL_STAFF[0]); // Elena (Admin)
-  const [activeCustomer, setActiveCustomer] = useState<Customer | null>(INITIAL_CUSTOMERS[0]); // Sarah Connor
+  // Do not pre-authenticate a demo customer. Customer routes are authorized by the
+  // authoritative MikitHub identity context after sign-in.
+  const [activeCustomer, setActiveCustomer] = useState<Customer | null>(null);
   const [storefrontCart, setStorefrontCart] = useState<import('./components/storefront/StorefrontCartPage').StorefrontCartLine[]>([]);
 
   // MikitHub Canonical Router
