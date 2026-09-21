@@ -350,7 +350,7 @@ test('Phase 9 Invariant 38: legacy refund-request initialization takes precedenc
   assert.ok(completedBranch > returnBranch);
   assert.match(lifecycle.slice(returnBranch, completedBranch), /startStageId = 30/);
 });
-\n
+
 
 test('Phase 9 Invariant 39: return transition runtime rejects an undelivered order', () => {
   const order: any = {
@@ -448,4 +448,3 @@ test('Phase 9 Invariant 42: terminal return states cannot be advanced at runtime
   const result = OrderLifecycleService.transitionReturnStatus(order, 'Return Requested');
   assert.equal(result, order);
 });
-\n
