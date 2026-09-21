@@ -90,7 +90,11 @@ export function registerBusinessProfileRoutes(params: {
         if (!tradingName) throw ownerError('Trading name cannot be empty.', 400);
         patch.tradingName = tradingName;
       }
-      if (body.email !== undefined) patch.email = cleanString(body.email, 320);
+      if (body.email !== undefined) {
+        const email = cleanString(body.email, 320).toLowerCase();
+        if (email && !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)) throw ownerError('Business email is invalid.', 400);
+        patch.email = email;
+      }
       if (body.phone !== undefined) patch.phone = cleanString(body.phone, 80);
 
       if (body.listing !== undefined) {
@@ -271,11 +275,20 @@ export function registerBusinessProfileRoutes(params: {
       if (!name || !description || !Number.isFinite(price) || price < 0 || !Number.isFinite(durationMinutes) || durationMinutes < 1) {
         throw ownerError('Service name, description, valid non-negative price, and duration are required.', 400);
       }
-      const service = { id: 'srv_' + cryptoRandom(), name, description, price, durationMinutes };
+      const service = { id: 'srv_' + cryptoRandom(), businessId, name, description, price, durationMinutes };
       const services = [...(Array.isArray(business.services) ? business.services : []), service];
       const now = new Date().toISOString();
-      await ref.set({ services, updatedAt: now }, { merge: true });
-      return res.status(201).json({ success: true, service, services });
+      const audit = createAuthoritativeAuditRecord({
+        tenantId: 'platform', actorUid: req.user.uid, actorEmail: req.user.email, actorRole: 'Business Owner',
+        action: 'BUSINESS_SERVICE_CREATED', module: 'Business Profile', targetType: 'business_service',
+        targetId: service.id, targetName: name, newState: service,
+        reason: 'Business owner added an authoritative service offering.', result: 'success',
+      });
+      await db.runTransaction(async (tx: any) => {
+        tx.set(ref, { services, updatedAt: now }, { merge: true });
+        tx.create(db.collection('audit_logs').doc(audit.id), audit);
+      });
+      return res.status(201).json({ success: true, service, services, audit });
     } catch (err: any) {
       return res.status(Number(err?.statusCode) || 500).json({ success: false, error: err?.message || 'Unable to create service.' });
     }
@@ -290,9 +303,19 @@ export function registerBusinessProfileRoutes(params: {
       const { ref, business } = await loadOwnedBusiness(db, businessId, req.user.uid);
       const services = Array.isArray(business.services) ? business.services : [];
       if (!services.some((x: any) => String(x?.id || '') === serviceId)) throw ownerError('Service not found.', 404);
+      const target = services.find((x: any) => String(x?.id || '') === serviceId);
       const next = services.filter((x: any) => String(x?.id || '') !== serviceId);
-      await ref.set({ services: next, updatedAt: new Date().toISOString() }, { merge: true });
-      return res.json({ success: true, services: next });
+      const audit = createAuthoritativeAuditRecord({
+        tenantId: 'platform', actorUid: req.user.uid, actorEmail: req.user.email, actorRole: 'Business Owner',
+        action: 'BUSINESS_SERVICE_DELETED', module: 'Business Profile', targetType: 'business_service',
+        targetId: serviceId, targetName: target?.name || serviceId, previousState: target,
+        reason: 'Business owner removed an authoritative service offering.', result: 'success',
+      });
+      await db.runTransaction(async (tx: any) => {
+        tx.set(ref, { services: next, updatedAt: new Date().toISOString() }, { merge: true });
+        tx.create(db.collection('audit_logs').doc(audit.id), audit);
+      });
+      return res.json({ success: true, services: next, audit });
     } catch (err: any) {
       return res.status(Number(err?.statusCode) || 500).json({ success: false, error: err?.message || 'Unable to delete service.' });
     }
