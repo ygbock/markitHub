@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { OrderLifecycleService } from '../services/orderLifecycleService';
 
 test('Phase 9 Invariant 1: checkout resolves tenant from storefront slug and never trusts a client tenantId', () => {
   const source = readFileSync(resolve(process.cwd(), 'src/server/storefrontCheckout.ts'), 'utf8');
@@ -348,5 +349,103 @@ test('Phase 9 Invariant 38: legacy refund-request initialization takes precedenc
   assert.ok(returnBranch >= 0);
   assert.ok(completedBranch > returnBranch);
   assert.match(lifecycle.slice(returnBranch, completedBranch), /startStageId = 30/);
+});
+\n
+
+test('Phase 9 Invariant 39: return transition runtime rejects an undelivered order', () => {
+  const order: any = {
+    id: 'ORD-RETURN-1',
+    date: new Date().toISOString(),
+    status: 'Completed',
+    total: 100,
+    paymentMethod: 'Digital Wallet',
+    channel: 'Online Storefront',
+    lifecycleDomainStatuses: {
+      orderStatus: 'Completed',
+      paymentStatus: 'Paid',
+      fulfillmentStatus: 'Fulfilled',
+      shipmentStatus: 'In Transit',
+      returnStatus: 'None',
+      lastUpdated: new Date().toISOString(),
+    },
+  };
+  const result = OrderLifecycleService.transitionReturnStatus(order, 'Return Requested');
+  assert.equal(result, order);
+});
+
+test('Phase 9 Invariant 40: return transition runtime enforces the ordered reverse-logistics state machine', () => {
+  const order: any = {
+    id: 'ORD-RETURN-2',
+    date: new Date().toISOString(),
+    status: 'Completed',
+    total: 100,
+    paymentMethod: 'Digital Wallet',
+    channel: 'Online Storefront',
+    lifecycleDomainStatuses: {
+      orderStatus: 'Completed',
+      paymentStatus: 'Paid',
+      fulfillmentStatus: 'Fulfilled',
+      shipmentStatus: 'Delivered',
+      returnStatus: 'None',
+      lastUpdated: new Date().toISOString(),
+    },
+  };
+  const requested = OrderLifecycleService.transitionReturnStatus(order, 'Return Requested');
+  assert.equal(requested.lifecycleDomainStatuses?.returnStatus, 'Return Requested');
+  const skipped = OrderLifecycleService.transitionReturnStatus(requested, 'Item Inspected');
+  assert.equal(skipped, requested);
+  const approved = OrderLifecycleService.transitionReturnStatus(requested, 'Return Approved');
+  assert.equal(approved.lifecycleDomainStatuses?.returnStatus, 'Return Approved');
+});
+
+test('Phase 9 Invariant 41: refund issuance runtime requires restock and refund transaction identifiers', () => {
+  const order: any = {
+    id: 'ORD-RETURN-3',
+    date: new Date().toISOString(),
+    status: 'Completed',
+    total: 100,
+    grandTotal: 100,
+    paymentMethod: 'Digital Wallet',
+    channel: 'Online Storefront',
+    lifecycleDomainStatuses: {
+      orderStatus: 'Completed',
+      paymentStatus: 'Paid',
+      fulfillmentStatus: 'Fulfilled',
+      shipmentStatus: 'Delivered',
+      returnStatus: 'Restocked',
+      lastUpdated: new Date().toISOString(),
+    },
+  };
+  const withoutRefundId = OrderLifecycleService.transitionReturnStatus(order, 'Refund Issued', { restockTransactionId: 'RESTOCK-1' });
+  assert.equal(withoutRefundId, order);
+  const refunded = OrderLifecycleService.transitionReturnStatus(order, 'Refund Issued', {
+    restockTransactionId: 'RESTOCK-1',
+    refundTransactionId: 'REFUND-1',
+  });
+  assert.equal(refunded.status, 'Refunded');
+  assert.equal(refunded.lifecycleDomainStatuses?.paymentStatus, 'Refunded');
+  assert.equal(refunded.lifecycleDomainStatuses?.fulfillmentStatus, 'Returned to Stock');
+  assert.equal(refunded.refundAmount, 100);
+});
+
+test('Phase 9 Invariant 42: terminal return states cannot be advanced at runtime', () => {
+  const order: any = {
+    id: 'ORD-RETURN-4',
+    date: new Date().toISOString(),
+    status: 'Refunded',
+    total: 100,
+    paymentMethod: 'Digital Wallet',
+    channel: 'Online Storefront',
+    lifecycleDomainStatuses: {
+      orderStatus: 'Completed',
+      paymentStatus: 'Refunded',
+      fulfillmentStatus: 'Returned to Stock',
+      shipmentStatus: 'Delivered',
+      returnStatus: 'Refund Issued',
+      lastUpdated: new Date().toISOString(),
+    },
+  };
+  const result = OrderLifecycleService.transitionReturnStatus(order, 'Return Requested');
+  assert.equal(result, order);
 });
 \n
