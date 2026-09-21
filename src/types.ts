@@ -109,6 +109,7 @@ export interface User {
   photoURL?: string;
   emailVerified: boolean;
   status: 'active' | 'suspended';
+  accountRole?: 'CUSTOMER' | 'BUSINESS_OWNER';
   createdAt?: string;
   updatedAt?: string;
 }
