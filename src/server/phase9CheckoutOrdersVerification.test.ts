@@ -301,3 +301,52 @@ test('Phase 9 Invariant 32: picking exception is optional on the happy path but 
   assert.match(lifecycle, /15: \[16\]/);
   assert.match(lifecycle, /16: \(\) => domainStatuses\.fulfillmentStatus === 'Pick Exception' \|\| domainStatuses\.fulfillmentStatus === 'Picking'/);
 });
+
+test('Phase 9 Invariant 34: return lifecycle cannot start before a paid completed delivery and cannot skip reverse-logistics states', () => {
+  const lifecycle = readFileSync(resolve(process.cwd(), 'src/services/orderLifecycleService.ts'), 'utf8');
+  assert.match(lifecycle, /static transitionReturnStatus\(/);
+  assert.match(lifecycle, /orderStatus !== 'Completed'/);
+  assert.match(lifecycle, /shipmentStatus !== 'Delivered'/);
+  assert.match(lifecycle, /paymentStatus !== 'Paid'/);
+  assert.match(lifecycle, /'Return Requested': \['Return Approved', 'Return Rejected'\]/);
+  assert.match(lifecycle, /'Return Approved': \['Reverse Pickup In-Transit'\]/);
+  assert.match(lifecycle, /'Reverse Pickup In-Transit': \['Item Inspected'\]/);
+  assert.match(lifecycle, /'Item Inspected': \['Restocked'\]/);
+  assert.match(lifecycle, /'Restocked': \['Refund Issued'\]/);
+});
+
+test('Phase 9 Invariant 35: restocking and refund issuance require idempotency transaction identifiers', () => {
+  const lifecycle = readFileSync(resolve(process.cwd(), 'src/services/orderLifecycleService.ts'), 'utf8');
+  assert.match(lifecycle, /restockTransactionId\?: string/);
+  assert.match(lifecycle, /refundTransactionId\?: string/);
+  assert.match(lifecycle, /targetStatus === 'Restocked'.*restockTransactionId/s);
+  assert.match(lifecycle, /targetStatus === 'Refund Issued'.*refundTransactionId/s);
+});
+
+test('Phase 9 Invariant 36: refund issuance atomically reconciles payment, fulfillment, legacy order state, and refund timestamp fields', () => {
+  const lifecycle = readFileSync(resolve(process.cwd(), 'src/services/orderLifecycleService.ts'), 'utf8');
+  const refund = lifecycle.slice(lifecycle.indexOf("targetStatus === 'Refund Issued'"));
+  assert.match(refund, /updated\.status = 'Refunded'/);
+  assert.match(refund, /next\.paymentStatus = 'Refunded'/);
+  assert.match(refund, /next\.fulfillmentStatus = 'Returned to Stock'/);
+  assert.match(refund, /updated\.refundedAt = now/);
+  assert.match(refund, /updated\.refundAmount = Number\(/);
+});
+
+test('Phase 9 Invariant 37: terminal return states cannot be advanced or resurrected', () => {
+  const lifecycle = readFileSync(resolve(process.cwd(), 'src/services/orderLifecycleService.ts'), 'utf8');
+  assert.match(lifecycle, /'Refund Issued': \[\]/);
+  assert.match(lifecycle, /'Return Rejected': \[\]/);
+  assert.match(lifecycle, /if \(targetStatus === currentReturn\) return order/);
+  assert.match(lifecycle, /if \(!allowed\[currentReturn\]\.includes\(targetStatus\)\) return order/);
+});
+
+test('Phase 9 Invariant 38: legacy refund-request initialization takes precedence over delivered/completed legacy fields', () => {
+  const lifecycle = readFileSync(resolve(process.cwd(), 'src/services/orderLifecycleService.ts'), 'utf8');
+  const returnBranch = lifecycle.indexOf('A return request is a post-delivery state');
+  const completedBranch = lifecycle.indexOf("order.status === 'Completed'", returnBranch);
+  assert.ok(returnBranch >= 0);
+  assert.ok(completedBranch > returnBranch);
+  assert.match(lifecycle.slice(returnBranch, completedBranch), /startStageId = 30/);
+});
+\n
