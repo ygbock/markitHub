@@ -361,7 +361,7 @@ export const ORDER_LIFECYCLE_STAGES: LifecycleStageDefinition[] = [
     systemDomain: 'Warehouse WMS',
     description: 'Package physically transferred from loading bay to courier vehicle; bilateral electronic signature confirms dock handover.',
     recommendedRole: 'Dock Supervisor & Courier Driver',
-    domainStatusImpact: { fulfillmentStatus: 'Fulfilled', shipmentStatus: 'Dispatched' },
+    domainStatusImpact: { shipmentStatus: 'Dispatched' },
     requiresProofOrAction: true,
     keyArtifacts: ['Warehouse Dock Handover Signature', 'Driver Custody Receipt', 'Dispatch Timestamp']
   },
