@@ -1014,42 +1014,89 @@ registerBusinessReviewRoutes({ app, requireServerAuth, requirePlatformAdmin, get
       await db.runTransaction(async (transaction) => {
         const priorRequest = await transaction.get(requestRef);
         const businessSnap = await transaction.get(businessRef);
-        const locationSnap = await transaction.get(locationRef);
-        const planSnap = await transaction.get(planRef);
+
+        if (!businessSnap.exists) {
+          throw Object.assign(new Error('Business not found.'), { statusCode: 404 });
+        }
+
+        const business = { id: businessSnap.id, ...businessSnap.data() } as any;
+
+        // Every provisioning attempt, including idempotent replays, must be
+        // authorized against the authoritative owner before any tenant data is
+        // returned.
+        if (String(business.ownerUid || '') !== String(req.user?.uid || '')) {
+          throw Object.assign(new Error('Only the authoritative business owner may provision a tenant.'), { statusCode: 403 });
+        }
 
         if (priorRequest.exists) {
-          const priorTenantId = String(priorRequest.data()?.tenantId || '').trim();
-          if (!priorTenantId) throw Object.assign(new Error('Provisioning idempotency record is invalid.'), { statusCode: 500 });
+          const prior = priorRequest.data() || {};
+          if (
+            String(prior.businessId || '') !== request.businessId ||
+            String(prior.locationId || '') !== request.locationId
+          ) {
+            throw Object.assign(new Error('Idempotency-Key is already bound to a different provisioning request.'), { statusCode: 409 });
+          }
+
+          const priorTenantId = String(prior.tenantId || '').trim();
+          if (!priorTenantId) {
+            throw Object.assign(new Error('Provisioning idempotency record is invalid.'), { statusCode: 500 });
+          }
+
           const tenantSnap = await transaction.get(db.collection('tenants').doc(priorTenantId));
-          if (!tenantSnap.exists) throw Object.assign(new Error('Provisioning idempotency record references a missing tenant.'), { statusCode: 409 });
+          if (!tenantSnap.exists) {
+            throw Object.assign(new Error('Provisioning idempotency record references a missing tenant.'), { statusCode: 409 });
+          }
+
           responsePayload = { id: tenantSnap.id, ...tenantSnap.data() };
           replayed = true;
           return;
         }
 
-        if (!businessSnap.exists) throw Object.assign(new Error('Business not found.'), { statusCode: 404 });
-        const business = { id: businessSnap.id, ...businessSnap.data() } as any;
-        if (String(business.ownerUid || '') !== String(req.user?.uid || '')) {
-          throw Object.assign(new Error('Only the authoritative business owner may provision a tenant.'), { statusCode: 403 });
+        // Tenant provisioning is a post-approval operational action. Listing
+        // creation and profile readiness do not grant tenant access.
+        if (String(business.businessMode || 'listing_only') !== 'listing_and_store') {
+          throw Object.assign(new Error('Only approved listing_and_store businesses may provision an operational tenant.'), { statusCode: 409 });
         }
-        if (!['active', 'pending_verification', 'draft'].includes(String(business.status || ''))) {
-          throw Object.assign(new Error('Business is not eligible for tenant provisioning.'), { statusCode: 409 });
+        if (
+          String(business.status || '') !== 'active' ||
+          String(business.verificationStatus || '') !== 'verified' ||
+          String(business.onboardingStatus || '') !== 'approved' ||
+          business.listing?.isPublished !== true
+        ) {
+          throw Object.assign(new Error('Business must be approved and published before tenant provisioning.'), { statusCode: 409 });
         }
+
+        const locationSnap = await transaction.get(locationRef);
+        const planSnap = await transaction.get(planRef);
 
         const embeddedLocation = Array.isArray(business.locations)
           ? business.locations.find((candidate: any) => String(candidate?.id || '') === request.locationId)
           : null;
-        if (!locationSnap.exists && !embeddedLocation) throw Object.assign(new Error('Business location not found.'), { statusCode: 404 });
-        const location = (locationSnap.exists ? { id: locationSnap.id, ...locationSnap.data() } : { ...embeddedLocation, id: request.locationId }) as any;
+        if (!locationSnap.exists && !embeddedLocation) {
+          throw Object.assign(new Error('Business location not found.'), { statusCode: 404 });
+        }
+
+        const location = (locationSnap.exists
+          ? { id: locationSnap.id, ...locationSnap.data() }
+          : { ...embeddedLocation, id: request.locationId }) as any;
+
         if (String(location.businessId || business.id) !== business.id) {
           throw Object.assign(new Error('Business location does not belong to the requested business.'), { statusCode: 403 });
         }
-        if (location.isActive === false) throw Object.assign(new Error('Inactive business locations cannot be provisioned as tenant branches.'), { statusCode: 409 });
-        if (location.tenantId) throw Object.assign(new Error('This business location already has an operational tenant.'), { statusCode: 409 });
+        if (location.isActive === false) {
+          throw Object.assign(new Error('Inactive business locations cannot be provisioned as tenant branches.'), { statusCode: 409 });
+        }
+        if (location.tenantId) {
+          throw Object.assign(new Error('This business location already has an operational tenant.'), { statusCode: 409 });
+        }
 
-        if (!planSnap.exists) throw Object.assign(new Error('Selected platform plan does not exist.'), { statusCode: 404 });
+        if (!planSnap.exists) {
+          throw Object.assign(new Error('Selected platform plan does not exist.'), { statusCode: 404 });
+        }
         const plan = { id: planSnap.id, ...planSnap.data() } as any;
-        if (plan.status !== 'active') throw Object.assign(new Error('Archived plans cannot be assigned during provisioning.'), { statusCode: 409 });
+        if (plan.status !== 'active') {
+          throw Object.assign(new Error('Archived plans cannot be assigned during provisioning.'), { statusCode: 409 });
+        }
 
         const records = buildTenantProvisioningRecords({
           request,
@@ -1072,6 +1119,7 @@ registerBusinessReviewRoutes({ app, requireServerAuth, requirePlatformAdmin, get
           tenantId: records.tenant.id,
           businessId: business.id,
           locationId: location.id,
+          planId: request.planId,
           idempotencyKeyHash: keyHash,
           createdAt: records.tenant.createdAt,
         });
@@ -1079,7 +1127,9 @@ registerBusinessReviewRoutes({ app, requireServerAuth, requirePlatformAdmin, get
         transaction.set(locationRef, { ...location, ...records.locationPatch, businessId: business.id }, { merge: true });
         if (Array.isArray(business.locations)) {
           const locations = business.locations.map((candidate: any) =>
-            String(candidate?.id || '') === request.locationId ? { ...candidate, ...records.locationPatch, businessId: business.id } : candidate,
+            String(candidate?.id || '') === request.locationId
+              ? { ...candidate, ...records.locationPatch, businessId: business.id }
+              : candidate,
           );
           transaction.set(businessRef, { locations }, { merge: true });
         }
@@ -1096,7 +1146,7 @@ registerBusinessReviewRoutes({ app, requireServerAuth, requirePlatformAdmin, get
           targetName: records.tenant.name,
           previousState: { businessId: business.id, locationId: location.id, tenantId: null },
           newState: { businessId: business.id, locationId: location.id, lifecycleStatus: records.tenant.lifecycleStatus, planId: records.tenant.planId },
-          reason: 'Business owner activated tenant capability during onboarding.',
+          reason: 'Approved listing_and_store business owner activated tenant capability.',
           result: 'success',
         });
         transaction.create(db.collection('audit_logs').doc(audit.id), audit);
