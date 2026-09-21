@@ -116,3 +116,19 @@ test('Business Owner 10: profile mutations validate contact data and audit servi
   assert.match(routes, /db\.runTransaction/);
   assert.match(routes, /businessId, name, description, price, durationMinutes/);
 });
+
+
+test('Business Owner 11: platform review workflow is mounted and publication remains server-gated', () => {
+  const server = readFileSync(resolve(process.cwd(), 'server.ts'), 'utf8');
+  const routes = readFileSync(resolve(process.cwd(), 'src/server/businessReviewRoutes.ts'), 'utf8');
+  assert.match(server, /registerBusinessReviewRoutes/);
+  assert.match(server, /requirePlatformAdmin/);
+  assert.match(routes, /\/api\/platform\/business-reviews/);
+  assert.match(routes, /\/approve/);
+  assert.match(routes, /\/reject/);
+  assert.match(routes, /onboardingStatus !== 'submitted_for_review'/);
+  assert.match(routes, /readyForReview/);
+  assert.match(routes, /BUSINESS_REVIEW_APPROVED/);
+  assert.match(routes, /BUSINESS_REVIEW_REJECTED/);
+  assert.match(routes, /listing: \{ \.(?:\.\.)?business\.listing/);
+});
