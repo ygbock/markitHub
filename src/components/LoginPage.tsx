@@ -43,9 +43,14 @@ export default function LoginPage({
   const [viewMode, setViewMode] = useState<IdentityViewMode>(() => getInitialMode(currentPath));
   // Public Discovery sign-in is a customer identity flow by default. Staff/platform
   // authentication is selected when the preserved destination is an operational route.
-  const defaultLoginMode: 'staff' | 'customer' =
-    returnUrl?.startsWith('/tenant/') || returnUrl?.startsWith('/superadmin/') ? 'staff' : 'customer';
-  const [loginMode, setLoginMode] = useState<'staff' | 'customer'>(defaultLoginMode);
+  const [loginMode, setLoginMode] = useState<'staff' | 'customer'>('staff');
+
+  useEffect(() => {
+    const defaultLoginMode: 'staff' | 'customer' =
+      returnUrl?.startsWith('/tenant/') || returnUrl?.startsWith('/superadmin/') ? 'staff' : 'customer';
+    setLoginMode(defaultLoginMode);
+  }, [returnUrl]);
+
   const loginTab = loginMode;
   const setLoginTab = setLoginMode;
 

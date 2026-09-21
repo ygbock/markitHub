@@ -130,7 +130,7 @@ test('Business Owner 11: platform review workflow is mounted and publication rem
   assert.match(routes, /readyForReview/);
   assert.match(routes, /BUSINESS_REVIEW_APPROVED/);
   assert.match(routes, /BUSINESS_REVIEW_REJECTED/);
-  assert.match(routes, /listing: \{ \.(?:\.\.)?business\.listing/);
+  assert.match(routes, /listing:\s*\{\s*\.\.\.\(\s*business\.listing/);
 });
 
 test('Business Owner 12: Discovery sign-in routes by authoritative identity instead of the default tenant or customer mock session', () => {
