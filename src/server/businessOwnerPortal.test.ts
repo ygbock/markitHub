@@ -78,3 +78,31 @@ test('Business Owner 7: owner portal consumes authoritative readiness and cannot
   assert.match(portal, /Submit for platform review/);
   assert.doesNotMatch(portal, /isPublished\s*:\s*true/);
 });
+
+
+test('Business Owner 8: listing management is server-authoritative, owner-scoped, and publication-gated', () => {
+  const server = readFileSync(resolve(process.cwd(), 'server.ts'), 'utf8');
+  const routes = readFileSync(resolve(process.cwd(), 'src/server/businessProfileRoutes.ts'), 'utf8');
+  const app = readFileSync(resolve(process.cwd(), 'src/App.tsx'), 'utf8');
+  assert.match(server, /registerBusinessProfileRoutes/);
+  assert.match(routes, /requireServerAuth/);
+  assert.match(routes, /Only the authoritative business owner may manage this business/);
+  assert.match(routes, /BUSINESS_PROFILE_UPDATED/);
+  assert.match(routes, /BUSINESS_LOCATION_CREATED/);
+  assert.match(routes, /Operational locations cannot be deleted/);
+  assert.match(routes, /current\.isPublished = business\.listing\?\.isPublished === true/);
+  assert.doesNotMatch(routes, /isPublished\s*=\s*true/);
+  assert.match(app, /BusinessOwnerListingManagement/);
+  assert.match(app, /currentRoute\.definition\.id === 'business\.locations'/);
+});
+
+test('Business Owner 9: authoritative profile management exposes profile, location and service endpoints', () => {
+  const routes = readFileSync(resolve(process.cwd(), 'src/server/businessProfileRoutes.ts'), 'utf8');
+  assert.match(routes, /app\.get\('\/api\/business\/:businessId\/profile'/);
+  assert.match(routes, /app\.patch\('\/api\/business\/:businessId\/profile'/);
+  assert.match(routes, /app\.post\('\/api\/business\/:businessId\/locations'/);
+  assert.match(routes, /app\.patch\('\/api\/business\/:businessId\/locations\/:locationId'/);
+  assert.match(routes, /app\.delete\('\/api\/business\/:businessId\/locations\/:locationId'/);
+  assert.match(routes, /app\.post\('\/api\/business\/:businessId\/services'/);
+  assert.match(routes, /app\.delete\('\/api\/business\/:businessId\/services\/:serviceId'/);
+});
