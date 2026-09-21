@@ -132,3 +132,16 @@ test('Business Owner 11: platform review workflow is mounted and publication rem
   assert.match(routes, /BUSINESS_REVIEW_REJECTED/);
   assert.match(routes, /listing: \{ \.(?:\.\.)?business\.listing/);
 });
+
+test('Business Owner 12: Discovery sign-in routes by authoritative identity instead of the default tenant or customer mock session', () => {
+  const login = readFileSync(resolve(process.cwd(), 'src/components/LoginPage.tsx'), 'utf8');
+  const app = readFileSync(resolve(process.cwd(), 'src/App.tsx'), 'utf8');
+  assert.match(login, /defaultLoginMode/);
+  assert.match(login, /returnUrl\?\.startsWith\('\/tenant\/'\)/);
+  assert.match(login, /authContext\.isPlatformAdmin \|\| authContext\.isSuperAdmin/);
+  assert.match(login, /accountRole === 'BUSINESS_OWNER'/);
+  assert.match(login, /\/account\/profile/);
+  assert.doesNotMatch(login, /else \{\s*navigateTo\('\/tenant\/nexus-retail\/dashboard'\)/);
+  assert.match(app, /useState<Customer \| null>\(null\)/);
+  assert.doesNotMatch(app, /useState<Customer \| null>\(INITIAL_CUSTOMERS\[0\]\)/);
+});
