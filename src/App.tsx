@@ -60,6 +60,8 @@ import StorefrontOrdersPage from './components/storefront/StorefrontOrdersPage';
 import TenantStorefrontManagement from './components/storefront/TenantStorefrontManagement';
 import TenantCatalogManagement from './components/tenant/TenantCatalogManagement';
 import ListingBusinessShell from './components/business/ListingBusinessShell';
+import BusinessOwnerSignup from './components/business/BusinessOwnerSignup';
+import BusinessOwnerPortal from './components/business/BusinessOwnerPortal';
 import CustomerAccountShell from './components/customer/CustomerAccountShell';
 import RouteGuardShell from './components/routing/RouteGuardShell';
 import { ShellResolver } from './layouts/ShellResolver';
@@ -1505,6 +1507,12 @@ export default function App() {
     );
   }
 
+  // Business owner signup owns its own public acquisition surface and therefore
+  // must not be wrapped by the authenticated BusinessShell.
+  if (currentRoute.definition.id === 'business.signup') {
+    return <BusinessOwnerSignup onNavigate={navigate} />;
+  }
+
   // 2. Authoritative Frontend Shell Dispatcher via ShellResolver
   // These route IDs are intentionally explicit so every canonical storefront
   // surface is visibly owned by the authoritative storefront application.
@@ -1595,8 +1603,11 @@ export default function App() {
         />
       )}
 
-      {/* 2c. Listing-Only Business Management Domain (/business/:businessId/*) */}
-      {activeDomain === 'BUSINESS' && (
+      {/* 2c. Business Owner Portal / Listing Management Domain */}
+      {activeDomain === 'BUSINESS' && currentRoute.definition.id === 'business.dashboard' && (
+        <BusinessOwnerPortal businessId={currentRoute.params.businessId} onNavigate={navigate} />
+      )}
+      {activeDomain === 'BUSINESS' && currentRoute.definition.id !== 'business.dashboard' && (
         <ListingBusinessShell
           businessId={currentRoute.params.businessId}
           onNavigate={navigate}
