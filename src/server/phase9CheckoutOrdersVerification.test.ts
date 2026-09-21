@@ -454,6 +454,17 @@ test('Phase 9 Invariant 44: Monime settlement synchronizes existing lifecycle pa
   assert.match(settlement, /stage\.stageId >= 7 && stage\.stageId <= 9/);
 });
 
+test('Phase 9 Invariant 45: terminal payment events cannot leave lifecycle fulfillment payable', () => {
+  const server = readFileSync(resolve(process.cwd(), 'server.ts'), 'utf8');
+  const terminal = server.slice(server.indexOf('const orderLifecycle = order.lifecycleDomainStatuses'));
+  assert.match(terminal, /paymentStatus: 'Failed'/);
+  assert.match(terminal, /fulfillmentStatus: 'Unfulfilled'/);
+  assert.match(terminal, /status: 'exception'/);
+  assert.match(terminal, /currentLifecycleStageId: 7/);
+  assert.match(terminal, /currentLifecyclePhaseId: 3/);
+  assert.match(terminal, /terminalPaymentStatus === 'cancelled' \|\| terminalPaymentStatus === 'expired'/);
+});
+
 test('Phase 9 Invariant 42: terminal return states cannot be advanced at runtime', () => {
   const order: any = {
     id: 'ORD-RETURN-4',
