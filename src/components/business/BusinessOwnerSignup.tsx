@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { ArrowRight, Building2, CheckCircle2, Eye, EyeOff, Store, UserPlus } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { auth } from '../../lib/firebase';
 
 type BusinessMode = 'listing_only' | 'listing_and_store';
 interface Props { onNavigate: (path: string) => void; }
@@ -31,7 +32,7 @@ export default function BusinessOwnerSignup({ onNavigate }: Props) {
     setBusy(true);
     try {
       await signUpWithEmail(email.trim(), password, name.trim());
-      const current = firebaseUser;
+      const current = auth.currentUser || firebaseUser;
       const token = current ? await current.getIdToken(true) : null;
       if (!token) throw new Error('Authentication session was not established.');
       const response = await fetch('/api/business/register', {
