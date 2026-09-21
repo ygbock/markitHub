@@ -188,6 +188,8 @@ export interface Business {
   ownerUid: string;
   country: string;
   currency: string;
+  email?: string;
+  phone?: string;
   verificationStatus: BusinessVerificationStatus;
   status: BusinessLifecycleStatus;
   listing?: BusinessListing;
