@@ -104,6 +104,8 @@ export function buildBusinessRegistrationRecords(params: {
     ownerUid: params.ownerUid,
     country: params.country || 'Sierra Leone',
     currency: params.currency || 'USD',
+    email: params.request.email || '',
+    phone: params.request.phone || '',
     verificationStatus: 'pending',
     status: 'pending_verification',
     businessMode: params.request.businessMode,
