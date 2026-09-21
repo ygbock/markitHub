@@ -2239,22 +2239,50 @@ async function startServer() {
         if (!['paid', 'completed', 'settled'].includes(current)) {
           const now = new Date().toISOString();
           const nextStatus = terminalPaymentStatus === 'failed' ? 'payment_failed' : terminalPaymentStatus;
-          tx.set(orderRef, {
+          const orderLifecycle = order.lifecycleDomainStatuses && typeof order.lifecycleDomainStatuses === 'object'
+            ? { ...order.lifecycleDomainStatuses }
+            : null;
+          const orderStages = Array.isArray(order.lifecycleStages) ? [...order.lifecycleStages] : [];
+          const lifecyclePatch = orderLifecycle
+            ? {
+                ...orderLifecycle,
+                paymentStatus: 'Failed',
+                fulfillmentStatus: 'Unfulfilled',
+                ...(terminalPaymentStatus === 'cancelled' || terminalPaymentStatus === 'expired'
+                  ? { orderStatus: 'Cancelled' as const }
+                  : {}),
+                lastUpdated: now,
+              }
+            : null;
+          const lifecycleStagesPatch = orderLifecycle
+            ? orderStages.map((stage: any) => {
+                if (stage.stageId === 7 || stage.stageId === 8) {
+                  return {
+                    ...stage,
+                    status: 'exception',
+                    timestamp: stage.timestamp || now,
+                    notes: 'Terminal payment event: ' + terminalPaymentStatus,
+                  };
+                }
+                return stage;
+              })
+            : null;
+          const paymentPatch = {
             paymentStatus: terminalPaymentStatus,
             payment_status: terminalPaymentStatus,
             status: nextStatus,
             updatedAt: now,
             updated_at: now,
             tenantId,
-          }, { merge: true });
-          tx.set(db.collection('tenants').doc(tenantId).collection('orders').doc(orderId), {
-            paymentStatus: terminalPaymentStatus,
-            payment_status: terminalPaymentStatus,
-            status: nextStatus,
-            updatedAt: now,
-            updated_at: now,
-            tenantId,
-          }, { merge: true });
+            ...(lifecyclePatch ? { lifecycleDomainStatuses: lifecyclePatch } : {}),
+            ...(lifecycleStagesPatch ? {
+              lifecycleStages: lifecycleStagesPatch,
+              currentLifecycleStageId: 7,
+              currentLifecyclePhaseId: 3,
+            } : {}),
+          };
+          tx.set(orderRef, paymentPatch, { merge: true });
+          tx.set(db.collection('tenants').doc(tenantId).collection('orders').doc(orderId), paymentPatch, { merge: true });
         }
       }
     }
