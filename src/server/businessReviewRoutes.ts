@@ -35,7 +35,8 @@ export function registerBusinessReviewRoutes(params: {
       const requestedStatus = clean(req.query.status, 60);
       const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 50));
       let query: any = db.collection('businesses');
-      if (requestedStatus) query = query.where('onboardingStatus', '==', requestedStatus);
+      const queueStatus = requestedStatus || 'submitted_for_review';
+      if (queueStatus) query = query.where('onboardingStatus', '==', queueStatus);
       const snap = await query.limit(limit).get();
       const businesses = snap.docs
         .map((doc: any) => ({ id: doc.id, ...doc.data() }))
