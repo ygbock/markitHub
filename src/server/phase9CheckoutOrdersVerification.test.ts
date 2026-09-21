@@ -273,7 +273,7 @@ test('Phase 9 Invariant 30: lifecycle transitions cannot skip stages or move a c
   const lifecycle = readFileSync(resolve(process.cwd(), 'src/services/orderLifecycleService.ts'), 'utf8');
   assert.match(
     lifecycle,
-    /targetStageId !== currentStageId && targetStageId !== currentStageId \+ 1/,
+    /targetStageId\s*!==\s*currentStageId\s*&&\s*!allowedNext\.includes\(\s*targetStageId\s*\)/,
   );
   assert.match(lifecycle, /currentStageId >= 27/);
   assert.match(lifecycle, /targetStageId < currentStageId/);

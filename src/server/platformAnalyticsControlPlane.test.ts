@@ -97,9 +97,13 @@ class MockAnalyticsDb {
 async function doFetch(app: any, path: string, headers: Record<string, string> = {}) {
   const http = await import('node:http');
   const server = http.createServer(app);
-  await new Promise<void>((resolve) => server.listen(0, resolve));
+  await new Promise<void>((resolve, reject) => {
+    server.listen(0, '127.0.0.1', () => resolve());
+    server.once('error', reject);
+  });
   const address = server.address() as any;
-  const url = `http://127.0.0.1:${address.port}${path}`;
+  const port = address?.port || 0;
+  const url = `http://127.0.0.1:${port}${path}`;
 
   try {
     const res = await fetch(url, { headers });
