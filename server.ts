@@ -56,6 +56,7 @@ import { DEFAULT_PLATFORM_PLANS } from './src/server/platformAdminControlPlane';
 import { validateTenantProvisioningRequest, hashProvisioningIdempotencyKey, buildTenantProvisioningRecords } from './src/server/tenantProvisioning';
 import { validateBusinessRegistrationRequest, hashBusinessRegistrationKey, buildBusinessRegistrationRecords } from './src/server/businessRegistration';
 import { evaluateBusinessOnboardingReadiness } from './src/server/businessOnboarding';
+import { registerBusinessProfileRoutes } from './src/server/businessProfileRoutes';
 import { registerTenantCatalogRoutes } from './src/server/tenantCatalog';
 import { registerTenantInventoryRoutes } from './src/server/tenantInventory';
 import { registerTenantPosRoutes } from './src/server/tenantPos';
@@ -879,6 +880,8 @@ async function startServer() {
       return res.status(500).json({ error: err?.message || 'Unable to load owned businesses.' });
     }
   });
+
+  registerBusinessProfileRoutes({ app, requireServerAuth, getAdminDb });
 
   // =========================================================================
   // CANONICAL BUSINESS ONBOARDING READINESS & REVIEW SUBMISSION
