@@ -44,6 +44,8 @@ test('Phase 5 Registration 2: registration identity and listing are canonically 
   assert.equal(records.business.listing.isPublished, false);
   assert.equal(records.business.status, 'pending_verification');
   assert.equal(records.business.businessMode, 'listing_and_store');
+  assert.equal(records.business.email, input.email);
+  assert.equal(records.business.phone, input.phone);
 });
 
 test('Phase 5 Registration 3: registration creates a listing-only business without tenant state', () => {
