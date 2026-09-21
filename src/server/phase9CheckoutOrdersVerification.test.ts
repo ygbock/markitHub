@@ -528,3 +528,19 @@ test('Phase 9 Invariant 48: stage 26 requires an authoritative inventory ledger 
   assert.match(settlement, /INV-SETTLEMENT-/);
   assert.match(settlement, /inventoryFinalizedAt: paidAt/);
 });
+
+
+test('Phase 9 Invariant 49: inventory finalization identity is deterministic and terminal settlement retries cannot overwrite it', () => {
+  const server = readFileSync(resolve(process.cwd(), 'server.ts'), 'utf8');
+  const settlement = server.slice(server.indexOf("const settlementRef = db.collection('payment_settlements')"));
+  assert.match(settlement, /\['settled', 'duplicate_order_terminal', 'rejected_order_terminal'\]\.includes\(existingSettlementStatus\)/);
+  assert.match(settlement, /if \(settlementSnap\.exists\)/);
+
+  const inventoryIdentity = server.slice(server.indexOf('const inventoryFinalizationTransactionId'));
+  assert.match(
+    inventoryIdentity,
+    /const inventoryFinalizationTransactionId = reservationId\s*\?\s*'INV-SETTLEMENT-' \+ String\(tenantId\) \+ '-' \+ String\(sessionId\)/,
+  );
+  assert.match(inventoryIdentity, /inventoryFinalizedAt: paidAt/);
+  assert.match(inventoryIdentity, /monimeSessionId: String\(sessionId\)/);
+});
