@@ -497,3 +497,19 @@ test('Phase 9 Invariant 46: successful Monime inventory settlement synchronizes 
   assert.doesNotMatch(settlement, /currentLifecycleStageId: 11/);
   assert.doesNotMatch(settlement, /currentLifecycleStageId: 12/);
 });
+
+test('Phase 9 Invariant 47: warehouse dispatch does not prematurely mark fulfillment complete', () => {
+  const lifecycle = readFileSync(resolve(process.cwd(), 'src/services/orderLifecycleService.ts'), 'utf8');
+  const dispatch = lifecycle.slice(
+    lifecycle.indexOf("name: 'Stage 20 — Warehouse Dispatch'"),
+    lifecycle.indexOf("name: 'Stage 21 — Customer Tracking'")
+  );
+  assert.doesNotMatch(dispatch, /fulfillmentStatus: 'Fulfilled'/);
+  assert.match(dispatch, /shipmentStatus: 'Dispatched'/);
+
+  const finalInventory = lifecycle.slice(
+    lifecycle.indexOf("name: 'Stage 26 — Inventory is Finally Completed'"),
+    lifecycle.indexOf("name: 'Stage 27 — Order Completed'")
+  );
+  assert.match(finalInventory, /fulfillmentStatus: 'Fulfilled'/);
+});
