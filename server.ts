@@ -2624,6 +2624,9 @@ async function startServer() {
                           ? 'Confirmed'
                           : existingLifecycle.orderStatus,
                         paymentStatus: 'Paid',
+                        fulfillmentStatus: ['Unfulfilled', 'Reserved'].includes(String(existingLifecycle.fulfillmentStatus || ''))
+                          ? 'Reserved'
+                          : existingLifecycle.fulfillmentStatus,
                         lastUpdated: paidAt,
                       }
                     : null;
@@ -2635,9 +2638,15 @@ async function startServer() {
                           }
                           return stage;
                         });
-                        return existingCurrentStage < 9
-                          ? { stages: next, currentLifecycleStageId: 9, currentLifecyclePhaseId: 3 }
-                          : { stages: next };
+                        const withReservationStage = next.map((stage: any) => {
+                          if (stage.stageId === 10 && stage.status !== 'completed') {
+                            return { ...stage, status: 'completed', timestamp: stage.timestamp || paidAt };
+                          }
+                          return stage;
+                        });
+                        return existingCurrentStage < 10
+                          ? { stages: withReservationStage, currentLifecycleStageId: 10, currentLifecyclePhaseId: 3 }
+                          : { stages: withReservationStage };
                       })()
                     : null;
                   const paymentPatch = {
