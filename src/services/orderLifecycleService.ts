@@ -700,7 +700,8 @@ export class OrderLifecycleService {
       23: () => domainStatuses.shipmentStatus === 'In Transit',
       24: () => domainStatuses.shipmentStatus === 'Out for Delivery',
       25: () => domainStatuses.shipmentStatus === 'Delivery Attempted',
-      26: () => domainStatuses.shipmentStatus === 'Delivered',
+      26: () => domainStatuses.shipmentStatus === 'Delivered'
+        && Boolean(String((order as any).inventoryFinalizationTransactionId || '').trim()),
       27: () => domainStatuses.shipmentStatus === 'Delivered' && domainStatuses.fulfillmentStatus === 'Fulfilled',
       28: () => domainStatuses.orderStatus === 'Completed',
       29: () => domainStatuses.orderStatus === 'Completed',
