@@ -34,7 +34,7 @@ test('Business Owner 3: owner workspace API is authenticated and returns only ow
   const server = readFileSync(resolve(process.cwd(), 'server.ts'), 'utf8');
   const route = server.slice(server.indexOf("app.get('/api/business/owned'"));
   assert.match(route, /requireServerAuth/);
-  assert.match(route, /where\\('ownerUid', '==', String\\(req\\.user\\.uid\\)\\)/);
+  assert.match(route, /where\('ownerUid', '==', String\(req\.user\.uid\)\)/);
   assert.match(route, /tenantIds/);
   assert.match(route, /verificationStatus/);
 });
@@ -44,7 +44,7 @@ test('Business Owner 4: registration idempotency keys cannot be replayed across 
   const registration = server.slice(server.indexOf("app.post('/api/business/register'"));
   assert.match(registration, /priorOwnerUid/);
   assert.match(registration, /Idempotency-Key belongs to another business owner/);
-  assert.match(registration, /ownerUid: req\\.user\\.uid/);
+  assert.match(registration, /ownerUid: req\.user\.uid/);
   assert.match(registration, /accountRole: 'BUSINESS_OWNER'/);
   assert.match(registration, /Business registration record belongs to another owner/);
 });
@@ -53,6 +53,6 @@ test('Business Owner 5: owner signup and portal are mounted into the canonical a
   const app = readFileSync(resolve(process.cwd(), 'src/App.tsx'), 'utf8');
   assert.match(app, /BusinessOwnerSignup/);
   assert.match(app, /BusinessOwnerPortal/);
-  assert.match(app, /currentRoute\\.definition\\.id === 'business\\.signup'/);
-  assert.match(app, /currentRoute\\.definition\\.id === 'business\\.dashboard'/);
+  assert.match(app, /currentRoute\.definition\.id === 'business\.signup'/);
+  assert.match(app, /currentRoute\.definition\.id === 'business\.dashboard'/);
 });
