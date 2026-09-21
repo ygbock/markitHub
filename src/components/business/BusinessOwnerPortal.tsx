@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { BarChart3, Building2, CheckCircle2, Clock3, ExternalLink, Plus, Settings, Store, Users } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { auth } from '../../lib/firebase';
 
 interface BusinessRecord { id:string; tradingName?:string; legalName?:string; status?:string; verificationStatus?:string; businessMode?:string; listing?:{slug?:string;isPublished?:boolean}; locations?:any[]; tenantIds?:string[]; }
 interface Props { businessId?: string; onNavigate:(path:string)=>void; }
@@ -10,7 +11,8 @@ export default function BusinessOwnerPortal({ businessId, onNavigate }: Props) {
   const [businesses,setBusinesses]=useState<BusinessRecord[]>([]);
   const [loading,setLoading]=useState(true);
   const [error,setError]=useState('');
-  useEffect(()=>{ let active=true; (async()=>{ try { const res=await fetch('/api/business/owned'); const json=await res.json().catch(()=>({})); if(!res.ok) throw new Error(json.error||'Unable to load your businesses.'); if(active) setBusinesses(Array.isArray(json.businesses)?json.businesses:[]); } catch(e:any){ if(active)setError(e?.message||'Unable to load business workspace.'); } finally { if(active)setLoading(false); } })(); return ()=>{active=false}; },[]);
+  useEffect(()=>{ let active=true; (async()=>{ try { const token = auth.currentUser ? await auth.currentUser.getIdToken() : '';
+    const res=await fetch('/api/business/owned', { headers: token ? { Authorization: 'Bearer ' + token } : {} }); const json=await res.json().catch(()=>({})); if(!res.ok) throw new Error(json.error||'Unable to load your businesses.'); if(active) setBusinesses(Array.isArray(json.businesses)?json.businesses:[]); } catch(e:any){ if(active)setError(e?.message||'Unable to load business workspace.'); } finally { if(active)setLoading(false); } })(); return ()=>{active=false}; },[]);
   const selected=businesses.find(b=>b.id===businessId)||businesses[0];
   if(loading) return <div className="min-h-screen bg-slate-950 text-white flex items-center justify-center">Loading business workspace…</div>;
   if(error) return <div className="min-h-screen bg-slate-950 text-white flex items-center justify-center p-6"><div className="max-w-md text-center"><h1 className="text-xl font-black">Business workspace unavailable</h1><p className="text-sm text-slate-400 mt-2">{error}</p></div></div>;
