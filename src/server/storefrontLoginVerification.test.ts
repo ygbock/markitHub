@@ -32,7 +32,9 @@ test('Storefront Integration 4: ECommerceStorefront accepts onOpenLogin and forw
 });
 
 test('Login Page 5: LoginPage provides dual mode authentication for Staff and Customers', () => {
-  assert.ok(loginPageFile.includes("const [loginMode, setLoginMode] = useState<'staff' | 'customer'>('staff');"), 'Must default to staff mode');
+  assert.ok(loginPageFile.includes('const defaultLoginMode'), 'Must derive the initial login mode from the destination');
+  assert.ok(loginPageFile.includes("returnUrl?.startsWith('/tenant/') || returnUrl?.startsWith('/superadmin/')"), 'Operational destinations must select staff mode');
+  assert.ok(loginPageFile.includes("setLoginMode(defaultLoginMode)"), 'Login mode must update when the return destination changes');
   assert.ok(loginPageFile.includes('id="tab-login-staff"'), 'Staff tab must exist');
   assert.ok(loginPageFile.includes('id="tab-login-customer"'), 'Customer tab must exist');
 });
