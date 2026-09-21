@@ -881,6 +881,111 @@ async function startServer() {
   });
 
   // =========================================================================
+  // CANONICAL BUSINESS ONBOARDING READINESS & REVIEW SUBMISSION
+  // =========================================================================
+  app.get('/api/business/:businessId/readiness', requireServerAuth, async (req: any, res: any) => {
+    const db = getAdminDb();
+    if (!db) return res.status(503).json({ error: 'Business onboarding service is not configured.' });
+
+    try {
+      const businessId = String(req.params.businessId || '').trim();
+      if (!businessId) return res.status(400).json({ error: 'Business ID is required.' });
+
+      const businessSnap = await db.collection('businesses').doc(businessId).get();
+      if (!businessSnap.exists) return res.status(404).json({ error: 'Business not found.' });
+
+      const business = { id: businessSnap.id, ...businessSnap.data() } as any;
+      if (String(business.ownerUid || '') !== String(req.user?.uid || '')) {
+        return res.status(403).json({ error: 'Only the authoritative business owner may access onboarding readiness.' });
+      }
+
+      return res.json({ success: true, readiness: evaluateBusinessOnboardingReadiness(business) });
+    } catch (err: any) {
+      return res.status(500).json({ error: err?.message || 'Unable to load business onboarding readiness.' });
+    }
+  });
+
+  app.post('/api/business/:businessId/submit-review', requireServerAuth, async (req: any, res: any) => {
+    const db = getAdminDb();
+    if (!db) return res.status(503).json({ error: 'Business onboarding service is not configured.' });
+
+    try {
+      const businessId = String(req.params.businessId || '').trim();
+      if (!businessId) return res.status(400).json({ error: 'Business ID is required.' });
+
+      const businessRef = db.collection('businesses').doc(businessId);
+      let readiness: ReturnType<typeof evaluateBusinessOnboardingReadiness> | null = null;
+      let updatedBusiness: any = null;
+      let auditRecord: any = null;
+
+      await db.runTransaction(async (transaction) => {
+        const businessSnap = await transaction.get(businessRef);
+        if (!businessSnap.exists) throw Object.assign(new Error('Business not found.'), { statusCode: 404 });
+
+        const business = { id: businessSnap.id, ...businessSnap.data() } as any;
+        if (String(business.ownerUid || '') !== String(req.user?.uid || '')) {
+          throw Object.assign(new Error('Only the authoritative business owner may submit this business for review.'), { statusCode: 403 });
+        }
+
+        readiness = evaluateBusinessOnboardingReadiness(business);
+        if (!readiness.readyForReview) {
+          const missing = readiness.checks.filter(check => check.required && !check.complete).map(check => check.label);
+          throw Object.assign(new Error('Business onboarding is incomplete. Missing: ' + missing.join(', ') + '.'), { statusCode: 409 });
+        }
+
+        if (business.verificationStatus === 'verified' && business.status === 'active' && business.listing?.isPublished === true) {
+          throw Object.assign(new Error('Business is already published.'), { statusCode: 409 });
+        }
+
+        const now = new Date().toISOString();
+        const patch = {
+          onboardingStatus: 'submitted_for_review',
+          updatedAt: now,
+        };
+        transaction.set(businessRef, patch, { merge: true });
+
+        auditRecord = createAuthoritativeAuditRecord({
+          tenantId: 'platform',
+          actorUid: req.user.uid,
+          actorEmail: req.user.email,
+          actorRole: 'Business Owner',
+          action: 'BUSINESS_SUBMITTED_FOR_REVIEW',
+          module: 'Business Onboarding',
+          targetType: 'business',
+          targetId: business.id,
+          targetName: business.tradingName || business.legalName,
+          previousState: {
+            onboardingStatus: business.onboardingStatus || 'in_progress',
+            verificationStatus: business.verificationStatus || 'pending',
+            status: business.status || 'draft',
+            listingPublished: business.listing?.isPublished === true,
+          },
+          newState: {
+            onboardingStatus: 'submitted_for_review',
+            verificationStatus: business.verificationStatus || 'pending',
+            status: business.status || 'pending_verification',
+            listingPublished: false,
+          },
+          reason: 'Business owner submitted a complete business profile for platform review.',
+          result: 'success',
+        });
+        transaction.create(db.collection('audit_logs').doc(auditRecord.id), auditRecord);
+        updatedBusiness = { ...business, ...patch };
+      });
+
+      return res.status(200).json({
+        success: true,
+        business: updatedBusiness,
+        readiness: readiness ? { ...readiness, onboardingStatus: 'submitted_for_review', nextAction: 'await_review' } : null,
+        audit: auditRecord,
+      });
+    } catch (err: any) {
+      const status = Number(err?.statusCode) || 500;
+      return res.status(status).json({ success: false, error: err?.message || 'Unable to submit business for review.' });
+    }
+  });
+
+  // =========================================================================
   // CANONICAL BUSINESS -> TENANT PROVISIONING
   // =========================================================================
   app.post('/api/business/provision-tenant', requireServerAuth, async (req: any, res: any) => {
