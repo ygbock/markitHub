@@ -89,7 +89,9 @@ export function evaluateBusinessOnboardingReadiness(business: any): BusinessOnbo
 
   let nextAction: BusinessOnboardingReadiness['nextAction'];
   if (readyForPublication) nextAction = 'published';
-  else if (business?.onboardingStatus === 'submitted_for_review' || business?.verificationStatus === 'pending') nextAction = readyForReview ? 'await_review' : 'complete_setup';
+  else if (business?.onboardingStatus === 'submitted_for_review') nextAction = 'await_review';
+  else if (readyForReview) nextAction = 'submit_review';
+  else if (business?.verificationStatus === 'pending' && business?.onboardingStatus === 'submitted_for_review') nextAction = 'await_review';
   else if (readyForReview) nextAction = 'submit_review';
   else nextAction = 'complete_setup';
 
