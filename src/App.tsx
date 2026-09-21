@@ -62,6 +62,7 @@ import TenantCatalogManagement from './components/tenant/TenantCatalogManagement
 import ListingBusinessShell from './components/business/ListingBusinessShell';
 import BusinessOwnerSignup from './components/business/BusinessOwnerSignup';
 import BusinessOwnerPortal from './components/business/BusinessOwnerPortal';
+import BusinessOwnerListingManagement from './components/business/BusinessOwnerListingManagement';
 import CustomerAccountShell from './components/customer/CustomerAccountShell';
 import RouteGuardShell from './components/routing/RouteGuardShell';
 import { ShellResolver } from './layouts/ShellResolver';
@@ -1608,12 +1609,16 @@ export default function App() {
         <BusinessOwnerPortal businessId={currentRoute.params.businessId} onNavigate={navigate} />
       )}
       {activeDomain === 'BUSINESS' && currentRoute.definition.id !== 'business.dashboard' && (
-        <ListingBusinessShell
+        <BusinessOwnerListingManagement
           businessId={currentRoute.params.businessId}
+          activeTab={
+            currentRoute.definition.id === 'business.overview' ? 'overview' :
+            currentRoute.definition.id === 'business.locations' ? 'locations' :
+            currentRoute.definition.id === 'business.services' ? 'services' :
+            currentRoute.definition.id === 'business.settings' ? 'settings' :
+            'listing'
+          }
           onNavigate={navigate}
-          onUpgradeToTenant={(_locationId) => {
-            navigate('/business/onboarding');
-          }}
         />
       )}
 
