@@ -2583,24 +2583,52 @@ async function startServer() {
                   const orderTenant = String(order.tenantId || order.tenant_id || '');
                   if (orderTenant && orderTenant !== tenantId) throw new Error('Order belongs to another tenant.');
                   const currentStatus = String(order.paymentStatus || order.payment_status || '').toLowerCase();
-                  if (!['paid', 'completed', 'settled'].includes(currentStatus)) {
-                    const paidAt = new Date().toISOString();
-                    tx.set(orderRef, {
-                      paymentStatus: 'paid',
-                      payment_status: 'paid',
-                      paidAt,
-                      paymentProvider: 'monime',
-                      monimeSessionId: String(sessionId),
-                      tenantId,
-                    }, { merge: true });
-                    tx.set(db.collection('tenants').doc(tenantId).collection('orders').doc(String(orderId)), {
-                      paymentStatus: 'paid',
-                      payment_status: 'paid',
-                      paidAt,
-                      paymentProvider: 'monime',
-                      monimeSessionId: String(sessionId),
-                      tenantId,
-                    }, { merge: true });
+                  const paidAt = new Date().toISOString();
+                  const existingLifecycle = order.lifecycleDomainStatuses && typeof order.lifecycleDomainStatuses === 'object'
+                    ? { ...order.lifecycleDomainStatuses }
+                    : null;
+                  const existingStages = Array.isArray(order.lifecycleStages) ? [...order.lifecycleStages] : [];
+                  const existingCurrentStage = Number(order.currentLifecycleStageId || 0);
+                  const lifecyclePaymentPatch = existingLifecycle
+                    ? {
+                        ...existingLifecycle,
+                        orderStatus: existingLifecycle.orderStatus === 'Draft' || existingLifecycle.orderStatus === 'Submitted'
+                          ? 'Confirmed'
+                          : existingLifecycle.orderStatus,
+                        paymentStatus: 'Paid',
+                        lastUpdated: paidAt,
+                      }
+                    : null;
+                  const lifecycleStagePatch = existingLifecycle
+                    ? (() => {
+                        const next = existingStages.map((stage: any) => {
+                          if (stage.stageId >= 7 && stage.stageId <= 9 && stage.status !== 'completed') {
+                            return { ...stage, status: 'completed', timestamp: stage.timestamp || paidAt };
+                          }
+                          return stage;
+                        });
+                        return existingCurrentStage < 9
+                          ? { stages: next, currentLifecycleStageId: 9, currentLifecyclePhaseId: 3 }
+                          : { stages: next };
+                      })()
+                    : null;
+                  const paymentPatch = {
+                    paymentStatus: 'paid',
+                    payment_status: 'paid',
+                    paidAt,
+                    paymentProvider: 'monime',
+                    monimeSessionId: String(sessionId),
+                    tenantId,
+                    ...(lifecyclePaymentPatch ? { lifecycleDomainStatuses: lifecyclePaymentPatch } : {}),
+                    ...(lifecycleStagePatch?.stages ? { lifecycleStages: lifecycleStagePatch.stages } : {}),
+                    ...(lifecycleStagePatch?.currentLifecycleStageId ? {
+                      currentLifecycleStageId: lifecycleStagePatch.currentLifecycleStageId,
+                      currentLifecyclePhaseId: lifecycleStagePatch.currentLifecyclePhaseId,
+                    } : {}),
+                  };
+                  if (!['paid', 'completed', 'settled'].includes(currentStatus) || lifecyclePaymentPatch) {
+                    tx.set(orderRef, paymentPatch, { merge: true });
+                    tx.set(db.collection('tenants').doc(tenantId).collection('orders').doc(String(orderId)), paymentPatch, { merge: true });
                   }
                 }
               }
