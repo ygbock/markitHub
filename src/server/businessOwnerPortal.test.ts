@@ -145,3 +145,24 @@ test('Business Owner 12: Discovery sign-in routes by authoritative identity inst
   assert.match(app, /useState<Customer \| null>\(null\)/);
   assert.doesNotMatch(app, /useState<Customer \| null>\(INITIAL_CUSTOMERS\[0\]\)/);
 });
+
+
+test('Business Owner 13: tenant provisioning is post-approval, owner-authorized, idempotent, and audited', () => {
+  const server = readFileSync(resolve(process.cwd(), 'server.ts'), 'utf8');
+  const start = server.indexOf("app.post('/api/business/provision-tenant'");
+  const end = server.indexOf("// TENANT AUDIT & SECURITY TELEMETRY", start);
+  const route = server.slice(start, end);
+
+  assert.match(route, /requireServerAuth/);
+  assert.match(route, /Only the authoritative business owner may provision a tenant/);
+  assert.match(route, /Idempotency-Key is already bound to a different provisioning request/);
+  assert.match(route, /business\.businessMode.*listing_and_store/s);
+  assert.match(route, /business\.verificationStatus.*verified/s);
+  assert.match(route, /business\.onboardingStatus.*approved/s);
+  assert.match(route, /business\.listing\?\.isPublished !== true/);
+  assert.match(route, /Inactive business locations cannot be provisioned/);
+  assert.match(route, /location\.tenantId/);
+  assert.match(route, /TENANT_PROVISIONED/);
+  assert.match(route, /transaction\.create\(db\.collection\('audit_logs'\)/);
+  assert.match(route, /replayed/);
+});
