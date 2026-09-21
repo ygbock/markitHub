@@ -443,6 +443,17 @@ test('Phase 9 Invariant 43: transitionToStage cannot bootstrap directly into a l
   assert.equal(result.currentLifecycleStageId, undefined);
 });
 
+test('Phase 9 Invariant 44: Monime settlement synchronizes existing lifecycle payment state and payment-success stages', () => {
+  const server = readFileSync(resolve(process.cwd(), 'server.ts'), 'utf8');
+  const settlement = server.slice(server.indexOf('const paymentPatch = {'));
+  assert.match(settlement, /paymentStatus: 'paid'/);
+  assert.match(settlement, /lifecycleDomainStatuses: lifecyclePaymentPatch/);
+  assert.match(settlement, /lifecycleStages: lifecycleStagePatch\.stages/);
+  assert.match(settlement, /currentLifecycleStageId: lifecycleStagePatch\.currentLifecycleStageId/);
+  assert.match(settlement, /existingCurrentStage < 9/);
+  assert.match(settlement, /stage\.stageId >= 7 && stage\.stageId <= 9/);
+});
+
 test('Phase 9 Invariant 42: terminal return states cannot be advanced at runtime', () => {
   const order: any = {
     id: 'ORD-RETURN-4',
