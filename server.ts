@@ -883,7 +883,7 @@ async function startServer() {
   });
 
   registerBusinessProfileRoutes({ app, requireServerAuth, getAdminDb });
-registerBusinessReviewRoutes({ app, requireServerAuth, requirePlatformAdmin: assertPlatformAdmin, getAdminDb });
+registerBusinessReviewRoutes({ app, requireServerAuth, requirePlatformAdmin, getAdminDb });
 
   // =========================================================================
   // CANONICAL BUSINESS ONBOARDING READINESS & REVIEW SUBMISSION
