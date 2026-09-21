@@ -450,7 +450,7 @@ test('Phase 9 Invariant 44: Monime settlement synchronizes existing lifecycle pa
   assert.match(settlement, /lifecycleDomainStatuses: lifecyclePaymentPatch/);
   assert.match(settlement, /lifecycleStages: lifecycleStagePatch\.stages/);
   assert.match(settlement, /currentLifecycleStageId: lifecycleStagePatch\.currentLifecycleStageId/);
-  assert.match(settlement, /existingCurrentStage < 9/);
+  assert.match(settlement, /existingCurrentStage < 10/);
   assert.match(settlement, /stage\.stageId >= 7 && stage\.stageId <= 9/);
 });
 
