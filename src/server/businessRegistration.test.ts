@@ -16,6 +16,7 @@ const input = {
   phone: '+232 76 000 000',
   email: 'hello@apex.sl',
   openingHours: 'Mon - Sat: 8:30 AM - 6:30 PM',
+  businessMode: 'listing_and_store' as const,
   idempotencyKey: 'registration-1',
 };
 
@@ -40,7 +41,9 @@ test('Phase 5 Registration 2: registration identity and listing are canonically 
   assert.equal(records.business.listing.businessId, 'biz-fixed');
   assert.equal(records.location.businessId, 'biz-fixed');
   assert.equal(records.relationship.relationshipType, 'owner');
-  assert.equal(records.business.listing.isPublished, true);
+  assert.equal(records.business.listing.isPublished, false);
+  assert.equal(records.business.status, 'pending_verification');
+  assert.equal(records.business.businessMode, 'listing_and_store');
 });
 
 test('Phase 5 Registration 3: registration creates a listing-only business without tenant state', () => {
@@ -67,4 +70,11 @@ test('Phase 5 Registration 5: registration output contains no credentials or sec
     ownerUid: 'uid-owner',
   });
   assert.doesNotMatch(JSON.stringify(records), /password|secret|privateKey|accessToken/i);
+});
+
+
+test('Phase 5 Registration 6: business mode is explicit and invalid modes fail closed', () => {
+  assert.equal(validateBusinessRegistrationRequest(input).businessMode, 'listing_and_store');
+  assert.equal(validateBusinessRegistrationRequest({ ...input, businessMode: 'listing_only' }).businessMode, 'listing_only');
+  assert.throws(() => validateBusinessRegistrationRequest({ ...input, businessMode: 'unknown' as any }), /Business mode must be/);
 });
