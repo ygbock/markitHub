@@ -1,5 +1,7 @@
 import crypto from 'node:crypto';
 
+export type BusinessMode = 'listing_only' | 'listing_and_store';
+
 export interface BusinessRegistrationRequest {
   businessName: string;
   category: string;
@@ -10,6 +12,7 @@ export interface BusinessRegistrationRequest {
   phone?: string;
   email?: string;
   openingHours?: string;
+  businessMode: BusinessMode;
   idempotencyKey: string;
 }
 
@@ -25,12 +28,14 @@ export function validateBusinessRegistrationRequest(input: Partial<BusinessRegis
   const address = String(input.address || '').trim();
   const city = String(input.city || '').trim();
   const idempotencyKey = String(input.idempotencyKey || '').trim();
+  const businessMode = String(input.businessMode || 'listing_only').trim() as BusinessMode;
 
   if (!businessName) throw new Error('Business name is required.');
   if (!category) throw new Error('Business category is required.');
   if (!address) throw new Error('Business address is required.');
   if (!city) throw new Error('Business city is required.');
   if (!idempotencyKey) throw new Error('Idempotency-Key is required.');
+  if (businessMode !== 'listing_only' && businessMode !== 'listing_and_store') throw new Error('Business mode must be listing_only or listing_and_store.');
 
   return {
     businessName,
@@ -42,6 +47,7 @@ export function validateBusinessRegistrationRequest(input: Partial<BusinessRegis
     phone: String(input.phone || '').trim() || undefined,
     email: String(input.email || '').trim() || undefined,
     openingHours: String(input.openingHours || '').trim() || undefined,
+    businessMode,
     idempotencyKey,
   };
 }
@@ -85,7 +91,7 @@ export function buildBusinessRegistrationRecords(params: {
     tags: [],
     ratingAverage: 0,
     reviewCount: 0,
-    isPublished: true,
+    isPublished: false,
     isFeatured: false,
   };
 
@@ -99,7 +105,9 @@ export function buildBusinessRegistrationRecords(params: {
     country: params.country || 'Sierra Leone',
     currency: params.currency || 'USD',
     verificationStatus: 'pending',
-    status: 'active',
+    status: 'pending_verification',
+    businessMode: params.request.businessMode,
+    onboardingStatus: 'in_progress',
     listing,
     locations: [location],
     tenantIds: [],
