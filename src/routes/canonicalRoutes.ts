@@ -420,6 +420,19 @@ export const CANONICAL_ROUTE_DEFINITIONS: CanonicalRouteDefinition[] = [
   // -------------------------------------------------------------------------
   // 5. BUSINESS ONBOARDING (Owner: Business Domain)
   // -------------------------------------------------------------------------
+  // Business owner acquisition is a public entry point; the account is
+  // established by the signup flow before a business record is created.
+  {
+    id: 'business.signup',
+    pattern: '/business/signup',
+    domain: 'BUSINESS_ONBOARDING',
+    context: 'BUSINESS',
+    auth: 'NONE',
+    title: 'Business Owner Signup',
+    description: 'Create a business owner identity and establish a business workspace.',
+  },
+
+
   {
     id: 'business.register',
     pattern: '/business/register',
