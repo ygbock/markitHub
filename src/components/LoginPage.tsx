@@ -41,7 +41,11 @@ export default function LoginPage({
   };
 
   const [viewMode, setViewMode] = useState<IdentityViewMode>(() => getInitialMode(currentPath));
-  const [loginMode, setLoginMode] = useState<'staff' | 'customer'>('staff');
+  // Public Discovery sign-in is a customer identity flow by default. Staff/platform
+  // authentication is selected when the preserved destination is an operational route.
+  const defaultLoginMode: 'staff' | 'customer' =
+    returnUrl?.startsWith('/tenant/') || returnUrl?.startsWith('/superadmin/') ? 'staff' : 'customer';
+  const [loginMode, setLoginMode] = useState<'staff' | 'customer'>(defaultLoginMode);
   const loginTab = loginMode;
   const setLoginTab = setLoginMode;
 
@@ -96,10 +100,23 @@ export default function LoginPage({
       if (authContext) {
         await authContext.signInWithEmail(email, password);
         setSuccessMsg('Successfully authenticated with Firebase Auth!');
-        if (returnUrl) {
+        // Route the authenticated identity to its authoritative domain. Public
+        // Discovery return URLs remain public; they must never fall through to
+        // the default tenant workspace.
+        const accountRole = authContext.user?.accountRole;
+        const isPlatformAdmin = authContext.isPlatformAdmin || authContext.isSuperAdmin;
+        const ownedBusiness = authContext.businessRelationships.find(
+          relationship => relationship.relationshipType === 'owner' && relationship.status === 'active'
+        );
+
+        if (returnUrl && !returnUrl.startsWith('/tenant/') && !returnUrl.startsWith('/superadmin/')) {
           navigateTo(returnUrl);
+        } else if (isPlatformAdmin) {
+          navigateTo('/superadmin/dashboard');
+        } else if (accountRole === 'BUSINESS_OWNER' && ownedBusiness) {
+          navigateTo('/business/' + encodeURIComponent(ownedBusiness.businessId) + '/dashboard');
         } else {
-          navigateTo('/tenant/nexus-retail/dashboard');
+          navigateTo('/account/profile');
         }
       } else {
         // Fallback for demo mode
