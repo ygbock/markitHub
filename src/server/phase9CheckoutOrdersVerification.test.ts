@@ -445,7 +445,7 @@ test('Phase 9 Invariant 43: transitionToStage cannot bootstrap directly into a l
 
 test('Phase 9 Invariant 44: Monime settlement synchronizes existing lifecycle payment state and payment-success stages', () => {
   const server = readFileSync(resolve(process.cwd(), 'server.ts'), 'utf8');
-  const settlement = server.slice(server.indexOf('const paymentPatch = {'));
+  const settlement = server.slice(server.indexOf('const lifecyclePaymentPatch = existingLifecycle'));
   assert.match(settlement, /paymentStatus: 'paid'/);
   assert.match(settlement, /lifecycleDomainStatuses: lifecyclePaymentPatch/);
   assert.match(settlement, /lifecycleStages: lifecycleStagePatch\.stages/);
