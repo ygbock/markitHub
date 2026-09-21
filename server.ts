@@ -2649,6 +2649,9 @@ async function startServer() {
                           : { stages: withReservationStage };
                       })()
                     : null;
+                  const inventoryFinalizationTransactionId = reservationId
+                    ? 'INV-SETTLEMENT-' + String(tenantId) + '-' + String(sessionId)
+                    : '';
                   const paymentPatch = {
                     paymentStatus: 'paid',
                     payment_status: 'paid',
@@ -2656,6 +2659,10 @@ async function startServer() {
                     paymentProvider: 'monime',
                     monimeSessionId: String(sessionId),
                     tenantId,
+                    ...(inventoryFinalizationTransactionId ? {
+                      inventoryFinalizationTransactionId,
+                      inventoryFinalizedAt: paidAt,
+                    } : {}),
                     ...(lifecyclePaymentPatch ? { lifecycleDomainStatuses: lifecyclePaymentPatch } : {}),
                     ...(lifecycleStagePatch?.stages ? { lifecycleStages: lifecycleStagePatch.stages } : {}),
                     ...(lifecycleStagePatch?.currentLifecycleStageId ? {
