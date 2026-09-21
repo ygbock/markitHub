@@ -59,7 +59,6 @@ import StorefrontCheckoutPage from './components/storefront/StorefrontCheckoutPa
 import StorefrontOrdersPage from './components/storefront/StorefrontOrdersPage';
 import TenantStorefrontManagement from './components/storefront/TenantStorefrontManagement';
 import TenantCatalogManagement from './components/tenant/TenantCatalogManagement';
-import ListingBusinessShell from './components/business/ListingBusinessShell';
 import BusinessOwnerSignup from './components/business/BusinessOwnerSignup';
 import BusinessOwnerPortal from './components/business/BusinessOwnerPortal';
 import BusinessOwnerListingManagement from './components/business/BusinessOwnerListingManagement';
