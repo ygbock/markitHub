@@ -106,3 +106,13 @@ test('Business Owner 9: authoritative profile management exposes profile, locati
   assert.match(routes, /app\.post\('\/api\/business\/:businessId\/services'/);
   assert.match(routes, /app\.delete\('\/api\/business\/:businessId\/services\/:serviceId'/);
 });
+
+
+test('Business Owner 10: profile mutations validate contact data and audit service lifecycle changes', () => {
+  const routes = readFileSync(resolve(process.cwd(), 'src/server/businessProfileRoutes.ts'), 'utf8');
+  assert.match(routes, /Business email is invalid/);
+  assert.match(routes, /BUSINESS_SERVICE_CREATED/);
+  assert.match(routes, /BUSINESS_SERVICE_DELETED/);
+  assert.match(routes, /db\.runTransaction/);
+  assert.match(routes, /businessId, name, description, price, durationMinutes/);
+});
