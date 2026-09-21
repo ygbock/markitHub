@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Building2, CheckCircle2, Clock3, MapPin, Plus, Save, Trash2, ShieldCheck } from 'lucide-react';
+import { CheckCircle2, MapPin, Plus, Save, Trash2, ShieldCheck } from 'lucide-react';
 import { auth } from '../../lib/firebase';
 
 type Tab = 'overview'|'listing'|'locations'|'services'|'settings';
