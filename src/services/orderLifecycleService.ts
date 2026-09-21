@@ -631,9 +631,9 @@ export class OrderLifecycleService {
       customDomainStatuses?: Partial<OrderLifecycleDomainStatuses>;
     }
   ): Order {
-    const { domainStatuses, stages } = order.lifecycleStages && order.lifecycleDomainStatuses 
+    const { domainStatuses, stages } = order.lifecycleStages && order.lifecycleDomainStatuses
       ? { domainStatuses: { ...order.lifecycleDomainStatuses }, stages: [...order.lifecycleStages] }
-      : this.initializeOrderLifecycle(order, targetStageId);
+      : this.initializeOrderLifecycle(order);
 
     const nowIso = new Date().toISOString();
     const stageDef = ORDER_LIFECYCLE_STAGES.find(s => s.id === targetStageId);
