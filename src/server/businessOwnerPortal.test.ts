@@ -56,3 +56,25 @@ test('Business Owner 5: owner signup and portal are mounted into the canonical a
   assert.match(app, /currentRoute\.definition\.id === 'business\.signup'/);
   assert.match(app, /currentRoute\.definition\.id === 'business\.dashboard'/);
 });
+
+test('Business Owner 6: onboarding readiness and review submission are owner-scoped and server-authoritative', () => {
+  const server = readFileSync(resolve(process.cwd(), 'server.ts'), 'utf8');
+  const readiness = server.slice(server.indexOf("app.get('/api/business/:businessId/readiness'"));
+  const submission = server.slice(server.indexOf("app.post('/api/business/:businessId/submit-review'"));
+  assert.match(readiness, /requireServerAuth/);
+  assert.match(readiness, /Only the authoritative business owner may access onboarding readiness/);
+  assert.match(readiness, /evaluateBusinessOnboardingReadiness/);
+  assert.match(submission, /requireServerAuth/);
+  assert.match(submission, /Only the authoritative business owner may submit this business for review/);
+  assert.match(submission, /readyForReview/);
+  assert.match(submission, /onboardingStatus: 'submitted_for_review'/);
+  assert.match(submission, /BUSINESS_SUBMITTED_FOR_REVIEW/);
+});
+
+test('Business Owner 7: owner portal consumes authoritative readiness and cannot publish directly', () => {
+  const portal = readFileSync(resolve(process.cwd(), 'src/components/business/BusinessOwnerPortal.tsx'), 'utf8');
+  assert.match(portal, /\/api\/business\/'\+encodeURIComponent\(selected\.id\)\+'\/readiness/);
+  assert.match(portal, /\/api\/business\/'\+encodeURIComponent\(selected\.id\)\+'\/submit-review/);
+  assert.match(portal, /Submit for platform review/);
+  assert.doesNotMatch(portal, /isPublished\s*:\s*true/);
+});
