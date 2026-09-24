@@ -142,8 +142,38 @@ export default function App() {
   }), []);
 
   const tenantLookup = useCallback((tenantIdOrSlug: string): TenantContextRecord | null => {
-    return tenantRegistry[tenantIdOrSlug] || null;
-  }, [tenantRegistry]);
+    const registered = tenantRegistry[tenantIdOrSlug];
+    if (registered) return registered;
+
+    // Provisioned tenants are authoritative Firestore records surfaced through
+    // AuthContext membership metadata. Fall back to that context before treating
+    // a tenant as unknown; the static registry is retained for legacy demo tenants.
+    const membership = authContextState?.tenantMemberships?.find((candidate) => {
+      const enriched = candidate as TenantMembership & {
+        tenantSlug?: string;
+        tenantName?: string;
+        tenantStatus?: string;
+        tenantCapabilities?: string[];
+      };
+      return candidate.status === 'active' &&
+        (candidate.tenantId === tenantIdOrSlug || enriched.tenantSlug === tenantIdOrSlug);
+    }) as (TenantMembership & {
+      tenantSlug?: string;
+      tenantName?: string;
+      tenantStatus?: string;
+      tenantCapabilities?: string[];
+    }) | undefined;
+
+    if (!membership) return null;
+
+    return {
+      id: membership.tenantId,
+      slug: membership.tenantSlug || membership.tenantId,
+      name: membership.tenantName || membership.tenantId,
+      status: (membership.tenantStatus || 'active') as TenantContextRecord['status'],
+      capabilities: (membership.tenantCapabilities || []) as TenantContextRecord['capabilities'],
+    };
+  }, [tenantRegistry, authContextState?.tenantMemberships]);
 
   // Consume Phase 2 Authoritative AuthContext
   let authContextState: ReturnType<typeof useAuth> | null = null;
