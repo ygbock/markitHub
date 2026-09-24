@@ -1038,7 +1038,10 @@ registerBusinessReviewRoutes({ app, requireServerAuth, requirePlatformAdmin, get
           const prior = priorRequest.data() || {};
           if (
             String(prior.businessId || '') !== request.businessId ||
-            String(prior.locationId || '') !== request.locationId
+            String(prior.locationId || '') !== request.locationId ||
+            String(prior.planId || '') !== request.planId ||
+            String(prior.billingInterval || 'monthly') !== request.billingInterval ||
+            Number(prior.trialDays ?? 14) !== Number(request.trialDays ?? 14)
           ) {
             throw Object.assign(new Error('Idempotency-Key is already bound to a different provisioning request.'), { statusCode: 409 });
           }
@@ -1126,6 +1129,8 @@ registerBusinessReviewRoutes({ app, requireServerAuth, requirePlatformAdmin, get
           businessId: business.id,
           locationId: location.id,
           planId: request.planId,
+          billingInterval: request.billingInterval,
+          trialDays: request.trialDays,
           idempotencyKeyHash: keyHash,
           createdAt: records.tenant.createdAt,
         });
