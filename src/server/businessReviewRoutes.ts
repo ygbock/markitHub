@@ -95,58 +95,63 @@ export function registerBusinessReviewRoutes(params: {
     if (!db) return res.status(503).json({ error: 'Platform service is not configured.' });
     try {
       const businessId = clean(req.params.businessId);
-      const { ref, business } = await loadBusiness(db, businessId);
-      const readiness = evaluateBusinessOnboardingReadiness(business);
-      if (!readiness.readyForReview) {
-        return res.status(409).json({
-          success: false,
-          error: 'Business has incomplete required onboarding data.',
-          readiness,
-        });
-      }
-      if (business.onboardingStatus !== 'submitted_for_review') {
-        return res.status(409).json({ success: false, error: 'Business must be submitted for review before approval.' });
-      }
-      if (business.status === 'active' && business.verificationStatus === 'verified' && business.listing?.isPublished === true) {
-        return res.status(409).json({ success: false, error: 'Business is already approved and published.' });
-      }
+      const ref = db.collection('businesses').doc(businessId);
+      let updatedBusiness: any = null;
+      let audit: any = null;
 
-      const now = new Date().toISOString();
-      const patch = {
-        status: 'active',
-        verificationStatus: 'verified',
-        onboardingStatus: 'approved',
-        listing: { ...(business.listing || {}), isPublished: true },
-        reviewedAt: now,
-        reviewedBy: req.user.uid,
-        reviewNotes: clean(req.body?.notes, 2000),
-        updatedAt: now,
-      };
-      const audit = createAuthoritativeAuditRecord({
-        tenantId: 'platform',
-        actorUid: req.user.uid,
-        actorEmail: req.user.email,
-        actorRole: 'Platform Administrator',
-        action: 'BUSINESS_REVIEW_APPROVED',
-        module: 'Business Verification',
-        targetType: 'business',
-        targetId: businessId,
-        targetName: business.tradingName || business.legalName,
-        previousState: {
-          status: business.status,
-          verificationStatus: business.verificationStatus,
-          onboardingStatus: business.onboardingStatus,
-          listingPublished: business.listing?.isPublished === true,
-        },
-        newState: patch,
-        reason: clean(req.body?.notes, 2000) || 'Business approved through platform review workflow.',
-        result: 'success',
-      });
       await db.runTransaction(async (tx: any) => {
+        const snap = await tx.get(ref);
+        if (!snap.exists) throw reviewError('Business not found.', 404);
+        const business = { id: snap.id, ...snap.data() } as any;
+
+        const readiness = evaluateBusinessOnboardingReadiness(business);
+        if (!readiness.readyForReview) {
+          throw Object.assign(reviewError('Business has incomplete required onboarding data.', 409), { readiness });
+        }
+        if (business.onboardingStatus !== 'submitted_for_review') {
+          throw reviewError('Business must be submitted for review before approval.', 409);
+        }
+        if (business.status === 'active' && business.verificationStatus === 'verified' && business.listing?.isPublished === true) {
+          throw reviewError('Business is already approved and published.', 409);
+        }
+
+        const now = new Date().toISOString();
+        const patch = {
+          status: 'active',
+          verificationStatus: 'verified',
+          onboardingStatus: 'approved',
+          listing: { ...(business.listing || {}), isPublished: true },
+          reviewedAt: now,
+          reviewedBy: req.user.uid,
+          reviewNotes: clean(req.body?.notes, 2000),
+          updatedAt: now,
+        };
+        audit = createAuthoritativeAuditRecord({
+          tenantId: 'platform',
+          actorUid: req.user.uid,
+          actorEmail: req.user.email,
+          actorRole: 'Platform Administrator',
+          action: 'BUSINESS_REVIEW_APPROVED',
+          module: 'Business Verification',
+          targetType: 'business',
+          targetId: businessId,
+          targetName: business.tradingName || business.legalName,
+          previousState: {
+            status: business.status,
+            verificationStatus: business.verificationStatus,
+            onboardingStatus: business.onboardingStatus,
+            listingPublished: business.listing?.isPublished === true,
+          },
+          newState: patch,
+          reason: clean(req.body?.notes, 2000) || 'Business approved through platform review workflow.',
+          result: 'success',
+        });
         tx.set(ref, patch, { merge: true });
         tx.create(db.collection('audit_logs').doc(audit.id), audit);
+        updatedBusiness = { ...business, ...patch };
       });
-      return res.json({ success: true, business: { ...business, ...patch }, audit });
+
+      return res.json({ success: true, business: updatedBusiness, audit });
     } catch (err: any) {
       return res.status(Number(err?.statusCode) || 500).json({ success: false, error: err?.message || 'Unable to approve business.' });
     }
@@ -157,51 +162,61 @@ export function registerBusinessReviewRoutes(params: {
     if (!db) return res.status(503).json({ error: 'Platform service is not configured.' });
     try {
       const businessId = clean(req.params.businessId);
-      const { ref, business } = await loadBusiness(db, businessId);
-      if (business.onboardingStatus !== 'submitted_for_review') {
-        return res.status(409).json({ success: false, error: 'Business must be submitted for review before rejection.' });
-      }
-      const notes = clean(req.body?.notes, 2000);
-      if (!notes) return res.status(400).json({ success: false, error: 'Review notes are required when rejecting a business.' });
+      const ref = db.collection('businesses').doc(businessId);
+      let updatedBusiness: any = null;
+      let audit: any = null;
 
-      const now = new Date().toISOString();
-      const patch = {
-        status: 'pending_verification',
-        verificationStatus: 'rejected',
-        onboardingStatus: 'rejected',
-        listing: { ...(business.listing || {}), isPublished: false },
-        reviewedAt: now,
-        reviewedBy: req.user.uid,
-        reviewNotes: notes,
-        updatedAt: now,
-      };
-      const audit = createAuthoritativeAuditRecord({
-        tenantId: 'platform',
-        actorUid: req.user.uid,
-        actorEmail: req.user.email,
-        actorRole: 'Platform Administrator',
-        action: 'BUSINESS_REVIEW_REJECTED',
-        module: 'Business Verification',
-        targetType: 'business',
-        targetId: businessId,
-        targetName: business.tradingName || business.legalName,
-        previousState: {
-          status: business.status,
-          verificationStatus: business.verificationStatus,
-          onboardingStatus: business.onboardingStatus,
-          listingPublished: business.listing?.isPublished === true,
-        },
-        newState: patch,
-        reason: notes,
-        result: 'success',
-      });
       await db.runTransaction(async (tx: any) => {
+        const snap = await tx.get(ref);
+        if (!snap.exists) throw reviewError('Business not found.', 404);
+        const business = { id: snap.id, ...snap.data() } as any;
+
+        if (business.onboardingStatus !== 'submitted_for_review') {
+          throw reviewError('Business must be submitted for review before rejection.', 409);
+        }
+        const notes = clean(req.body?.notes, 2000);
+        if (!notes) throw reviewError('Review notes are required when rejecting a business.', 400);
+
+        const now = new Date().toISOString();
+        const patch = {
+          status: 'pending_verification',
+          verificationStatus: 'rejected',
+          onboardingStatus: 'rejected',
+          listing: { ...(business.listing || {}), isPublished: false },
+          reviewedAt: now,
+          reviewedBy: req.user.uid,
+          reviewNotes: notes,
+          updatedAt: now,
+        };
+        audit = createAuthoritativeAuditRecord({
+          tenantId: 'platform',
+          actorUid: req.user.uid,
+          actorEmail: req.user.email,
+          actorRole: 'Platform Administrator',
+          action: 'BUSINESS_REVIEW_REJECTED',
+          module: 'Business Verification',
+          targetType: 'business',
+          targetId: businessId,
+          targetName: business.tradingName || business.legalName,
+          previousState: {
+            status: business.status,
+            verificationStatus: business.verificationStatus,
+            onboardingStatus: business.onboardingStatus,
+            listingPublished: business.listing?.isPublished === true,
+          },
+          newState: patch,
+          reason: notes,
+          result: 'success',
+        });
         tx.set(ref, patch, { merge: true });
         tx.create(db.collection('audit_logs').doc(audit.id), audit);
+        updatedBusiness = { ...business, ...patch };
       });
-      return res.json({ success: true, business: { ...business, ...patch }, audit });
+
+      return res.json({ success: true, business: updatedBusiness, audit });
     } catch (err: any) {
       return res.status(Number(err?.statusCode) || 500).json({ success: false, error: err?.message || 'Unable to reject business.' });
     }
   });
+
 }
