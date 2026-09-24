@@ -6,6 +6,7 @@ import { BusinessShell } from './BusinessShell';
 import { TenantShell } from './TenantShell';
 import { SuperAdminShell } from './SuperAdminShell';
 import { ShellOnboardingAdapter } from './ShellOnboardingAdapter';
+import { TenantProvider } from '../context/TenantContext';
 import { StaffMember } from '../utils/permissions';
 import { Customer, ListingBusinessProfile } from '../types';
 
@@ -171,15 +172,17 @@ export const ShellResolver: React.FC<ShellResolverProps> = ({
 
     case 'TENANT_OPERATIONS':
       return (
-        <TenantShell
-          activePath={currentPath}
-          onNavigate={onNavigate}
-          staff={staff}
-          onLogout={onLogout}
-          isOnline={isOnline}
-        >
-          {children}
-        </TenantShell>
+        <TenantProvider initialSlug={route.params.tenantId}>
+          <TenantShell
+            activePath={currentPath}
+            onNavigate={onNavigate}
+            staff={staff}
+            onLogout={onLogout}
+            isOnline={isOnline}
+          >
+            {children}
+          </TenantShell>
+        </TenantProvider>
       );
 
     default:
