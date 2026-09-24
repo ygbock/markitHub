@@ -258,10 +258,9 @@ test('Business Owner 17: provisioned owners recover an authoritative single-tena
   const app = readFileSync(resolve(process.cwd(), 'src/App.tsx'), 'utf8');
   const auth = readFileSync(resolve(process.cwd(), 'src/context/AuthContext.tsx'), 'utf8');
 
-  const membershipGuard = server.slice(
-    server.indexOf('const requireActiveTenantMembership'),
-    server.indexOf('registerTenantCatalogRoutes'),
-  );
+  const membershipGuardStart = server.indexOf('const requireActiveTenantMembership');
+  assert.ok(membershipGuardStart >= 0, 'requireActiveTenantMembership must be present in server.ts');
+  const membershipGuard = server.slice(membershipGuardStart);
 
   assert.match(membershipGuard, /tenant_memberships/);
   assert.match(membershipGuard, /where\('uid', '==', req\.user\.uid\)/);
