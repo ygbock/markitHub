@@ -312,6 +312,26 @@ async function startServer() {
         return res.status(evaluation.statusCode || 403).json({ error: evaluation.error });
       }
 
+      // Bind authoritative tenant role/permissions for this request. Newly
+      // provisioned owners may not yet have matching Firebase custom claims,
+      // so permission checks must not fail solely because the cached ID token
+      // predates tenant provisioning. Never persist these values to the token.
+      const authoritativeRole = ownerUid === req.user.uid
+        ? 'Business Owner'
+        : String(staffData?.role || req.user.claims?.role || 'Staff').trim();
+      const membershipPermissions = Array.isArray(staffData?.permissions)
+        ? staffData.permissions
+        : Array.isArray(staffData?.permissionsOverride)
+          ? staffData.permissionsOverride
+          : null;
+      const authoritativePermissions = membershipPermissions && membershipPermissions.length > 0
+        ? membershipPermissions
+        : ((DEFAULT_ROLE_PERMISSIONS as Record<string, string[]>)[authoritativeRole] || []);
+
+      req.user.claims.role = authoritativeRole;
+      req.user.claims.permissions = authoritativePermissions;
+      req.user.permissions = authoritativePermissions;
+
       return next();
     } catch {
       return res.status(500).json({ error: 'Unable to verify tenant membership status.' });
