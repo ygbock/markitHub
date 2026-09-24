@@ -238,3 +238,17 @@ test('Business Owner 15: platform review decisions re-read authoritative state i
   assert.match(reject, /business\.onboardingStatus !== 'submitted_for_review'/);
   assert.match(reject, /tx\.set\(ref, patch/);
 });
+
+
+test('Business Owner 16: provisioning idempotency binds the complete request, not only business and location', () => {
+  const server = readFileSync(resolve(process.cwd(), 'server.ts'), 'utf8');
+  const start = server.indexOf("app.post('/api/business/provision-tenant'");
+  const end = server.indexOf("// TENANT AUDIT & SECURITY TELEMETRY", start);
+  const route = server.slice(start, end);
+
+  assert.match(route, /String\(prior\.planId \|\| ''\) !== request\.planId/);
+  assert.match(route, /String\(prior\.billingInterval \|\| 'monthly'\) !== request\.billingInterval/);
+  assert.match(route, /Number\(prior\.trialDays \?\? 14\) !== Number\(request\.trialDays \?\? 14\)/);
+  assert.match(route, /billingInterval: request\.billingInterval/);
+  assert.match(route, /trialDays: request\.trialDays/);
+});
