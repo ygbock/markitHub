@@ -262,20 +262,22 @@ async function startServer() {
       if (!tenantId) {
         const membershipSnap = await db.collection('tenant_memberships')
           .where('uid', '==', req.user.uid)
-          .where('status', '==', 'active')
-          .limit(2)
+          .limit(20)
           .get();
+        const activeMemberships = membershipSnap.docs.filter((docSnap) =>
+          String(docSnap.data()?.status || '').toLowerCase() === 'active'
+        );
 
-        if (membershipSnap.size > 1) {
+        if (activeMemberships.length > 1) {
           return res.status(409).json({
             error: 'Multiple active tenant memberships exist; an explicit tenant context is required.',
           });
         }
-        if (membershipSnap.empty) {
+        if (activeMemberships.length === 0) {
           return res.status(403).json({ error: 'Active tenant membership is required.' });
         }
 
-        tenantId = String(membershipSnap.docs[0].data()?.tenantId || '').trim();
+        tenantId = String(activeMemberships[0].data()?.tenantId || '').trim();
         if (!tenantId) {
           return res.status(403).json({ error: 'Active tenant membership is invalid.' });
         }
