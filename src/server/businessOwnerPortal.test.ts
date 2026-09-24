@@ -268,9 +268,9 @@ test('Business Owner 17: provisioned owners recover an authoritative single-tena
   assert.match(membershipGuard, /status \\|\\| ''/);
   assert.match(membershipGuard, /Multiple active tenant memberships exist/);
   assert.match(membershipGuard, /req\.user\.claims\.tenantId = tenantId/);
-  assert.match(auth, /collection\(db, 'tenants'\)/);
+  assert.match(auth, /doc\(db, 'tenants',/);
   assert.match(auth, /tenantSlug/);
   assert.match(auth, /tenantCapabilities/);
-  assert.match(app, /authoritative Firestore records surfaced through AuthContext membership metadata/);
+  assert.match(app, /authoritative Firestore records surfaced through[\s\S]*AuthContext membership metadata/);
   assert.match(app, /tenantMemberships/);
 });

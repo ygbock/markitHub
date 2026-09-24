@@ -141,6 +141,14 @@ export default function App() {
     }
   }), []);
 
+  // Consume Phase 2 Authoritative AuthContext
+  let authContextState: ReturnType<typeof useAuth> | null = null;
+  try {
+    authContextState = useAuth();
+  } catch {
+    authContextState = null;
+  }
+
   const tenantLookup = useCallback((tenantIdOrSlug: string): TenantContextRecord | null => {
     const registered = tenantRegistry[tenantIdOrSlug];
     if (registered) return registered;
@@ -174,14 +182,6 @@ export default function App() {
       capabilities: (membership.tenantCapabilities || []) as TenantContextRecord['capabilities'],
     };
   }, [tenantRegistry, authContextState?.tenantMemberships]);
-
-  // Consume Phase 2 Authoritative AuthContext
-  let authContextState: ReturnType<typeof useAuth> | null = null;
-  try {
-    authContextState = useAuth();
-  } catch {
-    authContextState = null;
-  }
 
   const authContext = useMemo(() => ({
     activeCustomer,
