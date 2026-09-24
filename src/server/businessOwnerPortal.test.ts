@@ -252,3 +252,25 @@ test('Business Owner 16: provisioning idempotency binds the complete request, no
   assert.match(route, /billingInterval: request\.billingInterval/);
   assert.match(route, /trialDays: request\.trialDays/);
 });
+
+test('Business Owner 17: provisioned owners recover an authoritative single-tenant context without a stale custom claim', () => {
+  const server = readFileSync(resolve(process.cwd(), 'server.ts'), 'utf8');
+  const app = readFileSync(resolve(process.cwd(), 'src/App.tsx'), 'utf8');
+  const auth = readFileSync(resolve(process.cwd(), 'src/context/AuthContext.tsx'), 'utf8');
+
+  const membershipGuard = server.slice(
+    server.indexOf('const requireActiveTenantMembership'),
+    server.indexOf('registerTenantCatalogRoutes'),
+  );
+
+  assert.match(membershipGuard, /tenant_memberships/);
+  assert.match(membershipGuard, /where\('uid', '==', req\.user\.uid\)/);
+  assert.match(membershipGuard, /where\('status', '==', 'active'\)/);
+  assert.match(membershipGuard, /Multiple active tenant memberships exist/);
+  assert.match(membershipGuard, /req\.user\.claims\.tenantId = tenantId/);
+  assert.match(auth, /collection\(db, 'tenants'\)/);
+  assert.match(auth, /tenantSlug/);
+  assert.match(auth, /tenantCapabilities/);
+  assert.match(app, /authoritative Firestore records surfaced through AuthContext membership metadata/);
+  assert.match(app, /tenantMemberships/);
+});
