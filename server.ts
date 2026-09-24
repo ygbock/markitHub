@@ -1271,7 +1271,7 @@ registerBusinessReviewRoutes({ app, requireServerAuth, requirePlatformAdmin, get
     }
   });
 
-  app.post('/api/tenant/ownership/transfer', requireServerAuth, async (req, res) => {
+  app.post('/api/tenant/ownership/transfer', requireServerAuth, requireActiveTenantMembership, async (req, res) => {
     const tenantId = extractAuthenticatedTenantId(req.user);
     const db = getAdminDb();
     if (!tenantId || !db) return res.status(503).json({ error: 'Tenant service is not configured.' });
