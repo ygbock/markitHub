@@ -198,6 +198,31 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         throw new Error(`user tenant_memberships query failed: ${e?.message}`);
       }
 
+      // Enrich authoritative memberships with the tenant record so canonical
+      // route guards can resolve provisioned tenants without relying on a static
+      // client-side tenant registry.
+      const enrichedMemberships: TenantMembership[] = [];
+      for (const membership of memberships) {
+        try {
+          const tenantSnap = await getDoc(doc(db, 'tenants', membership.tenantId));
+          if (!tenantSnap.exists()) {
+            enrichedMemberships.push(membership);
+            continue;
+          }
+          const tenant = tenantSnap.data() || {};
+          enrichedMemberships.push({
+            ...membership,
+            tenantSlug: typeof tenant.slug === 'string' ? tenant.slug : undefined,
+            tenantName: typeof tenant.name === 'string' ? tenant.name : undefined,
+            tenantStatus: typeof tenant.status === 'string' ? tenant.status : undefined,
+            tenantCapabilities: Array.isArray(tenant.capabilities) ? tenant.capabilities : [],
+          } as TenantMembership);
+        } catch (e: any) {
+          console.error('[AuthProvider] Failed to resolve tenant metadata:', e?.message);
+          throw new Error(`tenant metadata query failed for ${membership.tenantId}: ${e?.message}`);
+        }
+      }
+
       // Query business_relationships (FAIL CLOSED on Firestore error)
       const relationships: BusinessRelationship[] = [];
       try {
@@ -228,7 +253,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const resolvedPlatformIdentity = await resolvePlatformIdentity(fbUser);
 
       setPlatformIdentity(resolvedPlatformIdentity);
-      setTenantMemberships(memberships);
+      setTenantMemberships(enrichedMemberships);
       setBusinessRelationships(relationships);
       setStatus('authenticated');
       return true;
