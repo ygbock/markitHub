@@ -299,3 +299,15 @@ test('Business Owner 19: ownership transfer requires authoritative tenant member
   assert.match(route, /establishTenantSecurityContext/);
   assert.match(route, /assertOwnershipTransferAllowed/);
 });
+
+
+test('Business Owner 20: provisioned tenant routes mount an authoritative tenant context', () => {
+  const shell = readFileSync(resolve(process.cwd(), 'src/layouts/ShellResolver.tsx'), 'utf8');
+  const tenantContext = readFileSync(resolve(process.cwd(), 'src/context/TenantContext.tsx'), 'utf8');
+  assert.match(shell, /<TenantProvider initialSlug=\{route\.params\.tenantId\}>/);
+  assert.match(shell, /<TenantShell/);
+  assert.match(tenantContext, /useAuth\(\)/);
+  assert.match(tenantContext, /tenantMemberships/);
+  assert.match(tenantContext, /Authoritative tenant workspace/);
+  assert.match(tenantContext, /if \(pathTenant\) return pathTenant/);
+});
