@@ -525,6 +525,54 @@ function initializeTenants() {
   TENANT_PRODUCTS_STORE.set('sierra-boutique', sierraProducts);
 }
 
+/**
+ * Resolve a storefront tenant identifier from trusted request routing inputs.
+ *
+ * Explicit route parameters take precedence for parameterized API endpoints.
+ * For generic storefront requests the deterministic fallback order is:
+ * hostname -> /store/:tenantSlug path -> tenant headers -> query parameter.
+ * Hostname resolution is restricted to the configured storefront base domain
+ * and the documented "store-" subdomain shape to avoid arbitrary Host spoofing.
+ */
+export function resolveStorefrontTenantSlug(input: {
+  routeTenantSlug?: string;
+  hostname?: string;
+  pathname?: string;
+  tenantSlugHeader?: string;
+  tenantIdHeader?: string;
+  queryTenant?: string;
+  storefrontBaseDomain?: string;
+}): string {
+  const clean = (value: unknown) => String(value ?? '').trim().toLowerCase();
+
+  const routeTenantSlug = clean(input.routeTenantSlug);
+  if (routeTenantSlug) return routeTenantSlug;
+
+  const hostname = clean(input.hostname).split(':')[0];
+  const baseDomain = clean(input.storefrontBaseDomain || 'nexuspos.io').replace(/^\\.+|\\.+$/g, '');
+  if (hostname && baseDomain && hostname.endsWith('.' + baseDomain)) {
+    const hostLabel = hostname.slice(0, -(baseDomain.length + 1));
+    const hostTenant = hostLabel.startsWith('store-')
+      ? hostLabel.slice('store-'.length)
+      : '';
+    if (hostTenant) return hostTenant;
+  }
+
+  const pathMatch = clean(input.pathname).match(/^\\/store\\/([^/?#]+)/);
+  if (pathMatch?.[1]) return decodeURIComponent(pathMatch[1]);
+
+  const headerTenantSlug = clean(input.tenantSlugHeader);
+  if (headerTenantSlug) return headerTenantSlug;
+
+  const headerTenantId = clean(input.tenantIdHeader);
+  if (headerTenantId) return headerTenantId;
+
+  const queryTenant = clean(input.queryTenant);
+  if (queryTenant) return queryTenant;
+
+  return 'nexus-retail';
+}
+
 // Call initialization
 initializeTenants();
 
