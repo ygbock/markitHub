@@ -549,7 +549,7 @@ export function resolveStorefrontTenantSlug(input: {
   if (routeTenantSlug) return routeTenantSlug;
 
   const hostname = clean(input.hostname).split(':')[0];
-  const baseDomain = clean(input.storefrontBaseDomain || 'nexuspos.io').replace(/^\\.+|\\.+$/g, '');
+  const baseDomain = clean(input.storefrontBaseDomain || 'nexuspos.io').replace(/^\.+|\.+$/g, '');
   if (hostname && baseDomain && hostname.endsWith('.' + baseDomain)) {
     const hostLabel = hostname.slice(0, -(baseDomain.length + 1));
     const hostTenant = hostLabel.startsWith('store-')
@@ -558,7 +558,7 @@ export function resolveStorefrontTenantSlug(input: {
     if (hostTenant) return hostTenant;
   }
 
-  const pathMatch = clean(input.pathname).match(/^\\/store\\/([^/?#]+)/);
+  const pathMatch = clean(input.pathname).match(/^\/store\/([^/?#]+)/);
   if (pathMatch?.[1]) return decodeURIComponent(pathMatch[1]);
 
   const headerTenantSlug = clean(input.tenantSlugHeader);
