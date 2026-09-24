@@ -265,7 +265,8 @@ test('Business Owner 17: provisioned owners recover an authoritative single-tena
 
   assert.match(membershipGuard, /tenant_memberships/);
   assert.match(membershipGuard, /where\('uid', '==', req\.user\.uid\)/);
-  assert.match(membershipGuard, /where\('status', '==', 'active'\)/);
+  assert.match(membershipGuard, /activeMemberships/);
+  assert.match(membershipGuard, /status \\|\\| ''/);
   assert.match(membershipGuard, /Multiple active tenant memberships exist/);
   assert.match(membershipGuard, /req\.user\.claims\.tenantId = tenantId/);
   assert.match(auth, /collection\(db, 'tenants'\)/);
