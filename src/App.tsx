@@ -7,7 +7,7 @@ import {
 import { 
   Product, Customer, StaffMember, Order, AuditLog, SystemSettings, 
   Category, StorefrontHomepageConfig, ProductReview, ReviewStatus, ReviewAdminResponse,
-  AdminNotification, RefundRequestDetails 
+  AdminNotification, RefundRequestDetails, TenantMembership
 } from './types';
 import { 
   seedInitialFirestoreData,
