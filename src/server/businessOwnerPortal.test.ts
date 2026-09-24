@@ -274,3 +274,19 @@ test('Business Owner 17: provisioned owners recover an authoritative single-tena
   assert.match(app, /authoritative Firestore records surfaced through[\s\S]*AuthContext membership metadata/);
   assert.match(app, /tenantMemberships/);
 });
+
+
+test('Business Owner 18: provisioned owners receive authoritative tenant role permissions before tenant route authorization', () => {
+  const server = readFileSync(resolve(process.cwd(), 'server.ts'), 'utf8');
+  const membershipGuardStart = server.indexOf('const requireActiveTenantMembership');
+  const membershipGuardEnd = server.indexOf('\n\n\n  registerTenantCatalogRoutes', membershipGuardStart);
+  const membershipGuard = server.slice(membershipGuardStart, membershipGuardEnd);
+
+  assert.match(membershipGuard, /authoritativeRole = ownerUid === req\.user\.uid/);
+  assert.match(membershipGuard, /'Business Owner'/);
+  assert.match(membershipGuard, /customPermissions/);
+  assert.match(membershipGuard, /DEFAULT_ROLE_PERMISSIONS/);
+  assert.match(membershipGuard, /req\.user\.claims\.role = authoritativeRole/);
+  assert.match(membershipGuard, /req\.user\.claims\.permissions = authoritativePermissions/);
+  assert.match(membershipGuard, /req\.user\.permissions = authoritativePermissions/);
+});
