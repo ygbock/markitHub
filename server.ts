@@ -248,12 +248,44 @@ async function startServer() {
   }
 
   const requireActiveTenantMembership = async (req: any, res: any, next: any) => {
-    const tenantId = extractAuthenticatedTenantId(req.user);
+    let tenantId = extractAuthenticatedTenantId(req.user);
     const db = getAdminDb();
-    if (!tenantId || !db || !req.user?.uid) {
+    if (!db || !req.user?.uid) {
       return res.status(403).json({ error: 'Active tenant membership is required.' });
     }
     try {
+      // Newly provisioned Business Owners have an authoritative tenant_memberships
+      // record before a tenantId custom claim can exist in their cached ID token.
+      // If the verified token has no tenant context, derive it only when the
+      // authenticated user has exactly one active tenant membership. Never accept
+      // a client-supplied tenant identifier.
+      if (!tenantId) {
+        const membershipSnap = await db.collection('tenant_memberships')
+          .where('uid', '==', req.user.uid)
+          .where('status', '==', 'active')
+          .limit(2)
+          .get();
+
+        if (membershipSnap.size > 1) {
+          return res.status(409).json({
+            error: 'Multiple active tenant memberships exist; an explicit tenant context is required.',
+          });
+        }
+        if (membershipSnap.empty) {
+          return res.status(403).json({ error: 'Active tenant membership is required.' });
+        }
+
+        tenantId = String(membershipSnap.docs[0].data()?.tenantId || '').trim();
+        if (!tenantId) {
+          return res.status(403).json({ error: 'Active tenant membership is invalid.' });
+        }
+
+        // Downstream tenant handlers already consume the verified request claims.
+        // Bind the server-derived context for this request only; it is never
+        // persisted as a client-controlled claim.
+        req.user.claims.tenantId = tenantId;
+      }
+
       const tenantSnap = await db.collection('tenants').doc(tenantId).get();
       const tenantData = tenantSnap.exists ? tenantSnap.data() : null;
 
