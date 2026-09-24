@@ -290,3 +290,12 @@ test('Business Owner 18: provisioned owners receive authoritative tenant role pe
   assert.match(membershipGuard, /req\.user\.claims\.permissions = authoritativePermissions/);
   assert.match(membershipGuard, /req\.user\.permissions = authoritativePermissions/);
 });
+
+
+test('Business Owner 19: ownership transfer requires authoritative tenant membership recovery', () => {
+  const server = readFileSync(resolve(process.cwd(), 'server.ts'), 'utf8');
+  const route = server.slice(server.indexOf("app.post('/api/tenant/ownership/transfer'"));
+  assert.match(route, /app\.post\('\/api\/tenant\/ownership\/transfer', requireServerAuth, requireActiveTenantMembership/);
+  assert.match(route, /establishTenantSecurityContext/);
+  assert.match(route, /assertOwnershipTransferAllowed/);
+});
