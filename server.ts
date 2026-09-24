@@ -319,11 +319,9 @@ async function startServer() {
       const authoritativeRole = ownerUid === req.user.uid
         ? 'Business Owner'
         : String(staffData?.role || req.user.claims?.role || 'Staff').trim();
-      const membershipPermissions = Array.isArray(staffData?.permissions)
-        ? staffData.permissions
-        : Array.isArray(staffData?.permissionsOverride)
-          ? staffData.permissionsOverride
-          : null;
+      const membershipPermissions = Array.isArray(staffData?.customPermissions)
+        ? staffData.customPermissions
+        : null;
       const authoritativePermissions = membershipPermissions && membershipPermissions.length > 0
         ? membershipPermissions
         : ((DEFAULT_ROLE_PERMISSIONS as Record<string, string[]>)[authoritativeRole] || []);
