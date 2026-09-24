@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
 import { StorefrontTenantConfig } from '../server/tenantManager';
 import { TenantCapability } from '../types';
+import { useAuth } from './AuthContext';
 
 export interface TenantInfoOption {
   slug: string;
@@ -45,6 +46,15 @@ export const DEFAULT_TENANT_CAPABILITIES: TenantCapability[] = [
   'loyalty',
 ];
 
+interface TenantMembershipLike {
+  tenantId: string;
+  status?: string;
+  tenantSlug?: string;
+  tenantName?: string;
+  tenantStatus?: string;
+  tenantCapabilities?: string[];
+}
+
 export interface TenantContextType {
   tenantConfig: StorefrontTenantConfig | null;
   tenantSlug: string;
@@ -76,6 +86,25 @@ export const TenantProvider: React.FC<{
   initialSlug,
   initialLocationId,
 }) => {
+  const { tenantMemberships } = useAuth();
+
+  const authoritativeTenants = useMemo<TenantInfoOption[]>(() => {
+    const dynamic = tenantMemberships
+      .filter(m => m.status === 'active')
+      .map(m => {
+        const enriched = m as TenantMembershipLike;
+        return {
+          slug: enriched.tenantSlug || m.tenantId,
+          name: enriched.tenantName || m.tenantId,
+          currencySymbol: 'Le',
+          currencyCode: 'SLE',
+          description: 'Authoritative tenant workspace',
+        };
+      });
+    const merged = [...AVAILABLE_TENANTS, ...dynamic];
+    return merged.filter((tenant, index, list) => list.findIndex(t => t.slug === tenant.slug) === index);
+  }, [tenantMemberships]);
+
   const [tenantSlug, setTenantSlugState] = useState<string>(() => {
     // 1. Check prop / URL parameter
     if (initialSlug) return initialSlug;
@@ -89,16 +118,12 @@ export const TenantProvider: React.FC<{
       const pathParts = window.location.pathname.split('/').filter(Boolean);
       if (pathParts[0] === 'store' && pathParts[1]) {
         const pathTenant = pathParts[1];
-        if (AVAILABLE_TENANTS.some((t) => t.slug === pathTenant)) {
-          return pathTenant;
-        }
+        if (pathTenant) return pathTenant;
       }
 
       // 3. Check localStorage
       const stored = localStorage.getItem(TENANT_STORAGE_KEY);
-      if (stored && AVAILABLE_TENANTS.some((t) => t.slug === stored)) {
-        return stored;
-      }
+      if (stored) return stored;
     }
 
     return 'nexus-retail';
@@ -219,7 +244,7 @@ export const TenantProvider: React.FC<{
         capabilities,
         isLoading,
         error,
-        availableTenants: AVAILABLE_TENANTS,
+        availableTenants: authoritativeTenants,
         setTenantSlug,
         setLocationId,
         switchBranch,
