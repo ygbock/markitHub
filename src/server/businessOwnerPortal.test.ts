@@ -222,3 +222,19 @@ test('Business Owner 14: lifecycle is closed-loop from owner signup through revi
   assert.match(portal, /Submit for platform review/);
   assert.doesNotMatch(portal, /isPublished\s*:\s*true/);
 });
+
+
+test('Business Owner 15: platform review decisions re-read authoritative state inside transactions', () => {
+  const routes = readFileSync(resolve(process.cwd(), 'src/server/businessReviewRoutes.ts'), 'utf8');
+  const approve = routes.slice(routes.indexOf("app.post('/api/platform/business-reviews/:businessId/approve'"), routes.indexOf("app.post('/api/platform/business-reviews/:businessId/reject'"));
+  const reject = routes.slice(routes.indexOf("app.post('/api/platform/business-reviews/:businessId/reject'"));
+
+  assert.match(approve, /db\.runTransaction\(async \(tx: any\) =>/);
+  assert.match(approve, /const snap = await tx\.get\(ref\)/);
+  assert.match(approve, /business\.onboardingStatus !== 'submitted_for_review'/);
+  assert.match(approve, /tx\.set\(ref, patch/);
+  assert.match(reject, /db\.runTransaction\(async \(tx: any\) =>/);
+  assert.match(reject, /const snap = await tx\.get\(ref\)/);
+  assert.match(reject, /business\.onboardingStatus !== 'submitted_for_review'/);
+  assert.match(reject, /tx\.set\(ref, patch/);
+});
