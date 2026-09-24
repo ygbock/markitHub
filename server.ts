@@ -20,7 +20,8 @@ import {
   getTenantProducts, 
   getTenantProductBySlugOrId,
   getTenantCategories,
-  getTenantBrands
+  getTenantBrands,
+  resolveStorefrontTenantSlug
 } from './src/server/tenantManager';
 import { INITIAL_PRODUCTS } from './src/data/mockData';
 import { slugify } from './src/utils/seoUtils';
@@ -1369,11 +1370,15 @@ registerBusinessReviewRoutes({ app, requireServerAuth, requirePlatformAdmin, get
 
   // Tenant Resolution Helper
   function resolveTenant(req: express.Request, paramTenantSlug?: string) {
-    const slug = paramTenantSlug || 
-      (req.headers['x-tenant-slug'] as string) || 
-      (req.headers['x-tenant-id'] as string) || 
-      (req.query.tenant as string) || 
-      'nexus-retail';
+    const slug = resolveStorefrontTenantSlug({
+      routeTenantSlug: paramTenantSlug,
+      hostname: String(req.hostname || req.headers.host || ''),
+      pathname: req.path,
+      tenantSlugHeader: String(req.headers['x-tenant-slug'] || ''),
+      tenantIdHeader: String(req.headers['x-tenant-id'] || ''),
+      queryTenant: String(req.query.tenant || ''),
+      storefrontBaseDomain: process.env.STOREFRONT_BASE_DOMAIN || 'nexuspos.io',
+    });
     return getTenantConfigBySlug(slug);
   }
 
