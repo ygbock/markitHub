@@ -373,3 +373,26 @@ test('Business Owner 23: public provisioned storefront resolution is publication
   assert.match(route, /Array.isArray\(tenant\.capabilities\)/);
   assert.match(route, /resolveTenant\(req, req\.params\.tenantSlug\)/);
 });
+
+test('Business Owner 24: published provisioned catalog reads are tenant-scoped and publication-gated', () => {
+  const server = readFileSync(resolve(process.cwd(), 'server.ts'), 'utf8');
+  const start = server.indexOf('async function resolvePublishedProvisionedCatalog');
+  const end = server.indexOf('  // 1. Storefront Context Endpoint', start);
+  const helper = server.slice(start, end);
+
+  assert.ok(start >= 0 && end > start);
+  assert.match(helper, /collection\('tenants'\)\.doc\(requested\)/);
+  assert.match(helper, /where\('slug', '==', requested\)\.limit\(1\)/);
+  assert.match(helper, /tenant\.status/);
+  assert.match(helper, /publicationStatus/);
+  assert.match(helper, /STOREFRONT_NOT_PUBLISHED/);
+  assert.match(helper, /collection\('products'\)/);
+  assert.match(helper, /product\.tenantId.*tenantSnap\.id/s);
+  assert.match(helper, /product\.status.*active/s);
+  assert.match(helper, /product\.ecommerce\?\.published === true/);
+  assert.match(server, /api\/storefront\/:tenantSlug\/products/);
+  assert.match(server, /api\/storefront\/:tenantSlug\/products\/:slugOrId/);
+  assert.match(server, /api\/storefront\/:tenantSlug\/categories/);
+  assert.match(server, /api\/storefront\/:tenantSlug\/brands/);
+  assert.match(server, /api\/storefront\/:tenantSlug\/search\/autocomplete/);
+});
