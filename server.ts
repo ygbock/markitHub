@@ -1518,7 +1518,7 @@ registerBusinessReviewRoutes({ app, requireServerAuth, requirePlatformAdmin, get
       if (db && requested) {
         let tenantSnap = await db.collection('tenants').doc(requested).get();
         if (!tenantSnap.exists) {
-          const slugQuery = await db.collection('tenants').where('slug', '==', requested).where('status', '==', 'active').limit(1).get();
+          const slugQuery = await db.collection('tenants').where('slug', '==', requested).limit(1).get();
           if (!slugQuery.empty) tenantSnap = slugQuery.docs[0];
         }
 
