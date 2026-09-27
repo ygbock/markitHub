@@ -8,40 +8,40 @@ const tenantManagerSource = () =>
 
 test('storefront tenant resolver defines explicit route precedence', () => {
   const source = tenantManagerSource();
-  assert.match(source, /export function resolveStorefrontTenantSlug\(input:/);
-  assert.match(source, /const routeTenantSlug = clean\(input\.routeTenantSlug\);/);
-  assert.match(source, /if \(routeTenantSlug\) return routeTenantSlug;/);
+  assert.ok(source.includes('export function resolveStorefrontTenantSlug(input:'));
+  assert.ok(source.includes('const routeTenantSlug = clean(input.routeTenantSlug);'));
+  assert.ok(source.includes('if (routeTenantSlug) return routeTenantSlug;'));
 });
 
 test('storefront tenant resolver supports canonical hostname routing', () => {
   const source = tenantManagerSource();
-  assert.match(source, /storefrontBaseDomain\|\| 'nexuspos\.io'/);
-  assert.match(source, /hostname\.endsWith\('\.' \+ baseDomain\)/);
-  assert.match(source, /hostLabel\.startsWith\('store-'\)/);
-  assert.match(source, /hostLabel\.slice\('store-'\.length\)/);
+  assert.ok(source.includes("storefrontBaseDomain || 'nexuspos.io'"));
+  assert.ok(source.includes("hostname.endsWith('.' + baseDomain)"));
+  assert.ok(source.includes("hostLabel.startsWith('store-')"));
+  assert.ok(source.includes("hostLabel.slice('store-'.length)"));
 });
 
 test('storefront tenant resolver supports /store/:tenantSlug paths', () => {
   const source = tenantManagerSource();
-  assert.match(source, /input\.pathname/);
-  assert.match(source, /match\(\/\^\\\/store\\\/\(\[\^\/?#\]\+\)\+\)\/\)/);
-  assert.match(source, /decodeURIComponent\(pathMatch\[1\]\)/);
+  assert.ok(source.includes('input.pathname'));
+  assert.ok(source.includes('match(/^\\/store/([^/?#]+)/)'));
+  assert.ok(source.includes('decodeURIComponent(pathMatch[1])'));
 });
 
 test('storefront tenant resolver has deterministic header/query/default fallbacks', () => {
   const source = tenantManagerSource();
-  assert.match(source, /const headerTenantSlug = clean\(input\.tenantSlugHeader\);/);
-  assert.match(source, /if \(headerTenantSlug\) return headerTenantSlug;/);
-  assert.match(source, /const headerTenantId = clean\(input\.tenantIdHeader\);/);
-  assert.match(source, /if \(headerTenantId\) return headerTenantId;/);
-  assert.match(source, /const queryTenant = clean\(input\.queryTenant\);/);
-  assert.match(source, /if \(queryTenant\) return queryTenant;/);
-  assert.match(source, /return 'nexus-retail';/);
+  assert.ok(source.includes('const headerTenantSlug = clean(input.tenantSlugHeader);'));
+  assert.ok(source.includes('if (headerTenantSlug) return headerTenantSlug;'));
+  assert.ok(source.includes('const headerTenantId = clean(input.tenantIdHeader);'));
+  assert.ok(source.includes('if (headerTenantId) return headerTenantId;'));
+  assert.ok(source.includes('const queryTenant = clean(input.queryTenant);'));
+  assert.ok(source.includes('if (queryTenant) return queryTenant;'));
+  assert.ok(source.includes("return 'nexus-retail';"));
 });
 
 test('storefront hostname routing is constrained to the configured base domain', () => {
   const source = tenantManagerSource();
-  assert.match(source, /hostname\.endsWith\('\.' \+ baseDomain\)/);
-  assert.match(source, /hostLabel\.startsWith\('store-'\)/);
-  assert.doesNotMatch(source, /hostname\.includes\(baseDomain\)/);
+  assert.ok(source.includes("hostname.endsWith('.' + baseDomain)"));
+  assert.ok(source.includes("hostLabel.startsWith('store-')"));
+  assert.ok(!source.includes('hostname.includes(baseDomain)'));
 });
