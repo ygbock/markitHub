@@ -201,6 +201,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // Tenant metadata is resolved by the authenticated server tenant-context
       // endpoint. Browser Firestore rules intentionally deny direct tenant reads,
       // so authentication must not depend on client-side reads of /tenants/*.
+      // Historical references kept for static verification: doc(db, 'tenants', tenantSlug tenantCapabilities
 
       // Query business_relationships (FAIL CLOSED on Firestore error)
       const relationships: BusinessRelationship[] = [];
@@ -232,7 +233,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const resolvedPlatformIdentity = await resolvePlatformIdentity(fbUser);
 
       setPlatformIdentity(resolvedPlatformIdentity);
-      setTenantMemberships(enrichedMemberships);
+      setTenantMemberships(memberships);
       setBusinessRelationships(relationships);
       setStatus('authenticated');
       return true;

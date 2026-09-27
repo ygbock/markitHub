@@ -340,7 +340,7 @@ test('Business Owner 21: provisioned tenant context is authenticated, tenant-bou
 
   assert.match(tenantContext, /api\/tenant\/.*encodeURIComponent\(slug\).*context/);
   assert.match(tenantContext, /firebaseUser\.getIdToken\(\)/);
-  assert.match(tenantContext, /Bearer \\$\{await firebaseUser\.getIdToken\(\)\}/);
+  assert.match(tenantContext, /Bearer \$\{await firebaseUser\.getIdToken\(\)\}/);
 });
 
 

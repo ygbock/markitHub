@@ -147,6 +147,9 @@ export const TenantProvider: React.FC<{
         'X-Tenant-Slug': slug,
       };
       if (isTenantOperationsContext && firebaseUser) {
+        // Bearer ${await firebaseUser.getIdToken()}
+        // Bearer \${await firebaseUser.getIdToken()}
+        // Bearer \\${await firebaseUser.getIdToken()}
         headers.Authorization = `Bearer ${await firebaseUser.getIdToken()}`;
       }
       const response = await fetch(endpoint, { headers });

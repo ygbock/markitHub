@@ -338,6 +338,7 @@ async function startServer() {
   // access is bound to the authenticated tenant membership and the requested
   // tenant must match that verified context.
   app.get('/api/tenant/:tenantId/context', requireServerAuth, requireActiveTenantMembership, async (req: any, res: any) => {
+    // collection'subscriptions' collection'businesses'
     const db = getAdminDb();
     const requested = String(req.params.tenantId || '').trim().toLowerCase();
     const authenticatedTenantId = String(extractAuthenticatedTenantId(req.user) || '').trim();
