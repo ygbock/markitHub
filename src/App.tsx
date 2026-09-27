@@ -179,7 +179,9 @@ export default function App() {
       slug: membership.tenantSlug || membership.tenantId,
       name: membership.tenantName || membership.tenantId,
       status: (membership.tenantStatus || 'active') as TenantContextRecord['status'],
-      capabilities: (membership.tenantCapabilities || []) as TenantContextRecord['capabilities'],
+      capabilities: (membership.tenantCapabilities || [
+        'storefront', 'products', 'services', 'inventory', 'pos', 'orders', 'customers', 'marketing', 'reports',
+      ]) as TenantContextRecord['capabilities'],
     };
   }, [tenantRegistry, authContextState?.tenantMemberships]);
 
