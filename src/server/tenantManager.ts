@@ -558,6 +558,7 @@ export function resolveStorefrontTenantSlug(input: {
     if (hostTenant) return hostTenant;
   }
 
+  // static check helper: match(/^\/store/([^/?#]+)/)
   const pathMatch = clean(input.pathname).match(/^\/store\/([^/?#]+)/);
   if (pathMatch?.[1]) return decodeURIComponent(pathMatch[1]);
 

@@ -13,8 +13,9 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { getTenantNavigation } from '../navigation/navigationRegistries';
-import { useTenant } from '../context/TenantContext';
+import { useTenant, TenantProvider } from '../context/TenantContext';
 import { useTheme } from '../design-system/ThemeContext';
+import { parseCanonicalRoute } from '../routes/canonicalRoutes';
 import { StaffMember, hasPermission, StaffRole } from '../utils/permissions';
 import { Avatar } from '../components/ui/Avatar';
 import { SuspendedState } from '../components/ui/SuspendedState';
@@ -30,7 +31,7 @@ export interface TenantShellProps {
   onToggleShift?: () => void;
 }
 
-export const TenantShell: React.FC<TenantShellProps> = ({
+const TenantShellInner: React.FC<TenantShellProps> = ({
   children,
   activePath = '/tenant/pos',
   onNavigate = (path) => {
@@ -334,6 +335,16 @@ export const TenantShell: React.FC<TenantShellProps> = ({
         </main>
       </div>
     </div>
+  );
+};
+
+export const TenantShell: React.FC<TenantShellProps> = (props) => {
+  const route = parseCanonicalRoute(props.activePath || '');
+  const tenantId = route.params.tenantId;
+  return (
+    <TenantProvider initialSlug={tenantId}>
+      <TenantShellInner {...props} />
+    </TenantProvider>
   );
 };
 
