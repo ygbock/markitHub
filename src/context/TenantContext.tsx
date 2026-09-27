@@ -86,7 +86,7 @@ export const TenantProvider: React.FC<{
   initialSlug,
   initialLocationId,
 }) => {
-  const { tenantMemberships } = useAuth();
+  const { tenantMemberships, firebaseUser } = useAuth();
 
   const authoritativeTenants = useMemo<TenantInfoOption[]>(() => {
     const dynamic = tenantMemberships
@@ -138,11 +138,18 @@ export const TenantProvider: React.FC<{
     setIsLoading(true);
     setError(null);
     try {
-      const response = await fetch(`/api/storefront/${slug}/context`, {
-        headers: {
-          'X-Tenant-Slug': slug,
-        },
-      });
+      const isTenantOperationsContext =
+        typeof window !== 'undefined' && window.location.pathname.startsWith('/tenant/');
+      const endpoint = isTenantOperationsContext
+        ? `/api/tenant/${encodeURIComponent(slug)}/context`
+        : `/api/storefront/${encodeURIComponent(slug)}/context`;
+      const headers: Record<string, string> = {
+        'X-Tenant-Slug': slug,
+      };
+      if (isTenantOperationsContext && firebaseUser) {
+        headers.Authorization = `Bearer ${await firebaseUser.getIdToken()}`;
+      }
+      const response = await fetch(endpoint, { headers });
 
       if (!response.ok) {
         throw new Error(`Failed to load tenant context for '${slug}'. Status: ${response.status}`);
@@ -169,7 +176,7 @@ export const TenantProvider: React.FC<{
     } finally {
       setIsLoading(false);
     }
-  }, [locationId]);
+  }, [firebaseUser, locationId]);
 
   useEffect(() => {
     fetchTenantConfig(tenantSlug);
