@@ -15,7 +15,7 @@ import {
   TenantOperationalStatus 
 } from './canonicalRoutes';
 import { StaffMember, Customer, User, PlatformIdentity, TenantMembership, BusinessRelationship } from '../types';
-import { getEffectivePermissions } from '../utils/permissions';
+import { DEFAULT_ROLE_PERMISSIONS, getEffectivePermissions } from '../utils/permissions';
 
 export interface TenantContextRecord {
   id: string;
@@ -161,10 +161,15 @@ export function evaluateCanonicalRouteGuard(
       return { type: 'CAPABILITY_DISABLED', allowed: false, message: `Capability "${requiredCapability}" is not activated for tenant "${tenant.name}".`, tenant, requiredCapability };
     }
     if (requiredPermission && !isSuperAdmin) {
-      if (!authContext.activeStaff) {
-        return { type: 'PERMISSION_DENIED', allowed: false, message: 'An active staff authorization context is required for this tenant permission.' , requiredPermission, tenant };
-      }
-      const staffPerms = getEffectivePermissions(authContext.activeStaff);
+      const matchingMembership = authContext.tenantMemberships?.find(m =>
+        (m.tenantId === tenant.id || m.tenantId === tenant.slug || m.tenantId === `tenant-${tenant.id}`) &&
+        m.status === 'active'
+      );
+      const staffPerms = authContext.activeStaff
+        ? getEffectivePermissions(authContext.activeStaff)
+        : matchingMembership?.role
+          ? (DEFAULT_ROLE_PERMISSIONS as Record<string, string[]>)[String(matchingMembership.role)] || []
+          : [];
       if (!staffPerms.includes(requiredPermission as any)) {
         return { type: 'PERMISSION_DENIED', allowed: false, message: `Access denied: Required permission "${requiredPermission}" is missing from your role.`, requiredPermission, tenant };
       }
