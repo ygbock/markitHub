@@ -406,7 +406,7 @@ test('Business Owner 25: provisioned storefront orders use the published Firesto
   assert.ok(start >= 0 && end > start);
   assert.match(route, /resolvePublishedProvisionedCatalog/);
   assert.match(route, /provisionedCatalog\?\.tenantConfig \|\| resolveTenant/);
-  assert.match(route, /provisionedCatalog ? provisionedCatalog\.products/);
+  assert.match(route, /provisionedCatalog \? provisionedCatalog\.products/);
   assert.match(route, /reserveInventoryServer/);
   assert.match(route, /tenantId: effectiveTenantConfig\.tenant\.id/);
   assert.match(route, /unitPrice = Number\(v\.price\)/);
