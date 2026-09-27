@@ -21,7 +21,8 @@ import {
   getTenantProductBySlugOrId,
   getTenantCategories,
   getTenantBrands,
-  resolveStorefrontTenantSlug
+  resolveStorefrontTenantSlug,
+  buildStorefrontTenantConfigFromRecords
 } from './src/server/tenantManager';
 import { INITIAL_PRODUCTS } from './src/data/mockData';
 import { slugify } from './src/utils/seoUtils';
@@ -243,6 +244,63 @@ async function startServer() {
   // =========================================================================
   // TENANT STAFF / ACCESS CONTROL
   // =========================================================================
+  // Authoritative tenant operations context. Unlike the public storefront
+  // context, this endpoint may expose draft storefront configuration because
+  // access is bound to the authenticated tenant membership and the requested
+  // tenant must match that verified context.
+  app.get('/api/tenant/:tenantId/context', requireServerAuth, requireActiveTenantMembership, async (req: any, res: any) => {
+    const db = getAdminDb();
+    const requested = String(req.params.tenantId || '').trim().toLowerCase();
+    const authenticatedTenantId = String(extractAuthenticatedTenantId(req.user) || '').trim();
+    if (!db || !requested || !authenticatedTenantId) {
+      return res.status(403).json({ success: false, error: 'ACTIVE_TENANT_MEMBERSHIP_REQUIRED' });
+    }
+
+    try {
+      const tenantRef = db.collection('tenants').doc(authenticatedTenantId);
+      const tenantSnap = await tenantRef.get();
+      if (!tenantSnap.exists) {
+        return res.status(404).json({ success: false, error: 'TENANT_NOT_FOUND' });
+      }
+
+      const tenant = { id: tenantSnap.id, ...tenantSnap.data() } as Record<string, unknown>;
+      const tenantId = String(tenant.id || '').trim().toLowerCase();
+      const tenantSlug = String(tenant.slug || '').trim().toLowerCase();
+      if (requested !== tenantId && requested !== tenantSlug) {
+        return res.status(403).json({ success: false, error: 'TENANT_CONTEXT_MISMATCH' });
+      }
+      if (String(tenant.status || '').toLowerCase() !== 'active') {
+        return res.status(403).json({ success: false, error: 'TENANT_NOT_ACTIVE' });
+      }
+
+      const [storefrontSnap, subscriptionSnap, locationSnap] = await Promise.all([
+        tenantRef.collection('storefront').doc('config').get(),
+        tenant.subscriptionId ? db.collection('subscriptions').doc(String(tenant.subscriptionId)).get() : Promise.resolve(null),
+        tenant.locationId && tenant.businessId
+          ? db.collection('businesses').doc(String(tenant.businessId)).collection('locations').doc(String(tenant.locationId)).get()
+          : Promise.resolve(null),
+      ]);
+
+      const storefront = storefrontSnap && storefrontSnap.exists ? storefrontSnap.data() : null;
+      const subscription = subscriptionSnap && subscriptionSnap.exists ? subscriptionSnap.data() : null;
+      const location = locationSnap && locationSnap.exists ? { id: locationSnap.id, ...locationSnap.data() } : null;
+      const tenantConfig = buildStorefrontTenantConfigFromRecords({ tenant, storefront, location, subscription });
+
+      return res.json({
+        success: true,
+        ...tenantConfig,
+        capabilities: Array.isArray(tenant.capabilities) ? tenant.capabilities : [],
+        storefront: storefront ? {
+          publicationStatus: String((storefront as any).publicationStatus || 'draft'),
+          updatedAt: (storefront as any).updatedAt || null,
+          publishedAt: (storefront as any).publishedAt || null,
+        } : null,
+      });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err?.message || 'Unable to load tenant context.' });
+    }
+  });
+
   function getAdminDb() {
     const auth = getFirebaseAdminAuth();
     return auth ? getFirestore() : null;
