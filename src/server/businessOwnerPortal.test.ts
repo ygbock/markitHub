@@ -311,3 +311,34 @@ test('Business Owner 20: provisioned tenant routes mount an authoritative tenant
   assert.match(tenantContext, /Authoritative tenant workspace/);
   assert.match(tenantContext, /if \(pathTenant\) return pathTenant/);
 });
+
+
+test('Business Owner 21: provisioned tenant context is authenticated, tenant-bound, and built from authoritative records', () => {
+  const server = readFileSync(resolve(process.cwd(), 'server.ts'), 'utf8');
+  const manager = readFileSync(resolve(process.cwd(), 'src/server/tenantManager.ts'), 'utf8');
+  const tenantContext = readFileSync(resolve(process.cwd(), 'src/context/TenantContext.tsx'), 'utf8');
+
+  const routeStart = server.indexOf("app.get('/api/tenant/:tenantId/context'");
+  const routeEnd = server.indexOf("  registerTenantCatalogRoutes(app, {", routeStart);
+  const route = server.slice(routeStart, routeEnd);
+
+  assert.ok(routeStart >= 0 && routeEnd > routeStart);
+  assert.match(route, /requireServerAuth/);
+  assert.match(route, /requireActiveTenantMembership/);
+  assert.match(route, /TENANT_CONTEXT_MISMATCH/);
+  assert.match(route, /tenant.slug/);
+  assert.match(route, /tenant.status.*active/s);
+  assert.match(route, /collection('subscriptions')/);
+  assert.match(route, /collection('businesses')/);
+  assert.match(route, /buildStorefrontTenantConfigFromRecords/);
+  assert.doesNotMatch(route, /STOREFRONT_NOT_PUBLISHED/);
+
+  assert.match(manager, /buildStorefrontTenantConfigFromRecords/);
+  assert.match(manager, /tenant.locationId/);
+  assert.match(manager, /storefront.primaryColor/);
+  assert.match(manager, /subscription.currency/);
+
+  assert.match(tenantContext, //api/tenant/\{encodeURIComponent(slug)\}/context/);
+  assert.match(tenantContext, /firebaseUser.getIdToken()/);
+  assert.match(tenantContext, /Bearer \${await firebaseUser.getIdToken()\}/);
+});
