@@ -342,3 +342,17 @@ test('Business Owner 21: provisioned tenant context is authenticated, tenant-bou
   assert.match(tenantContext, /firebaseUser\.getIdToken\(\)/);
   assert.match(tenantContext, /Bearer \\$\{await firebaseUser\.getIdToken\(\)\}/);
 });
+
+
+test('Business Owner 22: authentication does not depend on browser reads of private tenant documents', () => {
+  const auth = readFileSync(resolve(process.cwd(), 'src/context/AuthContext.tsx'), 'utf8');
+  const rules = readFileSync(resolve(process.cwd(), 'firestore.rules'), 'utf8');
+  const guards = readFileSync(resolve(process.cwd(), 'src/routes/routeGuards.ts'), 'utf8');
+
+  assert.doesNotMatch(auth, /getDoc\(doc\(db, 'tenants'/);
+  assert.match(auth, /Browser Firestore rules intentionally deny direct tenant reads/);
+  assert.match(rules, /match \/tenants\/\{tenantId\}/);
+  assert.match(rules, /allow read, write: if false/);
+  assert.match(guards, /DEFAULT_ROLE_PERMISSIONS/);
+  assert.match(guards, /matchingMembership\?\.role/);
+});
