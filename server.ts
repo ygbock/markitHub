@@ -1459,6 +1459,52 @@ registerBusinessReviewRoutes({ app, requireServerAuth, requirePlatformAdmin, get
     return getTenantConfigBySlug(slug);
   }
 
+  async function resolvePublishedProvisionedCatalog(requestedInput: string) {
+    const requested = String(requestedInput || '').trim().toLowerCase();
+    const db = getAdminDb();
+    if (!db || !requested) return null;
+
+    let tenantSnap = await db.collection('tenants').doc(requested).get();
+    if (!tenantSnap.exists) {
+      const slugQuery = await db.collection('tenants').where('slug', '==', requested).limit(1).get();
+      if (!slugQuery.empty) tenantSnap = slugQuery.docs[0];
+    }
+    if (!tenantSnap.exists) return null;
+
+    const tenant = { id: tenantSnap.id, ...tenantSnap.data() } as Record<string, any>;
+    if (String(tenant.status || '').toLowerCase() !== 'active') {
+      return { error: 'TENANT_NOT_FOUND' as const };
+    }
+
+    const storefrontSnap = await db.collection('tenants').doc(tenantSnap.id).collection('storefront').doc('config').get();
+    const storefront = storefrontSnap.exists ? storefrontSnap.data() as Record<string, any> : null;
+    if (!storefront || String(storefront.publicationStatus || 'draft') !== 'published') {
+      return { error: 'STOREFRONT_NOT_PUBLISHED' as const };
+    }
+
+    const productSnap = await db.collection('tenants').doc(tenantSnap.id).collection('products').limit(500).get();
+    const products = productSnap.docs
+      .map((docSnap: any) => ({ ...docSnap.data(), id: docSnap.id }))
+      .filter((product: any) =>
+        String(product.tenantId || '') === tenantSnap.id &&
+        String(product.status || '').toLowerCase() === 'active' &&
+        product.ecommerce?.published === true
+      );
+
+    const categories = Array.from(new Map(
+      products
+        .map((product: any) => String(product.category || '').trim())
+        .filter(Boolean)
+        .map((name: string) => [slugify(name), { id: slugify(name), name, slug: slugify(name) }])
+    ).values());
+
+    const brands = Array.from(new Set(
+      products.map((product: any) => String(product.brand || '').trim()).filter(Boolean)
+    ));
+
+    return { tenantId: tenantSnap.id, tenant, storefront, products, categories, brands };
+  }
+
   // 1. Storefront Context Endpoint
   app.get('/api/storefront/:tenantSlug/context', async (req, res) => {
     try {
@@ -1540,228 +1586,168 @@ registerBusinessReviewRoutes({ app, requireServerAuth, requirePlatformAdmin, get
   });
 
   // 2. Tenant Products List Endpoint (with filtering, search, sorting, pagination, & live stock)
-  app.get('/api/storefront/:tenantSlug/products', (req, res) => {
+  app.get('/api/storefront/:tenantSlug/products', async (req, res) => {
     try {
+      const provisioned = await resolvePublishedProvisionedCatalog(req.params.tenantSlug);
+      if (provisioned?.error) {
+        return res.status(404).json({ success: false, error: provisioned.error });
+      }
+      if (provisioned) {
+        let products: any[] = [...provisioned.products];
+        const { category, brand, minPrice, maxPrice, inStockOnly, search, q, sort, page = '1', limit = '12' } = req.query;
+        const searchTerm = String(search || q || '').trim().toLowerCase();
+        if (searchTerm) {
+          products = products.filter(p =>
+            String(p.name || '').toLowerCase().includes(searchTerm) ||
+            String(p.description || '').toLowerCase().includes(searchTerm) ||
+            String(p.sku || '').toLowerCase().includes(searchTerm) ||
+            String(p.brand || '').toLowerCase().includes(searchTerm) ||
+            String(p.category || '').toLowerCase().includes(searchTerm)
+          );
+        }
+        if (category) {
+          const catClean = String(category).trim().toLowerCase();
+          products = products.filter(p => String(p.category || '').toLowerCase().includes(catClean) || slugify(String(p.category || '')) === catClean);
+        }
+        if (brand) {
+          const brandClean = String(brand).trim().toLowerCase();
+          products = products.filter(p => String(p.brand || '').toLowerCase() === brandClean);
+        }
+        if (minPrice) {
+          const minP = Number(minPrice);
+          if (!Number.isNaN(minP)) products = products.filter(p => Number(p.price || 0) >= minP);
+        }
+        if (maxPrice) {
+          const maxP = Number(maxPrice);
+          if (!Number.isNaN(maxP)) products = products.filter(p => Number(p.price || 0) <= maxP);
+        }
+
+        const productsWithLiveStock = products.map(p => {
+          const activeReserved = getActiveReservedQuantity(p.id, undefined, undefined, provisioned.tenantId);
+          const availableStock = Math.max(0, Number(p.stock || 0) - activeReserved);
+          return { ...p, availableStock, activeReserved, inStock: availableStock > 0 };
+        });
+        let filteredProducts = productsWithLiveStock;
+        if (inStockOnly === 'true' || inStockOnly === '1') filteredProducts = filteredProducts.filter(p => p.inStock);
+
+        const sortKey = String(sort || 'newest');
+        if (sortKey === 'price_asc') filteredProducts.sort((a, b) => Number(a.price || 0) - Number(b.price || 0));
+        else if (sortKey === 'price_desc') filteredProducts.sort((a, b) => Number(b.price || 0) - Number(a.price || 0));
+        else if (sortKey === 'rating') filteredProducts.sort((a, b) => Number(b.rating || 0) - Number(a.rating || 0));
+        else if (sortKey === 'bestsellers') filteredProducts.sort((a, b) => Number(b.salesCount || 0) - Number(a.salesCount || 0));
+
+        const pageNum = Math.max(1, parseInt(String(page), 10) || 1);
+        const limitNum = Math.max(1, Math.min(100, parseInt(String(limit), 10) || 12));
+        const total = filteredProducts.length;
+        const totalPages = Math.ceil(total / limitNum) || 1;
+        const paginatedProducts = filteredProducts.slice((pageNum - 1) * limitNum, pageNum * limitNum);
+        return res.json({
+          success: true,
+          tenantSlug: String(provisioned.tenant.slug || provisioned.tenantId),
+          products: paginatedProducts,
+          pagination: { total, page: pageNum, limit: limitNum, totalPages },
+          appliedFilters: {
+            category: category || null, brand: brand || null,
+            minPrice: minPrice ? Number(minPrice) : null, maxPrice: maxPrice ? Number(maxPrice) : null,
+            inStockOnly: inStockOnly === 'true' || inStockOnly === '1',
+            search: searchTerm || null, sort: sortKey,
+          },
+        });
+      }
+
       const tenantConfig = resolveTenant(req, req.params.tenantSlug);
-      if (!tenantConfig) {
-        return res.status(404).json({ success: false, error: 'TENANT_NOT_FOUND' });
-      }
-
+      if (!tenantConfig) return res.status(404).json({ success: false, error: 'TENANT_NOT_FOUND' });
       let products = getTenantProducts(tenantConfig.tenant.slug);
-
       const { category, brand, minPrice, maxPrice, inStockOnly, search, q, sort, page = '1', limit = '12' } = req.query;
-
       const searchTerm = String(search || q || '').trim().toLowerCase();
-      if (searchTerm) {
-        products = products.filter(p =>
-          p.name.toLowerCase().includes(searchTerm) ||
-          p.description.toLowerCase().includes(searchTerm) ||
-          p.sku.toLowerCase().includes(searchTerm) ||
-          (p.brand && p.brand.toLowerCase().includes(searchTerm)) ||
-          (p.category && p.category.toLowerCase().includes(searchTerm))
-        );
-      }
-
-      if (category) {
-        const catClean = String(category).trim().toLowerCase();
-        products = products.filter(p => p.category.toLowerCase().includes(catClean) || slugify(p.category) === catClean);
-      }
-
-      if (brand) {
-        const brandClean = String(brand).trim().toLowerCase();
-        products = products.filter(p => p.brand && p.brand.toLowerCase() === brandClean);
-      }
-
-      if (minPrice) {
-        const minP = Number(minPrice);
-        if (!isNaN(minP)) products = products.filter(p => p.price >= minP);
-      }
-
-      if (maxPrice) {
-        const maxP = Number(maxPrice);
-        if (!isNaN(maxP)) products = products.filter(p => p.price <= maxP);
-      }
-
-      // Compute live available stock for each product
-      const productsWithLiveStock = products.map(p => {
-        const activeReserved = getActiveReservedQuantity(p.id, undefined, undefined, tenantConfig.tenant.id);
-        const availableStock = Math.max(0, (p.stock || 0) - activeReserved);
-        return {
-          ...p,
-          availableStock,
-          activeReserved,
-          inStock: availableStock > 0,
-        };
-      });
-
+      if (searchTerm) products = products.filter(p => p.name.toLowerCase().includes(searchTerm) || p.description.toLowerCase().includes(searchTerm) || p.sku.toLowerCase().includes(searchTerm) || (p.brand && p.brand.toLowerCase().includes(searchTerm)) || (p.category && p.category.toLowerCase().includes(searchTerm)));
+      if (category) { const catClean = String(category).trim().toLowerCase(); products = products.filter(p => p.category.toLowerCase().includes(catClean) || slugify(p.category) === catClean); }
+      if (brand) { const brandClean = String(brand).trim().toLowerCase(); products = products.filter(p => p.brand && p.brand.toLowerCase() === brandClean); }
+      if (minPrice) { const minP = Number(minPrice); if (!isNaN(minP)) products = products.filter(p => p.price >= minP); }
+      if (maxPrice) { const maxP = Number(maxPrice); if (!isNaN(maxP)) products = products.filter(p => p.price <= maxP); }
+      const productsWithLiveStock = products.map(p => ({ ...p, availableStock: Math.max(0, (p.stock || 0) - getActiveReservedQuantity(p.id, undefined, undefined, tenantConfig.tenant.id)), activeReserved: getActiveReservedQuantity(p.id, undefined, undefined, tenantConfig.tenant.id), inStock: Math.max(0, (p.stock || 0) - getActiveReservedQuantity(p.id, undefined, undefined, tenantConfig.tenant.id)) > 0 }));
       let filteredProducts = productsWithLiveStock;
-
-      if (inStockOnly === 'true' || inStockOnly === '1') {
-        filteredProducts = filteredProducts.filter(p => p.inStock);
-      }
-
-      // Sorting
+      if (inStockOnly === 'true' || inStockOnly === '1') filteredProducts = filteredProducts.filter(p => p.inStock);
       const sortKey = String(sort || 'newest');
-      if (sortKey === 'price_asc') {
-        filteredProducts.sort((a, b) => a.price - b.price);
-      } else if (sortKey === 'price_desc') {
-        filteredProducts.sort((a, b) => b.price - a.price);
-      } else if (sortKey === 'rating') {
-        filteredProducts.sort((a, b) => (b.rating || 0) - (a.rating || 0));
-      } else if (sortKey === 'bestsellers') {
-        filteredProducts.sort((a, b) => (b.salesCount || 0) - (a.salesCount || 0));
-      }
-
-      // Pagination
-      const pageNum = Math.max(1, parseInt(String(page), 10) || 1);
-      const limitNum = Math.max(1, Math.min(100, parseInt(String(limit), 10) || 12));
-      const total = filteredProducts.length;
-      const totalPages = Math.ceil(total / limitNum) || 1;
-      const startIndex = (pageNum - 1) * limitNum;
-      const paginatedProducts = filteredProducts.slice(startIndex, startIndex + limitNum);
-
-      return res.json({
-        success: true,
-        tenantSlug: tenantConfig.tenant.slug,
-        products: paginatedProducts,
-        pagination: {
-          total,
-          page: pageNum,
-          limit: limitNum,
-          totalPages,
-        },
-        appliedFilters: {
-          category: category || null,
-          brand: brand || null,
-          minPrice: minPrice ? Number(minPrice) : null,
-          maxPrice: maxPrice ? Number(maxPrice) : null,
-          inStockOnly: inStockOnly === 'true' || inStockOnly === '1',
-          search: searchTerm || null,
-          sort: sortKey,
-        },
-      });
+      if (sortKey === 'price_asc') filteredProducts.sort((a, b) => a.price - b.price);
+      else if (sortKey === 'price_desc') filteredProducts.sort((a, b) => b.price - a.price);
+      else if (sortKey === 'rating') filteredProducts.sort((a, b) => (b.rating || 0) - (a.rating || 0));
+      else if (sortKey === 'bestsellers') filteredProducts.sort((a, b) => (b.salesCount || 0) - (a.salesCount || 0));
+      const pageNum = Math.max(1, parseInt(String(page), 10) || 1), limitNum = Math.max(1, Math.min(100, parseInt(String(limit), 10) || 12));
+      const total = filteredProducts.length, totalPages = Math.ceil(total / limitNum) || 1;
+      return res.json({ success: true, tenantSlug: tenantConfig.tenant.slug, products: filteredProducts.slice((pageNum - 1) * limitNum, pageNum * limitNum), pagination: { total, page: pageNum, limit: limitNum, totalPages }, appliedFilters: { category: category || null, brand: brand || null, minPrice: minPrice ? Number(minPrice) : null, maxPrice: maxPrice ? Number(maxPrice) : null, inStockOnly: inStockOnly === 'true' || inStockOnly === '1', search: searchTerm || null, sort: sortKey } });
     } catch (err: any) {
       return res.status(500).json({ success: false, error: err?.message });
     }
   });
 
   // 3. Single Product Endpoint
-  app.get('/api/storefront/:tenantSlug/products/:slugOrId', (req, res) => {
+  app.get('/api/storefront/:tenantSlug/products/:slugOrId', async (req, res) => {
     try {
+      const provisioned = await resolvePublishedProvisionedCatalog(req.params.tenantSlug);
+      if (provisioned?.error) return res.status(404).json({ success: false, error: provisioned.error });
+      if (provisioned) {
+        const key = String(req.params.slugOrId || '').trim().toLowerCase();
+        const product = provisioned.products.find((p: any) => String(p.id || '').toLowerCase() === key || String(p.ecommerce?.slug || p.slug || '').toLowerCase() === key || slugify(String(p.name || '')) === key);
+        if (!product) return res.status(404).json({ success: false, error: 'PRODUCT_NOT_FOUND', message: `Product '${req.params.slugOrId}' not found.` });
+        const activeReserved = getActiveReservedQuantity(product.id, undefined, undefined, provisioned.tenantId);
+        const availableStock = Math.max(0, Number(product.stock || 0) - activeReserved);
+        const recommendations = provisioned.products.filter((p: any) => p.id !== product.id && (p.category === product.category || p.brand === product.brand)).slice(0, 4).map((p: any) => ({ ...p, availableStock: Math.max(0, Number(p.stock || 0) - getActiveReservedQuantity(p.id, undefined, undefined, provisioned.tenantId)) }));
+        return res.json({ success: true, product: { ...product, availableStock, activeReserved, inStock: availableStock > 0 }, recommendations, tenant: { slug: String(provisioned.tenant.slug || provisioned.tenantId) } });
+      }
       const tenantConfig = resolveTenant(req, req.params.tenantSlug);
-      if (!tenantConfig) {
-        return res.status(404).json({ success: false, error: 'TENANT_NOT_FOUND' });
-      }
-
+      if (!tenantConfig) return res.status(404).json({ success: false, error: 'TENANT_NOT_FOUND' });
       const product = getTenantProductBySlugOrId(tenantConfig.tenant.slug, req.params.slugOrId);
-      if (!product) {
-        return res.status(404).json({ success: false, error: 'PRODUCT_NOT_FOUND', message: `Product '${req.params.slugOrId}' not found.` });
-      }
-
+      if (!product) return res.status(404).json({ success: false, error: 'PRODUCT_NOT_FOUND', message: `Product '${req.params.slugOrId}' not found.` });
       const activeReserved = getActiveReservedQuantity(product.id, undefined, undefined, tenantConfig.tenant.id);
       const availableStock = Math.max(0, (product.stock || 0) - activeReserved);
-
-      // Recommendations from same tenant catalog
       const allTenantProducts = getTenantProducts(tenantConfig.tenant.slug);
-      const recommendations = allTenantProducts
-        .filter(p => p.id !== product.id && (p.category === product.category || p.brand === product.brand))
-        .slice(0, 4)
-        .map(p => ({
-          ...p,
-          availableStock: Math.max(0, (p.stock || 0) - getActiveReservedQuantity(p.id, undefined, undefined, tenantConfig.tenant.id)),
-        }));
-
-      return res.json({
-        success: true,
-        product: {
-          ...product,
-          availableStock,
-          activeReserved,
-          inStock: availableStock > 0,
-        },
-        recommendations,
-        tenant: {
-          slug: tenantConfig.tenant.slug,
-          currency: tenantConfig.currency,
-        },
-      });
-    } catch (err: any) {
-      return res.status(500).json({ success: false, error: err?.message });
-    }
+      const recommendations = allTenantProducts.filter(p => p.id !== product.id && (p.category === product.category || p.brand === product.brand)).slice(0, 4).map(p => ({ ...p, availableStock: Math.max(0, (p.stock || 0) - getActiveReservedQuantity(p.id, undefined, undefined, tenantConfig.tenant.id)) }));
+      return res.json({ success: true, product: { ...product, availableStock, activeReserved, inStock: availableStock > 0 }, recommendations, tenant: { slug: tenantConfig.tenant.slug, currency: tenantConfig.currency } });
+    } catch (err: any) { return res.status(500).json({ success: false, error: err?.message }); }
   });
 
   // 4. Categories Endpoint
-  app.get('/api/storefront/:tenantSlug/categories', (req, res) => {
+  app.get('/api/storefront/:tenantSlug/categories', async (req, res) => {
     try {
+      const provisioned = await resolvePublishedProvisionedCatalog(req.params.tenantSlug);
+      if (provisioned?.error) return res.status(404).json({ success: false, error: provisioned.error });
+      if (provisioned) return res.json({ success: true, categories: provisioned.categories });
       const tenantConfig = resolveTenant(req, req.params.tenantSlug);
-      if (!tenantConfig) {
-        return res.status(404).json({ success: false, error: 'TENANT_NOT_FOUND' });
-      }
-      return res.json({
-        success: true,
-        categories: getTenantCategories(tenantConfig.tenant.slug),
-      });
-    } catch (err: any) {
-      return res.status(500).json({ success: false, error: err?.message });
-    }
+      if (!tenantConfig) return res.status(404).json({ success: false, error: 'TENANT_NOT_FOUND' });
+      return res.json({ success: true, categories: getTenantCategories(tenantConfig.tenant.slug) });
+    } catch (err: any) { return res.status(500).json({ success: false, error: err?.message }); }
   });
 
   // 5. Brands Endpoint
-  app.get('/api/storefront/:tenantSlug/brands', (req, res) => {
+  app.get('/api/storefront/:tenantSlug/brands', async (req, res) => {
     try {
+      const provisioned = await resolvePublishedProvisionedCatalog(req.params.tenantSlug);
+      if (provisioned?.error) return res.status(404).json({ success: false, error: provisioned.error });
+      if (provisioned) return res.json({ success: true, brands: provisioned.brands });
       const tenantConfig = resolveTenant(req, req.params.tenantSlug);
-      if (!tenantConfig) {
-        return res.status(404).json({ success: false, error: 'TENANT_NOT_FOUND' });
-      }
-      return res.json({
-        success: true,
-        brands: getTenantBrands(tenantConfig.tenant.slug),
-      });
-    } catch (err: any) {
-      return res.status(500).json({ success: false, error: err?.message });
-    }
+      if (!tenantConfig) return res.status(404).json({ success: false, error: 'TENANT_NOT_FOUND' });
+      return res.json({ success: true, brands: getTenantBrands(tenantConfig.tenant.slug) });
+    } catch (err: any) { return res.status(500).json({ success: false, error: err?.message }); }
   });
 
   // 6. Search Autocomplete Endpoint
-  app.get('/api/storefront/:tenantSlug/search/autocomplete', (req, res) => {
+  app.get('/api/storefront/:tenantSlug/search/autocomplete', async (req, res) => {
     try {
-      const tenantConfig = resolveTenant(req, req.params.tenantSlug);
-      if (!tenantConfig) {
-        return res.status(404).json({ success: false, error: 'TENANT_NOT_FOUND' });
-      }
-
+      const provisioned = await resolvePublishedProvisionedCatalog(req.params.tenantSlug);
+      if (provisioned?.error) return res.status(404).json({ success: false, error: provisioned.error });
       const query = String(req.query.q || req.query.query || '').trim().toLowerCase();
-      if (!query) {
-        return res.json({ success: true, products: [], categories: [], brands: [] });
+      if (!query) return res.json({ success: true, products: [], categories: [], brands: [] });
+      if (provisioned) {
+        const products = provisioned.products.filter((p: any) => String(p.name || '').toLowerCase().includes(query) || String(p.sku || '').toLowerCase().includes(query) || String(p.brand || '').toLowerCase().includes(query)).slice(0, 6).map((p: any) => ({ id: p.id, name: p.name, sku: p.sku, price: p.price, category: p.category, imageUrl: p.imageUrl, slug: String(p.ecommerce?.slug || slugify(String(p.name || ''))) }));
+        return res.json({ success: true, query, products, categories: provisioned.categories.filter((c: any) => c.name.toLowerCase().includes(query)), brands: provisioned.brands.filter((b: string) => b.toLowerCase().includes(query)) });
       }
-
+      const tenantConfig = resolveTenant(req, req.params.tenantSlug);
+      if (!tenantConfig) return res.status(404).json({ success: false, error: 'TENANT_NOT_FOUND' });
       const products = getTenantProducts(tenantConfig.tenant.slug);
-      const matchingProducts = products
-        .filter(p => p.name.toLowerCase().includes(query) || p.sku.toLowerCase().includes(query) || (p.brand && p.brand.toLowerCase().includes(query)))
-        .slice(0, 6)
-        .map(p => ({
-          id: p.id,
-          name: p.name,
-          sku: p.sku,
-          price: p.price,
-          category: p.category,
-          imageUrl: p.imageUrl,
-          slug: slugify(p.name),
-        }));
-
-      const categories = getTenantCategories(tenantConfig.tenant.slug).filter(c => c.name.toLowerCase().includes(query));
-      const brands = getTenantBrands(tenantConfig.tenant.slug).filter(b => b.toLowerCase().includes(query));
-
-      return res.json({
-        success: true,
-        query,
-        products: matchingProducts,
-        categories,
-        brands,
-      });
-    } catch (err: any) {
-      return res.status(500).json({ success: false, error: err?.message });
-    }
+      const matchingProducts = products.filter(p => p.name.toLowerCase().includes(query) || p.sku.toLowerCase().includes(query) || (p.brand && p.brand.toLowerCase().includes(query))).slice(0, 6).map(p => ({ id: p.id, name: p.name, sku: p.sku, price: p.price, category: p.category, imageUrl: p.imageUrl, slug: slugify(p.name) }));
+      return res.json({ success: true, query, products: matchingProducts, categories: getTenantCategories(tenantConfig.tenant.slug).filter(c => c.name.toLowerCase().includes(query)), brands: getTenantBrands(tenantConfig.tenant.slug).filter(b => b.toLowerCase().includes(query)) });
+    } catch (err: any) { return res.status(500).json({ success: false, error: err?.message }); }
   });
 
   // 7. Tenant-scoped Order Creation Endpoint
