@@ -356,3 +356,20 @@ test('Business Owner 22: authentication does not depend on browser reads of priv
   assert.match(guards, /DEFAULT_ROLE_PERMISSIONS/);
   assert.match(guards, /matchingMembership\?\.role/);
 });
+
+
+test('Business Owner 23: public provisioned storefront resolution is publication-gated and accepts authoritative slug or tenant ID', () => {
+  const server = readFileSync(resolve(process.cwd(), 'server.ts'), 'utf8');
+  const start = server.indexOf("app.get('/api/storefront/:tenantSlug/context'");
+  const end = server.indexOf("  // Default Storefront Context Endpoint", start);
+  const route = server.slice(start, end);
+
+  assert.ok(start >= 0 && end > start);
+  assert.match(route, /collection\('tenants'\)\.doc\(requested\)/);
+  assert.match(route, /where\('slug', '==', requested\)/);
+  assert.match(route, /publicationStatus.*published/);
+  assert.match(route, /STOREFRONT_NOT_PUBLISHED/);
+  assert.match(route, /buildStorefrontTenantConfigFromRecords/);
+  assert.match(route, /Array.isArray\(tenant\.capabilities\)/);
+  assert.match(route, /resolveTenant\(req, req\.params\.tenantSlug\)/);
+});
