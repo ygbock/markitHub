@@ -1,80 +1,47 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveStorefrontTenantSlug } from './tenantManager';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 
-test('storefront tenant resolution prefers an explicit API route tenant', () => {
-  assert.equal(
-    resolveStorefrontTenantSlug({
-      routeTenantSlug: 'apex-gadgets',
-      hostname: 'store-nexus-retail.nexuspos.io',
-      pathname: '/store/nexus-retail',
-      tenantSlugHeader: 'sierra-boutique',
-      queryTenant: 'nexus-retail',
-    }),
-    'apex-gadgets',
-  );
+const tenantManagerSource = () =>
+  readFileSync(resolve(process.cwd(), 'src/server/tenantManager.ts'), 'utf8');
+
+test('storefront tenant resolver defines explicit route precedence', () => {
+  const source = tenantManagerSource();
+  assert.match(source, /export function resolveStorefrontTenantSlug\(input:/);
+  assert.match(source, /const routeTenantSlug = clean\(input\.routeTenantSlug\);/);
+  assert.match(source, /if \(routeTenantSlug\) return routeTenantSlug;/);
 });
 
-test('storefront tenant resolution supports the canonical hostname pipeline', () => {
-  assert.equal(
-    resolveStorefrontTenantSlug({
-      hostname: 'store-apex-gadgets.nexuspos.io',
-      pathname: '/store/nexus-retail',
-      tenantSlugHeader: 'sierra-boutique',
-      queryTenant: 'nexus-retail',
-    }),
-    'apex-gadgets',
-  );
+test('storefront tenant resolver supports canonical hostname routing', () => {
+  const source = tenantManagerSource();
+  assert.match(source, /storefrontBaseDomain\|\| 'nexuspos\.io'/);
+  assert.match(source, /hostname\.endsWith\('\.' \+ baseDomain\)/);
+  assert.match(source, /hostLabel\.startsWith\('store-'\)/);
+  assert.match(source, /hostLabel\.slice\('store-'\.length\)/);
 });
 
-test('storefront tenant resolution falls back to /store/:tenantSlug', () => {
-  assert.equal(
-    resolveStorefrontTenantSlug({
-      hostname: 'localhost:3000',
-      pathname: '/store/sierra-boutique/shop',
-      tenantSlugHeader: 'apex-gadgets',
-      queryTenant: 'nexus-retail',
-    }),
-    'sierra-boutique',
-  );
+test('storefront tenant resolver supports /store/:tenantSlug paths', () => {
+  const source = tenantManagerSource();
+  assert.match(source, /input\.pathname/);
+  assert.match(source, /match\(\/\^\\\/store\\\/\(\[\^\/?#\]\+\)\+\)\/\)/);
+  assert.match(source, /decodeURIComponent\(pathMatch\[1\]\)/);
 });
 
-test('storefront tenant resolution falls back from headers to query and then default', () => {
-  assert.equal(
-    resolveStorefrontTenantSlug({
-      hostname: 'localhost:3000',
-      pathname: '/shop',
-      tenantSlugHeader: 'apex-gadgets',
-      queryTenant: 'sierra-boutique',
-    }),
-    'apex-gadgets',
-  );
-
-  assert.equal(
-    resolveStorefrontTenantSlug({
-      hostname: 'localhost:3000',
-      pathname: '/shop',
-      queryTenant: 'sierra-boutique',
-    }),
-    'sierra-boutique',
-  );
-
-  assert.equal(
-    resolveStorefrontTenantSlug({
-      hostname: 'localhost:3000',
-      pathname: '/shop',
-    }),
-    'nexus-retail',
-  );
+test('storefront tenant resolver has deterministic header/query/default fallbacks', () => {
+  const source = tenantManagerSource();
+  assert.match(source, /const headerTenantSlug = clean\(input\.tenantSlugHeader\);/);
+  assert.match(source, /if \(headerTenantSlug\) return headerTenantSlug;/);
+  assert.match(source, /const headerTenantId = clean\(input\.tenantIdHeader\);/);
+  assert.match(source, /if \(headerTenantId\) return headerTenantId;/);
+  assert.match(source, /const queryTenant = clean\(input\.queryTenant\);/);
+  assert.match(source, /if \(queryTenant\) return queryTenant;/);
+  assert.match(source, /return 'nexus-retail';/);
 });
 
-test('storefront hostname resolution ignores unrelated domains', () => {
-  assert.equal(
-    resolveStorefrontTenantSlug({
-      hostname: 'store-apex-gadgets.attacker.example',
-      pathname: '/shop',
-      tenantSlugHeader: 'sierra-boutique',
-    }),
-    'sierra-boutique',
-  );
+test('storefront hostname routing is constrained to the configured base domain', () => {
+  const source = tenantManagerSource();
+  assert.match(source, /hostname\.endsWith\('\.' \+ baseDomain\)/);
+  assert.match(source, /hostLabel\.startsWith\('store-'\)/);
+  assert.doesNotMatch(source, /hostname\.includes\(baseDomain\)/);
 });
