@@ -1766,12 +1766,14 @@ registerBusinessReviewRoutes({ app, requireServerAuth, requirePlatformAdmin, get
   // 7. Tenant-scoped Order Creation Endpoint
   app.post('/api/storefront/:tenantSlug/orders', async (req, res) => {
     try {
-      const tenantConfig = resolveTenant(req, req.params.tenantSlug);
+      const provisionedCatalog = await resolvePublishedProvisionedCatalog(req.params.tenantSlug);
+      const tenantConfig = provisionedCatalog?.tenantConfig || resolveTenant(req, req.params.tenantSlug);
       if (!tenantConfig) {
+        if (provisionedCatalog?.error) {
+          return res.status(404).json({ success: false, error: provisionedCatalog.error });
+        }
         return res.status(404).json({ success: false, error: 'TENANT_NOT_FOUND' });
       }
-
-      const provisionedCatalog = await resolvePublishedProvisionedCatalog(req.params.tenantSlug);
       if (provisionedCatalog?.error) {
         return res.status(404).json({ success: false, error: provisionedCatalog.error });
       }
@@ -1892,7 +1894,7 @@ registerBusinessReviewRoutes({ app, requireServerAuth, requirePlatformAdmin, get
 
         if (item.variantSku && product.variants) {
           const v = product.variants.find((v: any) => v.sku === item.variantSku);
-          if (v && v.price) unitPrice = v.price;
+          if (v && v.price !== undefined && v.price !== null) unitPrice = Number(v.price);
         }
 
         const lineTotal = Number((unitPrice * qty).toFixed(2));
