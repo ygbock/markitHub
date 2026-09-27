@@ -396,3 +396,21 @@ test('Business Owner 24: published provisioned catalog reads are tenant-scoped a
   assert.match(server, /api\/storefront\/:tenantSlug\/brands/);
   assert.match(server, /api\/storefront\/:tenantSlug\/search\/autocomplete/);
 });
+
+test('Business Owner 25: provisioned storefront orders use the published Firestore catalog before legacy fallback', () => {
+  const server = readFileSync(resolve(process.cwd(), 'server.ts'), 'utf8');
+  const start = server.indexOf("app.post('/api/storefront/:tenantSlug/orders'");
+  const end = server.indexOf("  //", start + 20);
+  const route = server.slice(start, end);
+
+  assert.ok(start >= 0 && end > start);
+  assert.match(route, /resolvePublishedProvisionedCatalog/);
+  assert.match(route, /provisionedCatalog\?\.tenantConfig \|\| resolveTenant/);
+  assert.match(route, /provisionedCatalog ? provisionedCatalog\.products/);
+  assert.match(route, /reserveInventoryServer/);
+  assert.match(route, /tenantId: effectiveTenantConfig\.tenant\.id/);
+  assert.match(route, /unitPrice = Number\(v\.price\)/);
+  assert.match(route, /effectiveTenantConfig\.catalogPolicy\.taxRate/);
+  assert.match(route, /effectiveTenantConfig\.policies\.shipping/);
+  assert.match(route, /effectiveTenantConfig\.currency\.code/);
+});
