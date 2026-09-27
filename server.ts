@@ -1482,7 +1482,20 @@ registerBusinessReviewRoutes({ app, requireServerAuth, requirePlatformAdmin, get
       return { error: 'STOREFRONT_NOT_PUBLISHED' as const };
     }
 
-    const productSnap = await db.collection('tenants').doc(tenantSnap.id).collection('products').limit(500).get();
+    const [subscriptionSnap, locationSnap, productSnap] = await Promise.all([
+      tenant.subscriptionId ? db.collection('subscriptions').doc(String(tenant.subscriptionId)).get() : Promise.resolve(null),
+      tenant.locationId && tenant.businessId
+        ? db.collection('businesses').doc(String(tenant.businessId)).collection('locations').doc(String(tenant.locationId)).get()
+        : Promise.resolve(null),
+      db.collection('tenants').doc(tenantSnap.id).collection('products').limit(500).get(),
+    ]);
+    const tenantConfig = buildStorefrontTenantConfigFromRecords({
+      tenant,
+      storefront,
+      subscription: subscriptionSnap?.exists ? subscriptionSnap.data() : null,
+      location: locationSnap?.exists ? { id: locationSnap.id, ...locationSnap.data() } : null,
+    });
+
     const products = productSnap.docs
       .map((docSnap: any) => ({ ...docSnap.data(), id: docSnap.id }))
       .filter((product: any) =>
@@ -1502,7 +1515,7 @@ registerBusinessReviewRoutes({ app, requireServerAuth, requirePlatformAdmin, get
       products.map((product: any) => String(product.brand || '').trim()).filter(Boolean)
     ));
 
-    return { tenantId: tenantSnap.id, tenant, storefront, products, categories, brands };
+    return { tenantId: tenantSnap.id, tenant, storefront, tenantConfig, products, categories, brands };
   }
 
   // 1. Storefront Context Endpoint
@@ -1758,7 +1771,15 @@ registerBusinessReviewRoutes({ app, requireServerAuth, requirePlatformAdmin, get
         return res.status(404).json({ success: false, error: 'TENANT_NOT_FOUND' });
       }
 
-      const tenantId = tenantConfig.tenant.id;
+      const provisionedCatalog = await resolvePublishedProvisionedCatalog(req.params.tenantSlug);
+      if (provisionedCatalog?.error) {
+        return res.status(404).json({ success: false, error: provisionedCatalog.error });
+      }
+      const effectiveTenantConfig = provisionedCatalog?.tenantConfig || tenantConfig;
+      if (!effectiveTenantConfig) {
+        return res.status(404).json({ success: false, error: 'TENANT_NOT_FOUND' });
+      }
+      const tenantId = effectiveTenantConfig.tenant.id;
       const db = getFirestoreDb();
 
       // Enforce Tenant Subscription Lifecycle & Usage Limits
@@ -1817,10 +1838,10 @@ registerBusinessReviewRoutes({ app, requireServerAuth, requirePlatformAdmin, get
               module: 'Platform Billing',
               targetType: 'subscription_limit',
               targetId: tenantId,
-              targetName: tenantConfig.tenant.name,
+              targetName: effectiveTenantConfig.tenant.name,
               result: 'denied',
               severity: 'warning',
-              details: `Monthly order limit reached (${usedOrders}/${monthlyLimit}) for tenant '${tenantConfig.tenant.name}'.`,
+              details: `Monthly order limit reached (${usedOrders}/${monthlyLimit}) for tenant '${effectiveTenantConfig.tenant.name}'.`,
               metadata: { period, planId, usedOrders, monthlyLimit, decision },
             });
             await recordAuditEvent(db, auditRecord);
@@ -1849,7 +1870,9 @@ registerBusinessReviewRoutes({ app, requireServerAuth, requirePlatformAdmin, get
         return res.status(400).json({ success: false, error: 'Cart items cannot be empty.' });
       }
 
-      const tenantProducts = getTenantProducts(tenantConfig.tenant.slug);
+      const tenantProducts = provisionedCatalog
+        ? provisionedCatalog.products as any[]
+        : getTenantProducts(effectiveTenantConfig.tenant.slug);
 
       // Re-validate products and compute authoritative subtotal
       let subtotal = 0;
@@ -1860,7 +1883,7 @@ registerBusinessReviewRoutes({ app, requireServerAuth, requirePlatformAdmin, get
         if (!product) {
           return res.status(400).json({
             success: false,
-            error: `Product '${item.name || item.productId}' is not available in ${tenantConfig.tenant.name} catalog.`,
+            error: `Product '${item.name || item.productId}' is not available in ${effectiveTenantConfig.tenant.name} catalog.`,
           });
         }
 
@@ -1889,7 +1912,7 @@ registerBusinessReviewRoutes({ app, requireServerAuth, requirePlatformAdmin, get
 
       // Reserve stock with tenantId lock
       const reserveResult = reserveInventoryServer({
-        tenantId: tenantConfig.tenant.id,
+        tenantId: effectiveTenantConfig.tenant.id,
         items: validatedLineItems.map(it => ({
           productId: it.productId,
           productName: it.productName,
@@ -1906,18 +1929,18 @@ registerBusinessReviewRoutes({ app, requireServerAuth, requirePlatformAdmin, get
       }
 
       // Shipping fee calculation
-      let shippingFee = tenantConfig.policies.shipping.standardFee;
-      if (shippingOption === 'express' && tenantConfig.policies.shipping.expressFee !== null) {
-        shippingFee = tenantConfig.policies.shipping.expressFee;
+      let shippingFee = effectiveTenantConfig.policies.shipping.standardFee;
+      if (shippingOption === 'express' && effectiveTenantConfig.policies.shipping.expressFee !== null) {
+        shippingFee = effectiveTenantConfig.policies.shipping.expressFee;
       }
       if (
-        tenantConfig.policies.shipping.freeShippingThreshold !== null &&
-        subtotal >= tenantConfig.policies.shipping.freeShippingThreshold
+        effectiveTenantConfig.policies.shipping.freeShippingThreshold !== null &&
+        subtotal >= effectiveTenantConfig.policies.shipping.freeShippingThreshold
       ) {
         shippingFee = 0;
       }
 
-      const taxAmount = Number((subtotal * tenantConfig.catalogPolicy.taxRate).toFixed(2));
+      const taxAmount = Number((subtotal * effectiveTenantConfig.catalogPolicy.taxRate).toFixed(2));
       let discountAmount = 0;
 
       // Validate Coupon if provided
@@ -1938,13 +1961,13 @@ registerBusinessReviewRoutes({ app, requireServerAuth, requirePlatformAdmin, get
       }
 
       const totalAmount = Number((subtotal + shippingFee + taxAmount - discountAmount).toFixed(2));
-      const orderId = `ORD-${tenantConfig.store.code}-${Date.now().toString().slice(-6)}`;
+      const orderId = `ORD-${effectiveTenantConfig.store.code}-${Date.now().toString().slice(-6)}`;
 
       const orderRecord = {
         id: orderId,
         orderNumber: orderId,
-        tenantId: tenantConfig.tenant.id,
-        tenantSlug: tenantConfig.tenant.slug,
+        tenantId: effectiveTenantConfig.tenant.id,
+        tenantSlug: effectiveTenantConfig.tenant.slug,
         customer: {
           id: customer.id || `cust-${Date.now()}`,
           name: customer.name || 'Guest Customer',
@@ -1957,8 +1980,8 @@ registerBusinessReviewRoutes({ app, requireServerAuth, requirePlatformAdmin, get
         taxAmount,
         discountAmount,
         totalAmount,
-        currency: tenantConfig.currency.code,
-        currencySymbol: tenantConfig.currency.symbol,
+        currency: effectiveTenantConfig.currency.code,
+        currencySymbol: effectiveTenantConfig.currency.symbol,
         paymentMethod,
         paymentStatus: 'Pending Payment',
         fulfillmentStatus: 'Unfulfilled',
