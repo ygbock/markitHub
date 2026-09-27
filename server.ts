@@ -1459,8 +1459,56 @@ registerBusinessReviewRoutes({ app, requireServerAuth, requirePlatformAdmin, get
   }
 
   // 1. Storefront Context Endpoint
-  app.get('/api/storefront/:tenantSlug/context', (req, res) => {
+  app.get('/api/storefront/:tenantSlug/context', async (req, res) => {
     try {
+      const requested = String(req.params.tenantSlug || '').trim().toLowerCase();
+      const db = getAdminDb();
+
+      // Provisioned tenants are resolved from authoritative Firestore records.
+      // Public callers may only receive a tenant context after both the tenant
+      // and its storefront are active/published. Request selectors are lookup
+      // hints, never authorization.
+      if (db && requested) {
+        let tenantSnap = await db.collection('tenants').doc(requested).get();
+        if (!tenantSnap.exists) {
+          const slugQuery = await db.collection('tenants').where('slug', '==', requested).where('status', '==', 'active').limit(1).get();
+          if (!slugQuery.empty) tenantSnap = slugQuery.docs[0];
+        }
+
+        if (tenantSnap.exists) {
+          const tenant = { id: tenantSnap.id, ...tenantSnap.data() } as Record<string, unknown>;
+          if (String(tenant.status || '').toLowerCase() !== 'active') {
+            return res.status(404).json({ success: false, error: 'TENANT_NOT_FOUND', message: 'Tenant not found.' });
+          }
+
+          const storefrontSnap = await db.collection('tenants').doc(tenantSnap.id).collection('storefront').doc('config').get();
+          const storefront = storefrontSnap.exists ? storefrontSnap.data() : null;
+          if (!storefront || String((storefront as any).publicationStatus || 'draft') !== 'published') {
+            return res.status(404).json({ success: false, error: 'STOREFRONT_NOT_PUBLISHED' });
+          }
+
+          const [subscriptionSnap, locationSnap] = await Promise.all([
+            tenant.subscriptionId ? db.collection('subscriptions').doc(String(tenant.subscriptionId)).get() : Promise.resolve(null),
+            tenant.locationId && tenant.businessId
+              ? db.collection('businesses').doc(String(tenant.businessId)).collection('locations').doc(String(tenant.locationId)).get()
+              : Promise.resolve(null),
+          ]);
+
+          const tenantConfig = buildStorefrontTenantConfigFromRecords({
+            tenant,
+            storefront,
+            subscription: subscriptionSnap?.exists ? subscriptionSnap.data() : null,
+            location: locationSnap?.exists ? { id: locationSnap.id, ...locationSnap.data() } : null,
+          });
+
+          return res.json({
+            success: true,
+            ...tenantConfig,
+            capabilities: Array.isArray(tenant.capabilities) ? tenant.capabilities : [],
+          });
+        }
+      }
+
       const tenantConfig = resolveTenant(req, req.params.tenantSlug);
       if (!tenantConfig) {
         return res.status(404).json({ success: false, error: 'TENANT_NOT_FOUND', message: 'Tenant not found.' });
@@ -1470,7 +1518,7 @@ registerBusinessReviewRoutes({ app, requireServerAuth, requirePlatformAdmin, get
         ...tenantConfig,
       });
     } catch (err: any) {
-      return res.status(500).json({ success: false, error: err?.message });
+      return res.status(500).json({ success: false, error: err?.message || 'Unable to load storefront context.' });
     }
   });
 
